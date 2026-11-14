@@ -55,6 +55,9 @@ export const OVERLAY_CSS = `
 .ask-line { display: flex; align-items: baseline; gap: 10px; }
 .ask-line .q { flex: 1; min-width: 0; color: rgba(255, 255, 255, 0.55); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ask-line .meta { flex: none; font-size: 11.5px; color: rgba(255, 255, 255, 0.32); font-variant-numeric: tabular-nums; }
+.run-details { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 0; max-width: 55%; }
+.run-details .meta { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-usage { flex: none; font-size: 10px; line-height: 1.3; color: rgba(255, 255, 255, 0.45); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
 .st { display: flex; align-items: center; gap: 9px; font-size: 13px; color: rgba(255, 255, 255, 0.5); }
 .st .ico { width: 14px; color: rgba(255, 255, 255, 0.35); }

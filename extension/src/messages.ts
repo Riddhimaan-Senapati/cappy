@@ -16,6 +16,7 @@ export type UiEvent =
   | { type: "cancelled"; runId: string; reason?: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
+  | { type: "usage"; runId: string; usage: TokenUsage }
   | { type: "blocked"; runId: string; reason: string }
   | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
   | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[]; host?: string; scope?: MemoryScope }

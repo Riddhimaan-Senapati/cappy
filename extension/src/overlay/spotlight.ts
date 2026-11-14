@@ -1,6 +1,6 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
-import type { ChoiceOption, MemoryScope, Routing, Suggestion, TargetElement } from "../../../shared/protocol.js";
+import type { ChoiceOption, MemoryScope, Routing, Suggestion, TargetElement, TokenUsage } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
@@ -80,6 +80,7 @@ interface RunState {
   steps: Step[];
   memory: MemoryEntry[];
   model?: string;
+  usage?: TokenUsage;
   tier?: string;
   startedAt: number;
   endedAt?: number;
@@ -863,6 +864,17 @@ export class Spotlight {
     return `${(((run.endedAt ?? Date.now()) - run.startedAt) / 1000).toFixed(1)}s`;
   }
 
+  private usageLabel(run: RunState) {
+    const label = h("span", "run-usage", run.usage
+      ? `In ${run.usage.inputTokens.toLocaleString("en-US")} · Out ${run.usage.outputTokens.toLocaleString("en-US")} tokens`
+      : "In — · Out — tokens");
+    label.title = "Input / output tokens across all LLM calls in this request. Updates after each response.";
+    label.setAttribute("aria-label", run.usage
+      ? `${run.usage.inputTokens} input tokens, ${run.usage.outputTokens} output tokens`
+      : "Input and output token usage pending");
+    return label;
+  }
+
   private stepNodes(run: RunState, live: boolean): Node[] {
     const currentTask = live ? run.steps.map((step) => step.tone).lastIndexOf("info") : -1;
     const nodes = run.steps.map((step, index) => {
@@ -942,7 +954,10 @@ export class Spotlight {
         stop.disabled = true;
         this.deps.stop();
       });
-      head.append(h("span", "meta", `${this.elapsed(run)}${run.model ? ` · ${run.model}` : ""}`), stop);
+      head.append(h("span", "run-details", "", [
+        h("span", "meta", `${this.elapsed(run)}${run.model ? ` · ${run.model}` : ""}`),
+        this.usageLabel(run),
+      ]), stop);
       return h("div", `card active${enter}`, "", [head, h("ul", "steps", "", this.stepNodes(run, true)), ...memory]);
     }
 
@@ -953,6 +968,7 @@ export class Spotlight {
       run.expanded = false;
       this.renderRun();
     });
+    if (run.usage) head.append(this.usageLabel(run));
     head.append(hide);
     const { kind, text, applied } = run.result!;
     const resultRow = h("div", `result ${kind === "done" ? "" : kind}${run.shownResult ? "" : " new"}${run.undone ? " undone" : ""}`, "", [icon(run.undone ? "undo" : kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 15), h("span", "", run.undone ? "Undone. The page is back to how it was before this request." : text)]);
@@ -1346,6 +1362,13 @@ export class Spotlight {
           run.tier = event.tier;
           run.model = event.model;
           run.steps.push({ text: "Thinking", tone: "info" });
+          break;
+        case "usage":
+          run.usage = {
+            calls: (run.usage?.calls ?? 0) + event.usage.calls,
+            inputTokens: (run.usage?.inputTokens ?? 0) + event.usage.inputTokens,
+            outputTokens: (run.usage?.outputTokens ?? 0) + event.usage.outputTokens,
+          };
           break;
         case "memory":
           run.memory.push(...event.lines.map((line) => ({ line, status: (event.status === "saved" ? "remembered" : "proposed") as MemoryStatus, host: event.host, scope: event.scope })));
