@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { acceptMemory, addMemoryLines, editMemoryLine, forgetMemory, normalizeMemoryLine, receiveMemory, rejectMemory } from "../extension/src/memory.ts";
+import { acceptMemory, addMemoryLines, editMemoryLine, forgetMemory, normalizeMemoryLine, receiveMemory, rejectMemory } from "../extension/src/memory.js";
 
 test("normalizeMemoryLine trims, collapses whitespace and caps length", () => {
   assert.equal(normalizeMemoryLine("  Prefers   dark\tmode  "), "Prefers dark mode");

@@ -10,7 +10,11 @@
     "dev": "bun run build:ext && concurrently -k -n server,ext \"bun run server\" \"bun run watch:ext\"",
     "typecheck": "tsc --noEmit",
     "chatgpt:login": "bun server/auth/chatgpt.ts",
-    "test": "bun x tsx --test tests/*.test.ts"
+    "test": "bun x tsx --test tests/*.test.ts",
+    "e2e": "bun scripts/e2e/run-all.ts",
+    "e2e:gate": "bun scripts/e2e/gate.ts",
+    "e2e:injection": "bun scripts/e2e/injection.ts",
+    "e2e:replay": "bun scripts/e2e/replay.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
@@ -31,6 +35,7 @@
     "concurrently": "^10.0.7",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
+    "playwright": "^1.65.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },

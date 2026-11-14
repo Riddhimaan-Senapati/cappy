@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isScheduleActive } from "../shared/validate.ts";
-import type { Change } from "../shared/adaptation.ts";
+import { isScheduleActive } from "../shared/validate.js";
+import type { Change } from "../shared/adaptation.js";
 
 type Schedule = NonNullable<Change["schedule"]>;
 const at = (y: number, mo: number, d: number, h: number, m = 0) => new Date(y, mo - 1, d, h, m);

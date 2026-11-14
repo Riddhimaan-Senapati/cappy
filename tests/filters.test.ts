@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
-import type { BlockCall } from "../shared/adaptation.ts";
-import { installDom } from "./dom-setup.ts";
+import type { BlockCall } from "../shared/adaptation.js";
+import { installDom } from "./dom-setup.js";
 
 installDom();
-const { applyContentFilter, keywordPattern } = await import("../extension/src/content/content-filter.ts");
-const { findItemGroups, detectItemGroups } = await import("../extension/src/content/item-groups.ts");
+const { applyContentFilter, keywordPattern } = await import("../extension/src/content/content-filter.js");
+const { findItemGroups, detectItemGroups } = await import("../extension/src/content/item-groups.js");
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 320));
