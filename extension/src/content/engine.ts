@@ -3,7 +3,7 @@ import { validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
-import { computeStats } from "./outline.js";
+import { computeStats, lowContrastSamples } from "./outline.js";
 
 type Undo = () => void;
 type Reapply = (roots: Element[]) => void;
@@ -15,6 +15,8 @@ interface Applied {
 }
 
 const applied = new Map<string, Applied>();
+// Every change applied on this page, including ones turned off, so history can turn them back on.
+const changeLog = new Map<string, ActiveChange>();
 let generatedIds = 0;
 const BASE_CSS = `
 .ba-label { display: block !important; font: 600 0.95rem/1.3 system-ui, sans-serif !important; margin: 0.6em 0 0.25em !important; color: inherit !important; }
@@ -68,6 +70,7 @@ function liveOp(op: DomOp): LiveOp {
   const seen = new WeakSet<Element>();
   const undoSteps: Undo[] = [];
   const labels = new WeakMap<Element, HTMLLabelElement>();
+  const originalOrder = new Map<Element, Element[]>();
 
   const run = (roots: ParentNode[]): number => {
     const elements = queryIn(roots, op.selector);
@@ -120,12 +123,67 @@ function liveOp(op: DomOp): LiveOp {
           if (element instanceof HTMLMediaElement && !element.paused) element.pause();
           break;
         }
+        case "reorder":
+          break;
       }
     }
+    if (op.op === "reorder") sortItems(op, elements, originalOrder, undoSteps);
     return elements.length;
   };
 
   return { run, undo: () => [...undoSteps].reverse().forEach((step) => step()) };
+}
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+export function keyText(item: Element, keySelector: string | null) {
+  const source = keySelector ? item.querySelector(keySelector) : item;
+  return (source?.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+function compareKeys(op: Extract<DomOp, { op: "reorder" }>) {
+  const direction = op.direction === "asc" ? 1 : -1;
+  if (!op.ranking) return (a: Element, b: Element) => collator.compare(keyText(a, op.keySelector), keyText(b, op.keySelector)) * direction;
+  const ranks = new Map(op.ranking.map((entry) => [entry.key.replace(/\s+/g, " ").trim().toLowerCase(), entry.rank]));
+  const rankOf = (item: Element) => ranks.get(keyText(item, op.keySelector).toLowerCase());
+  return (a: Element, b: Element) => {
+    const [x, y] = [rankOf(a), rankOf(b)];
+    // Items the model did not rank (for example ones that loaded later) keep their order at the end.
+    if (x === undefined || y === undefined) return x === undefined ? (y === undefined ? 0 : 1) : -1;
+    return x - y;
+  };
+}
+
+function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], originalOrder: Map<Element, Element[]>, undoSteps: Undo[]) {
+  const byParent = new Map<Element, Element[]>();
+  for (const item of items) {
+    if (!item.parentElement) continue;
+    const group = byParent.get(item.parentElement) ?? [];
+    group.push(item);
+    byParent.set(item.parentElement, group);
+  }
+  for (const [parent, group] of byParent) {
+    if (group.length < 2) continue;
+    const current = [...parent.children].filter((child) => group.includes(child));
+    const sorted = [...current].sort(compareKeys(op));
+    // Only move nodes when out of order, so our own moves do not retrigger the observer forever.
+    if (sorted.every((item, i) => item === current[i])) continue;
+    if (!originalOrder.has(parent)) {
+      originalOrder.set(parent, [...parent.children]);
+      undoSteps.push(() => {
+        const original = originalOrder.get(parent) ?? [];
+        for (const child of original) if (child.parentElement === parent) parent.append(child);
+        originalOrder.delete(parent);
+      });
+    }
+    const anchor = current[0].previousElementSibling;
+    let cursor: Element | null = anchor;
+    for (const item of sorted) {
+      if (cursor) cursor.after(item);
+      else parent.prepend(item);
+      cursor = item;
+    }
+  }
 }
 
 function revertNow(id: string): boolean {
@@ -135,6 +193,28 @@ function revertNow(id: string): boolean {
   applied.delete(id);
   stopObservingIfIdle();
   return true;
+}
+
+function reorderTargets(change: Change): Set<Element> {
+  const targets = new Set<Element>();
+  for (const op of change.dom ?? []) {
+    if (op.op !== "reorder") continue;
+    try {
+      for (const element of document.querySelectorAll(op.selector)) targets.add(element);
+    } catch {
+      // invalid selectors are reported by the op itself
+    }
+  }
+  return targets;
+}
+
+// Two live sorts on the same items would keep undoing each other, so a new sort replaces any older one.
+function competingSorts(change: Change): string[] {
+  const mine = reorderTargets(change);
+  if (!mine.size) return [];
+  return [...applied.values()]
+    .filter((entry) => entry.change.id !== change.id && [...reorderTargets(entry.change)].some((element) => mine.has(element)))
+    .map((entry) => entry.change.id);
 }
 
 async function transition(update: () => void, animate: boolean) {
@@ -197,8 +277,10 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
 
   const matched: Record<string, number> = {};
   let error: string | undefined;
+  const replaced = competingSorts(change);
 
   await transition(() => {
+    for (const id of replaced) revertNow(id);
     revertNow(change.id);
     const entry: Applied = { change: { ...change, appliedAt: Date.now() }, undo: [], reapply: [] };
     try {
@@ -215,6 +297,8 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
         if (block.reapply) entry.reapply.push(block.reapply);
       }
       applied.set(change.id, entry);
+      changeLog.delete(change.id);
+      changeLog.set(change.id, entry.change);
       if (entry.reapply.length) startObserving();
     } catch (caught) {
       [...entry.undo].reverse().forEach((step) => step());
@@ -222,7 +306,8 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
     }
   }, animate);
 
-  return { ok: !error, error, matched, before, after: computeStats() };
+  const visual = Boolean(change.css || (change.block && change.block.name !== "stopMotion"));
+  return { ok: !error, error, matched, before, after: computeStats(), ...(visual && !error ? { lowContrast: lowContrastSamples() } : {}), ...(replaced.length ? { replaced } : {}) };
 }
 
 export async function revertChange(id: string, animate = true): Promise<boolean> {
@@ -235,6 +320,16 @@ export async function revertChange(id: string, animate = true): Promise<boolean>
 
 export async function revertAll(animate = true) {
   await transition(() => [...applied.keys()].forEach(revertNow), animate);
+}
+
+export function stopEngine() {
+  observer?.disconnect();
+  observer = null;
+  pendingRoots = new Set();
+}
+
+export function changeHistory(): Array<{ change: ActiveChange; active: boolean }> {
+  return [...changeLog.values()].reverse().map((change) => ({ change, active: applied.has(change.id) }));
 }
 
 export function activeChanges(): ActiveChange[] {

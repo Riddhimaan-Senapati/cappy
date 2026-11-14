@@ -17,7 +17,7 @@ export const SAFE_ATTRIBUTES = [
 export const REMOVABLE_ATTRIBUTES = ["autoplay", "loop", "tabindex", "aria-hidden", "disabled", "readonly"] as const;
 
 
-const DOM_OPS = new Set(["addLabel", "setAttribute", "removeAttribute", "pauseMedia"]);
+const DOM_OPS = new Set(["addLabel", "setAttribute", "removeAttribute", "pauseMedia", "reorder"]);
 const BLOCKS = new Set(["colorblind", "textScale", "stopMotion"]);
 
 const FORBIDDEN_CSS: Array<[RegExp, string]> = [
@@ -61,6 +61,12 @@ export function validateChange(change: Change): string | null {
     if (op.op === "setAttribute" && !(SAFE_ATTRIBUTES as readonly string[]).includes(op.name)) return `attribute "${op.name}" not allowed`;
     if (op.op === "removeAttribute" && !(REMOVABLE_ATTRIBUTES as readonly string[]).includes(op.name)) return `attribute "${op.name}" not removable`;
     if (op.op === "addLabel" && op.text.length > LIMITS.labelChars) return "label text too long";
+    if (op.op === "reorder" && op.direction !== "asc" && op.direction !== "desc") return "reorder direction must be asc or desc";
+    if (op.op === "reorder" && op.ranking !== null) {
+      if (!Array.isArray(op.ranking) || op.ranking.length > 300) return "reorder ranking must be a list of at most 300 items";
+      if (op.ranking.some((entry) => typeof entry.key !== "string" || entry.key.length > 300 || !Number.isFinite(entry.rank))) return "each ranking entry needs a key and a numeric rank";
+    }
+    if (op.op === "reorder" && op.keySelector !== null && typeof op.keySelector !== "string") return "bad reorder keySelector";
     if (op.op === "setAttribute" && op.value.length > LIMITS.attrChars) return "attribute value too long";
   }
   if (change.block && !BLOCKS.has(change.block.name)) return `unknown block "${change.block.name}"`;

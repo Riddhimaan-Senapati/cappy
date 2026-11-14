@@ -9,6 +9,7 @@ export interface RunRequest {
   runId: string;
   trigger: Trigger;
   message: string;
+  provider?: string;
   routing: Routing;
   models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];
@@ -25,10 +26,20 @@ export interface InspectedElement {
   attributes: Record<string, string>;
 }
 
+export interface ContrastIssue {
+  selector: string;
+  text: string;
+  color: string;
+  background: string;
+  ratio: number;
+}
+
 export interface ApplyOutcome {
   ok: boolean;
   error?: string;
   matched: Record<string, number>;
+  lowContrast?: ContrastIssue[];
+  replaced?: string[];
   before: PageStats;
   after: PageStats;
 }
@@ -36,6 +47,7 @@ export interface ApplyOutcome {
 export interface TabTools {
   read_page: { input: Record<string, never>; output: PageOutline };
   inspect: { input: { selector: string }; output: { count: number; samples: InspectedElement[] } };
+  list_items: { input: { selector: string; keySelector: string | null }; output: { count: number; items: Array<{ key: string; text: string }> } };
   apply_change: { input: { change: Change }; output: ApplyOutcome };
   revert_change: { input: { id: string }; output: { ok: boolean } };
   screenshot: { input: Record<string, never>; output: { dataUrl: string } };
@@ -72,5 +84,53 @@ export interface PingMessage {
   type: "ping";
 }
 
-export type ClientMessage = RunRequest | ToolResultMessage | PingMessage;
-export type ServerMessage = ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models: Record<Tier, string>; available: string[] };
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  setup: "key" | "signin";
+  ready: boolean;
+  models?: Record<Tier, string>;
+  available?: string[];
+}
+
+export interface SetKeyMessage {
+  type: "setKey";
+  provider: string;
+  key: string | null;
+}
+
+export interface ListModelsMessage {
+  type: "listModels";
+  provider: string;
+}
+
+export interface SignInMessage {
+  type: "chatgptLogin";
+}
+
+export interface SignOutMessage {
+  type: "chatgptLogout";
+}
+
+export interface SuggestMessage {
+  type: "suggest";
+  requestId: string;
+  provider?: string;
+  models?: Partial<Record<Tier, string>>;
+  profile: string[];
+  applied: string[];
+  page: PageOutline;
+}
+
+export interface CancelMessage {
+  type: "cancel";
+  runId: string;
+}
+
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage | SuggestMessage;
+export type ServerMessage =
+  | ToolCallMessage
+  | AgentEvent
+  | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
+  | { type: "notice"; level: "info" | "error"; text: string }
+  | { type: "suggestion"; requestId: string; text: string | null };

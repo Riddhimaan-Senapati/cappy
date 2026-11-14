@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "server": "tsx watch server/index.ts",
-    "build:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist",
-    "watch:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch",
+    "build:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist && esbuild content=extension/src/content/index.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist",
+    "watch:ext": "concurrently -r \"esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch\" \"esbuild content=extension/src/content/index.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist --watch\"",
     "dev": "npm run build:ext && concurrently -k -n server,ext \"npm run server\" \"npm run watch:ext\"",
     "typecheck": "tsc --noEmit",
     "chatgpt:login": "tsx server/auth/chatgpt.ts"

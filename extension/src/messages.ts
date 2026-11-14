@@ -1,4 +1,5 @@
-import type { Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { PageOutline } from "../../shared/adaptation.js";
+import type { ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
 
 export interface AppliedSummary {
   id: string;
@@ -9,6 +10,8 @@ export interface AppliedSummary {
 
 export type UiEvent =
   | { type: "start"; runId: string; trigger: Trigger; message: string }
+  | { type: "queued"; runId: string; message: string }
+  | { type: "cancelled"; runId: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
@@ -28,9 +31,12 @@ export type ContentResponse = { ok: true; result: unknown } | { ok: false; error
 export interface StatusInfo {
   connected: boolean;
   busy: boolean;
+  providers?: ProviderInfo[];
+  activeProvider?: string | null;
   provider?: string;
   models?: Record<Tier, string>;
   available?: string[];
+  notice?: { level: "info" | "error"; text: string };
   error?: string;
 }
 
@@ -39,7 +45,13 @@ export type BackgroundRequest =
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
-  | { kind: "status" };
+  | { kind: "status" }
+  | { kind: "setKey"; provider: string; key: string | null }
+  | { kind: "chatgptLogin" }
+  | { kind: "chatgptLogout" }
+  | { kind: "stopRun" }
+  | { kind: "suggest"; page: PageOutline; applied: string[] }
+  | { kind: "dequeue"; runId: string };
 
 export type DebugPortMessage =
   | { type: "status"; status: StatusInfo }
@@ -48,4 +60,4 @@ export type DebugPortMessage =
 
 export type DebugPortRequest = { type: "chat"; message: string };
 
-export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Frontier" };
+export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Pro" };

@@ -1,6 +1,7 @@
 import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import { z } from "zod";
 import type { Tier } from "../../../shared/protocol.js";
+import { getKey } from "../../keys.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
 import { tools } from "../tools.js";
@@ -9,7 +10,7 @@ import type { AgentProvider } from "./types.js";
 const MAX_STEPS = 16;
 
 export function createGeminiProvider(): AgentProvider {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getKey("GEMINI_API_KEY") });
   const fast = process.env.GEMINI_MODEL_FAST ?? process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
   const models: Record<Tier, string> = { fast, frontier: process.env.GEMINI_MODEL_FRONTIER ?? fast };
   const functionDeclarations = tools.map((tool) => ({
@@ -21,6 +22,10 @@ export function createGeminiProvider(): AgentProvider {
   return {
     name: "gemini",
     models,
+    async complete(system: string, user: string, model: string) {
+      const response = await ai.models.generateContent({ model, contents: user, config: { systemInstruction: system } });
+      return (response.text ?? "").trim();
+    },
     async listModels() {
       const names: string[] = [];
       for await (const model of await ai.models.list()) if (model.name) names.push(model.name.replace(/^models\//, ""));
@@ -30,10 +35,11 @@ export function createGeminiProvider(): AgentProvider {
       const contents: Content[] = [{ role: "user", parts: [{ text: buildUserTurn(session.request) }] }];
 
       for (let step = 0; step < MAX_STEPS; step++) {
+        session.throwIfCancelled();
         const response = await ai.models.generateContent({
           model,
           contents,
-          config: { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }] },
+          config: { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }], abortSignal: session.signal },
         });
 
         const calls = response.functionCalls ?? [];
@@ -56,6 +62,7 @@ export function createGeminiProvider(): AgentProvider {
           parts.unshift({ functionResponse: { id: call.id, name: call.name, response: { output } } });
         }
         contents.push({ role: "user", parts });
+        if (session.escalation) return "";
       }
       return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
     },

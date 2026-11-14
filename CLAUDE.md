@@ -1,133 +1,106 @@
 # CLAUDE.md
 
-Guidance for Claude Code and teammates working in this repo. The full product brief is [PROJECT.md](PROJECT.md). This file is the engineering contract: read it before writing code.
+Engineering guide for this repo. Product brief: [PROJECT.md](PROJECT.md).
 
-## What we are building
+## What it is
 
-A Chrome extension (Manifest V3) with an AI browser agent that learns one person's needs (colorblindness, light sensitivity, motor limits, focus, text size) and adapts the websites they visit. It acts first on page load, explains every change, verifies it worked, and lets the user undo it. The user can also ask in plain English ("invert this page", "my wrist is in a cast, make this form easier") and the agent works out how to implement it on the live page.
+A Chrome extension (MV3) with an AI agent that adapts the page you are on to your needs (colorblindness, light sensitivity, text size, focus, motor limits). You open a Spotlight-style bar, say what you need, and the agent changes the live page, verifies it, and lets you undo. It can also act on page load from your saved profile.
 
-HackUMass XIV, Nov 13 to 15 2026. Judging Sunday 12:30 PM. Demo is 3 minutes on 3 to 4 rehearsed sites. See PROJECT.md sections 8 to 10 for demo script and prize map.
+Scope: the agent changes how pages look, read and respond. It never clicks, types, fills forms or navigates for the user; that is left to computer-use agents such as Sentient's.
 
 ## Architecture
 
 ```
-Chrome extension (one install, everything the user sees)        Local agent server (Node, holds API keys)
-  side panel   chat, profile, active changes, agent steps  <-WS->  agent loop (provider-agnostic)
-               runs tab tools, captures screenshots                   tools: read_page, inspect, apply_change,
-  content script  reads page, applies/undoes changes,                        revert_change, screenshot, remember
-                  restores saved changes on load, toast             safety: CSS scan, op allowlist, injection check
-  service worker  opens side panel                                   providers: gemini (default), anthropic-key
-  chrome.storage  profile, chat history, per-site + global changes
+Chrome extension                                        Local Node server (holds keys)
+  content script  bar UI, floating button, toasts,          agent loop per provider
+                  reads page, applies and undoes   <--WS-->  tools: read_page, inspect, apply_change,
+                  changes, re-applies on new DOM               revert_change, screenshot, remember
+  service worker  owns the WebSocket, runs tool              safety: CSS scan, op allowlist,
+                  calls against the tab, routing              prompt-injection check
+  popup           settings                                    routing: fast / pro tier
+  side panel      debug chat and tool log
+  chrome.storage  profile, history, saved changes, settings
 ```
 
-- **The agent is a real tool-use loop, not a single JSON call.** It reads the page, inspects elements, applies a change, checks matched counts and before/after stats (and a screenshot when visual), then fixes or reverts. Max 16 steps, max two fix attempts per change.
-- **Tools execute in the user's real tab.** The server sends `tool` messages over the WebSocket; the side panel forwards them to the content script (or captures a screenshot) and returns `toolResult`. See [shared/protocol.ts](shared/protocol.ts).
-- **State lives in the extension** ([extension/src/storage.ts](extension/src/storage.ts)). The server is stateless per run: every `run` message carries profile, recent chat and active changes.
-- **Fast path:** saved changes are replayed by the content script on page load with no LLM call. The LLM only runs on chat, or proactively (`page_load` trigger) when the profile is non-empty and the site has nothing saved yet.
-- **Why a local server instead of calling the LLM from the extension:** API keys must never ship in the extension, and provider SDKs (tool runner, Gemini SDK) run in Node. Users still only see one extension.
+- The server is required for new requests: it keeps API keys and credentials out of the extension and runs the provider SDKs. Saved changes, undo and settings work without it.
+- One run = one tool-use loop. The page outline is sent with the request, so the model can act on its first turn. A new request on the same tab cancels the running one (server aborts the model call).
+- Saved changes replay on page load with no model call. Repeating the same request on a site is served from storage; Shift+Enter asks the model again.
+- DOM ops and text scaling re-apply to content added later (a MutationObserver in `extension/src/content/engine.ts`). CSS keeps applying on its own.
+- The overlay lives in a closed shadow root rendered in the top layer (`popover`), so page-wide filters and site modals do not affect it.
 
-### Why not Stagehand / Browser Use / computer-use models
+## The change format (the core contract)
 
-Those SDKs drive a browser they control (Playwright/CDP) to complete tasks by clicking and typing, or work from pixels (Gemini computer use, Claude computer use). We adapt the user's own live tab and need DOM-level, reversible, verifiable edits, so we own a small tool set instead. The tool boundary is also our security story. Borrow ideas freely (Nanobrowser is a good in-extension reference), but do not add those SDKs as dependencies without a team decision.
-
-## The adaptation model (most important contract)
-
-Defined in [shared/adaptation.ts](shared/adaptation.ts); validated by [shared/validate.ts](shared/validate.ts) on the server and again in the content script.
-
-A **Change** is what the agent produces. The LLM decides *how* to implement a need; it is not limited to presets.
+Defined in [shared/adaptation.ts](shared/adaptation.ts), validated in [shared/validate.ts](shared/validate.ts) on the server and again in the content script.
 
 ```ts
-Change = {
-  id: "invert-page",                // kebab-case, reusing an id replaces the change
-  summary, reason,                  // shown to the user; reason cites the profile line or request
-  css: string | null,               // model-written CSS, scanned before use
-  dom: DomOp[] | null,              // allowlisted DOM operations, any selector
-  block: BlockCall | null,          // pre-built JS capability
-  scope: "site" | "everywhere",
-}
+Change = { id, summary, reason, css, dom, block, scope: "site" | "everywhere" }
 ```
 
-Three layers, in order of preference:
-1. **CSS the model writes.** Covers most visual needs: invert, dim, spacing, fonts, hiding elements, focus rings, bigger targets.
-2. **DomOps** for what CSS cannot do: `addLabel`, `setAttribute` (aria-*, alt, title, role, tabindex, lang, autocomplete, inputmode), `removeAttribute` (autoplay, loop, ...), `pauseMedia`. Text is always inserted with `textContent`.
-3. **Blocks**: pre-written code we control, for what neither can do: `colorblind` (daltonizing SVG color matrix), `textScale` (scales real computed px sizes), `stopMotion`. Planned: `gestureScroll` (MediaPipe), `flashCalm`, `readAloud`, `altText`.
+The model decides how to implement a need, in this order of preference:
+1. `css` it writes itself (invert, dim, spacing, fonts, hiding, focus rings, target size).
+2. `dom` ops for what CSS cannot do: `addLabel`, `setAttribute` (allowlisted attributes), `removeAttribute`, `pauseMedia`.
+3. `block`, pre-written code we own: `colorblind`, `textScale`, `stopMotion`.
 
-To add a capability: add a DomOp or Block to the zod schema in `shared/adaptation.ts`, its allowlist entry in `shared/validate.ts`, the implementation in `extension/src/content/engine.ts` or `blocks.ts`, and a line in the system prompt ([server/agent/prompt.ts](server/agent/prompt.ts)).
+To add a capability: schema in `shared/adaptation.ts`, allowlist in `shared/validate.ts`, implementation in `extension/src/content/engine.ts` or `blocks.ts`, one line in the system prompt in `server/agent/prompt.ts`.
 
-## Security rules (non-negotiable, these are a judged feature)
+## Security rules (non-negotiable)
 
-- **The model never writes JavaScript.** No `eval`, no `new Function`, no `innerHTML` with model text, no model-chosen event handlers or attributes outside the allowlist.
-- **CSS scan** rejects `url()`, `@import`, `@font-face`, `image-set()`, `expression()`, `javascript:`, backslash escapes, `<style`/`<script`, and any `content:` value except none/normal/"" (blocks fake text overlays). Max 6000 chars.
-- **Page content is untrusted.** Tool results that contain page data are wrapped in `<untrusted_page_data>`; the system prompt says it is data, never instructions.
-- **Injection check** ([server/safety.ts](server/safety.ts)) runs on every `read_page`. A hit sets `blockedReason`; all further `apply_change` calls are refused and the panel shows "Blocked". Test page: `/demo/trap.html`.
-- Validate twice: server (zod + validateChange) and content script (validateChange) before touching the DOM.
-- Every change is undoable (per change, toast Undo, global kill switch in the panel header).
-- Only the short profile lines go to the model, never raw notes or messages. Never log prompts containing user data.
-- WebSocket only accepts `chrome-extension://` origins.
+- The model never writes JavaScript. No `eval`, no `innerHTML` with model or page text, no model-chosen attributes outside the allowlist. Text goes in with `textContent`.
+- CSS is rejected if it has `url()`, `@import`, `@font-face`, `image-set()`, `expression()`, `javascript:`, backslash escapes, markup, or any `content:` value other than none/normal/"".
+- Page content is untrusted and wrapped in `<untrusted_page_data>`. The injection check runs before any model call and on every re-read; a hit blocks all changes. Test page: `/demo/trap.html`.
+- API keys and the ChatGPT credentials file live only on the server and are gitignored. Only short profile lines go to the model.
+- The WebSocket accepts only `chrome-extension://` origins.
 
-## DOM manipulation and animation
+## Providers and models
 
-- CSS changes are `<style data-ba="change:<id>">` elements appended to `<html>`; undo removes them. DomOps record an undo closure per element. Our own nodes carry `data-ba` and are excluded from page reads.
-- Changes animate with the **View Transitions API** (`document.startViewTransition`), a 0.45 s crossfade of the whole page from old look to new. No per-property transitions needed. Skipped when `prefers-reduced-motion` is set or on restore at page load.
-- Newly inserted elements (labels) get a short blue pulse so the user sees what changed.
-- `page_load` runs blur the page (`html.ba-busy`) until the first change lands, then show an in-page toast (shadow DOM) with Undo.
-- Known limits: inline `<style>` can be blocked by strict page CSP (fallback: `chrome.scripting.insertCSS` from the service worker); `textScale` does not follow SPA content added later (needs a MutationObserver).
+Nothing is required in `.env`. The server starts with no provider; the settings view (popup or `/settings` in the bar) lists ChatGPT, Claude, OpenAI API and Gemini, with Sign in or Add key for each, and lets you switch between the ready ones.
+
+- Keys added from settings are saved by the server to `.agent-keys.json` (gitignored, 0600). Keys in `.env` also count. The extension never stores keys.
+- `chatgpt-signin` uses OpenAI's documented sign-in for local open-source apps; the Sign in button runs the same flow as `npm run chatgpt:login`. Claude subscription logins are not allowed in third-party tools, so Claude means an API key.
+- With no provider picked, the first ready one wins (ChatGPT, Claude, OpenAI, Gemini), or `LLM_PROVIDER` if set and ready.
+- Each provider has a Fast and a Pro model; picks are stored per provider. Routing defaults to Fast; Tab in the bar switches to Pro. In `auto`, keywords give a first guess, and the fast model can call `escalate` when a request is beyond it; the server then undoes its changes and reruns on Pro (it also does this when Fast's changes fail). Model lists are fetched only for the selected provider, since listing costs an API call.
+- Adding a provider: implement `AgentProvider` in `server/agent/providers/` over the shared `tools` list, honour `session.signal` for cancellation, register it in `providers/index.ts`.
+
+## Memory (integration point)
+
+Long-term memory (learned preferences, friction signals, Sentient notes) plugs in through `server/agent/memory.ts`:
+
+- `recallForRun(request)` returns the lines the agent sees as `<profile>` for this run. Today it returns the profile lines the extension sends.
+- `rememberFacts(request, lines)` receives durable facts the agent learns through its `remember` tool. Today the extension stores them in its profile and this is a no-op.
+
+Keep what reaches the model short (a few lines), never raw notes or messages. Profile editing in settings keeps working either way.
+
+## Skills
+
+Playbooks for kinds of requests live in `server/skills/*.md` (front matter: `name`, `description`). The prompt lists names and descriptions; the model loads one with `load_skill` when a request matches, by meaning rather than keywords. Edit or add a file to change behavior; no restart needed.
 
 ## Repo layout
 
 ```
-shared/adaptation.ts     Change / DomOp / BlockCall zod schemas, PageOutline, PageStats types
-shared/validate.ts       zod-free validator + CSS scanner (bundled into the content script)
-shared/protocol.ts       WebSocket messages and tab tool signatures
-server/index.ts          Express (demo sites, /api/health) + WebSocket /agent
-server/agent/            session (tool RPC), tools, prompt, providers/{gemini,anthropic,index}.ts
-server/safety.ts         prompt-injection heuristics
-extension/manifest.json  MV3 manifest; load the extension/ folder unpacked
-extension/src/sidepanel.ts   chat UI, WS client, tool dispatch, proactive runs
-extension/src/content/   index (messages, restore, toast), outline (read_page, inspect, stats), engine, blocks, dom helpers
-demo-sites/              campus.html (messy demo page), trap.html (injection test)
+shared/        change schema, validator, WebSocket protocol
+server/        Express + WebSocket entry, agent session, tools, prompt, router, providers, ChatGPT sign-in
+extension/src/
+  background/  WebSocket client and run orchestration
+  content/     page reading, change engine, blocks, content entry
+  overlay/     Spotlight bar, floating button, toast
+  ui/          shared settings view, theme, DOM helpers
+  popup.ts, sidepanel.ts
+demo-sites/    campus.html (messy test page), trap.html (injection test)
 ```
 
-## Running it
+## Running
 
 ```bash
 npm install
-cp .env.example .env          # set LLM_PROVIDER and the matching key
-npm run dev                   # server on :8787 + extension build in watch mode
+npm run dev               # server on :8787 + extension build in watch mode
 ```
 
-Then open `chrome://extensions`, enable Developer mode, **Load unpacked** the `extension/` folder, open `http://localhost:8787/demo/campus.html`, click the extension icon to open the side panel. Reload open tabs after (re)loading the extension so the content script is injected.
+Load `extension/` unpacked at `chrome://extensions`, then set up a provider from the extension settings. Shortcuts: Ctrl+Shift+Space (bar), Ctrl+Shift+Y (debug panel); rebind at `chrome://extensions/shortcuts`. `npm run typecheck` before pushing.
 
-Other scripts: `npm run typecheck`, `npm run build:ext`, `npm run server`.
+## Conventions
 
-## LLM providers
-
-Summary:
-- `LLM_PROVIDER=gemini` (default, the one we pitch for MLH) or `anthropic-key`. Missing key fails at startup; never fall back silently.
-- A provider implements `AgentProvider.run(session)` ([server/agent/providers/types.ts](server/agent/providers/types.ts)): drive the tool loop over the shared `tools` list and return the final reply. Tools, safety and prompt are shared, so providers stay small.
-- Anthropic uses the SDK tool runner (`client.beta.messages.toolRunner` + `betaZodTool`) with server-side refusal fallbacks enabled. Default model `claude-opus-5-5` at effort `low`; override with `ANTHROPIC_MODEL` / `AGENT_EFFORT`.
-- Gemini uses a manual function-calling loop with `@google/genai`. Default `gemini-3.5-flash`; confirm the current model name before the demo.
-- `openai-key` and `chatgpt-signin` share one Responses API loop ([server/agent/providers/openai.ts](server/agent/providers/openai.ts)): tools grouped in a `namespace` tool, `store: false`, `stream: true`, no system messages / temperature / max_output_tokens (required by the ChatGPT plan route).
-- `chatgpt-signin` follows OpenAI's official open-source "Sign in with ChatGPT" flow (developers.openai.com/siwc/token-sharing-open-source): `npm run chatgpt:login` does dynamic client registration + PKCE on `http://127.0.0.1:1455/auth/callback`, verifies the ID token via OIDC discovery, requires the `chatgpt.tokens.use.direct` scope, and saves `.chatgpt-credentials.json` (gitignored, 0600). Tokens refresh 5 minutes before expiry; one retry after a refresh on 401. Local use only (hosted apps need OpenAI approval); plan limits surface as an error, never a silent fallback.
-- Consumer Claude logins cannot be used by third-party tools, so say "Claude via API key".
-
-## Coding conventions
-
-- TypeScript everywhere, strict mode, ESM. Node 20+ (team uses 24).
-- No comments unless they explain a non-obvious why, one short line. No em dashes anywhere in code or strings.
+- TypeScript strict, ESM. Keep `extension/src/content/` free of zod and server code; it is bundled into every page.
+- No comments unless they explain a non-obvious why, one short line. No em dashes in code or strings.
 - Use SDK types and helpers; do not hand-roll API shapes.
-- Keep the content script small: never import zod or server code into `extension/src/content/`.
-- Never commit `.env`. Check `git status` / `git diff --cached --stat` before every commit and push.
+- Never commit `.env`, `.agent-keys.json` or `.chatgpt-credentials.json`; check `git diff --cached --stat` before committing.
 - Commit messages: one line, `type: short description`.
-
-## Status and next steps
-
-Done in this PoC: extension shell, WebSocket agent loop, tab tools, CSS/DOM/block engine with undo and View Transitions, per-site and global persistence, proactive page_load with blur and toast, injection blocking, before/after stats verification, demo pages.
-
-Next, roughly in demo priority:
-1. Real-site testing on the rehearsed demo sites (W3C BAD survey, Mars Commuter, Our World in Data); tune `read_page` outline size.
-2. axe-core in `computeStats` for real issue counts in verification.
-3. Gesture scrolling block (MediaPipe), with a recorded fallback clip.
-4. Onboarding chat that builds the first profile; friction signals (zoom, misclicks) feeding proactive suggestions.
-5. `openai-key` provider; latency work (cache per site and profile version, smaller model for page_load).
-6. Stretch per PROJECT.md: Sentient connector, MongoDB library, Tiger Data dashboard.

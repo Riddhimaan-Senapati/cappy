@@ -7,17 +7,28 @@ export interface Recipe {
   at: number;
 }
 
+export interface SavedCommand {
+  id: string;
+  name: string;
+  prompt: string;
+  everywhere: boolean;
+  appliedOrigins: string[];
+  createdAt: number;
+}
+
 export interface StoredState {
   profile: string[];
   history: ChatTurn[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
   recipes: Record<string, Recipe>;
+  commands: SavedCommand[];
   paused: boolean;
   proactive: boolean;
   floatingButton: boolean;
   routing: Routing;
-  modelOverrides: Partial<Record<Tier, string>>;
+  provider: string | null;
+  modelChoices: Record<string, Partial<Record<Tier, string>>>;
   serverUrl: string;
 }
 
@@ -27,23 +38,34 @@ export const DEFAULTS: StoredState = {
   globalChanges: [],
   siteChanges: {},
   recipes: {},
+  commands: [],
   paused: false,
   proactive: true,
   floatingButton: true,
-  routing: "auto",
-  modelOverrides: {},
+  routing: "fast",
+  provider: null,
+  modelChoices: {},
   serverUrl: "ws://localhost:8787/agent",
 };
 
 const MAX_RECIPES = 60;
 
+// A content script left behind by a reloaded extension loses access to chrome.*; treat that as empty, not as a crash.
 export async function load(): Promise<StoredState> {
-  const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
-  return { ...DEFAULTS, ...stored } as StoredState;
+  try {
+    const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
+    return { ...DEFAULTS, ...stored } as StoredState;
+  } catch {
+    return { ...DEFAULTS };
+  }
 }
 
 export async function save(patch: Partial<StoredState>) {
-  await chrome.storage.local.set(patch);
+  try {
+    await chrome.storage.local.set(patch);
+  } catch {
+    // extension was reloaded; the new instance owns storage now
+  }
 }
 
 export async function savedChangesFor(origin: string): Promise<ActiveChange[]> {
