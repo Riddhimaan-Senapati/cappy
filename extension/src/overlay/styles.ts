@@ -104,6 +104,13 @@ export const OVERLAY_CSS = `
 .mini-toggle[aria-pressed="true"] { color: #e4d6ff; background: rgba(167, 139, 250, 0.18); border-color: rgba(167, 139, 250, 0.32); }
 .mini-toggle:focus-visible, .name-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hrow .mini { cursor: pointer; }
+.choices { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: 24px; animation: fade 0.25s var(--ease); }
+.choices-q { width: 100%; font-size: 12.5px; color: rgba(255, 255, 255, 0.6); margin-bottom: 2px; }
+.choice { all: unset; cursor: pointer; padding: 5px 11px; border-radius: 8px; font-size: 12.5px; font-weight: 550; color: #dfe3ff; background: rgba(139, 155, 255, 0.14); border: 1px solid rgba(139, 155, 255, 0.3); }
+.choice:hover:not(:disabled) { background: rgba(139, 155, 255, 0.26); }
+.choice:focus-visible { outline: 2px solid var(--accent); }
+.choice:disabled { cursor: default; opacity: 0.45; }
+.choice.picked { opacity: 1; background: rgba(74, 222, 128, 0.18); border-color: rgba(74, 222, 128, 0.4); color: #bbf7d0; }
 .thread { display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 8px; }
 .card { border-radius: 10px; }
 .card.enter { animation: rise 0.34s var(--spring) both; }

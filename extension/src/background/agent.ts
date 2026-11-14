@@ -262,7 +262,8 @@ export class AgentClient {
         active,
         page,
       };
-      if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: message }].slice(-20) });
+      const historyText = target ? `${message} (selected: ${target.label})` : message;
+      if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: historyText }].slice(-20) });
       this.send(request);
     } catch (error) {
       this.fail(run, error instanceof Error ? error.message : String(error));
@@ -336,6 +337,8 @@ export class AgentClient {
         return this.step(run, message.text, "bad");
       case "blocked":
         return this.emit(run, { type: "blocked", runId: run.runId, reason: message.reason });
+      case "options":
+        return this.emit(run, { type: "options", runId: run.runId, question: message.question, options: message.options });
       case "profile": {
         const state = await load();
         await save({ profile: [...state.profile, ...message.lines.filter((line) => !state.profile.includes(line))] });

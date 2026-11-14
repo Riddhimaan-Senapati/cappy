@@ -8,6 +8,7 @@ export interface CameraHooks {
   turnOff(): void;
   select(element: Element): void;
   cancel(): boolean;
+  hasSelection(): boolean;
 }
 
 const CSS = `
@@ -72,7 +73,8 @@ export class CameraController {
   private frame = document.createElement("iframe");
   private dot = document.createElement("span");
   private pauseButton = document.createElement("button");
-  private overPause = false;
+  private offButton = document.createElement("button");
+  private overButton: HTMLButtonElement | null = null;
   private mode = document.createElement("span");
   private cursor = document.createElement("div");
   private ringCircle: SVGCircleElement;
@@ -124,7 +126,7 @@ export class CameraController {
     this.pauseButton.textContent = "Pause";
     this.pauseButton.setAttribute("aria-label", "Pause camera control");
     this.pauseButton.addEventListener("click", () => this.togglePause());
-    const off = document.createElement("button");
+    const off = this.offButton;
     off.className = "off danger";
     off.type = "button";
     off.textContent = "Turn off";
@@ -153,7 +155,7 @@ export class CameraController {
     this.outline.className = "outline";
     this.label.className = "label";
 
-    this.shadow.append(style, this.outline, this.label, this.cursor, pip);
+    this.shadow.append(style, this.outline, this.label, pip, this.cursor);
   }
 
   start() {
@@ -240,6 +242,12 @@ export class CameraController {
         this.swipeTrail = [];
         // The camera image is not mirrored: the hand moving toward the image's right is the user swiping to their left.
         const back = dx > 0;
+        // With something selected, swiping back clears the selection instead of leaving the page.
+        if (back && this.hooks.hasSelection()) {
+          this.hooks.cancel();
+          this.scrollSpeed = 0;
+          return this.setMode("Selection cleared", "on");
+        }
         this.hooks.notify(back ? "Back" : "Forward");
         if (back) history.back();
         else history.forward();
@@ -325,9 +333,12 @@ export class CameraController {
     this.cursor.classList.add("on");
     this.cursor.classList.toggle("press", this.pinching || startPinch);
 
-    const pauseRect = this.pauseButton.getBoundingClientRect();
-    this.overPause = this.stable.x >= pauseRect.left && this.stable.x <= pauseRect.right && this.stable.y >= pauseRect.top && this.stable.y <= pauseRect.bottom;
-    if (this.overPause) this.hover(this.pauseButton);
+    const inside = (button: HTMLElement) => {
+      const rect = button.getBoundingClientRect();
+      return this.stable.x >= rect.left - 4 && this.stable.x <= rect.right + 4 && this.stable.y >= rect.top - 4 && this.stable.y <= rect.bottom + 4;
+    };
+    this.overButton = [this.pauseButton, this.offButton].find(inside) ?? null;
+    if (this.overButton) this.hover(this.overButton);
     else if (this.paused) this.hover(null);
     else {
       const under = document.elementFromPoint(this.stable.x, this.stable.y);
@@ -346,7 +357,7 @@ export class CameraController {
       // A quick pinch clicks; holding the pinch selects the element as the agent's target.
       const held = t - this.pinchStart;
       this.setRing(held > 200 ? (held - 200) / (SELECT_HOLD_MS - 200) : 0);
-      if (!this.holdFired && held >= SELECT_HOLD_MS && this.pinchTarget && this.pinchTarget !== this.pauseButton && !this.paused) {
+      if (!this.holdFired && held >= SELECT_HOLD_MS && this.pinchTarget && !this.isPreviewButton(this.pinchTarget) && !this.paused) {
         this.holdFired = true;
         this.setRing(0);
         this.hooks.select(this.pinchTarget);
@@ -358,7 +369,7 @@ export class CameraController {
 
   private endPinch(t: number) {
     this.pinching = false;
-    if (this.pinchTarget === this.pauseButton) this.togglePause();
+    if (this.isPreviewButton(this.pinchTarget)) this.pressPreviewButton(this.pinchTarget as HTMLButtonElement);
     else if (!this.holdFired && t - this.pinchStart < TAP_MS && this.pinchTarget && !this.paused) {
       this.hovered = this.pinchTarget;
       this.activate();
@@ -399,7 +410,8 @@ export class CameraController {
     const rect = target.getBoundingClientRect();
     Object.assign(this.outline.style, { left: `${rect.left - 3}px`, top: `${rect.top - 3}px`, width: `${rect.width + 6}px`, height: `${rect.height + 6}px` });
     this.outline.classList.add("on");
-    this.label.textContent = target === this.pauseButton ? `${this.paused ? "Resume" : "Pause"} · camera control` : describeElement(target);
+    this.label.textContent =
+      target === this.pauseButton ? `${this.paused ? "Resume" : "Pause"} · camera control` : target === this.offButton ? "Turn off · camera control" : describeElement(target);
     Object.assign(this.label.style, { left: `${Math.min(innerWidth - 270, Math.max(8, rect.left))}px`, top: `${rect.top > 32 ? rect.top - 28 : rect.bottom + 6}px` });
     this.label.classList.add("on");
   }
@@ -413,8 +425,17 @@ export class CameraController {
     this.hooks.notify(this.paused ? "Camera control paused. Point at Resume and pinch to continue." : "Camera control resumed.");
   }
 
+  private isPreviewButton(element: Element | null) {
+    return element === this.pauseButton || element === this.offButton;
+  }
+
+  private pressPreviewButton(button: HTMLButtonElement) {
+    if (button === this.pauseButton) this.togglePause();
+    else this.hooks.turnOff();
+  }
+
   private activate() {
-    if (this.overPause) return this.togglePause();
+    if (this.overButton) return this.pressPreviewButton(this.overButton);
     const target = this.hovered;
     if (!(target instanceof HTMLElement)) return;
     if (target.matches("input, textarea, select, [contenteditable='true']")) target.focus();

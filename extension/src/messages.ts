@@ -1,5 +1,5 @@
 import type { PageOutline } from "../../shared/adaptation.js";
-import type { ProviderInfo, Routing, TabToolName, TargetElement, Tier, Trigger } from "../../shared/protocol.js";
+import type { ChoiceOption, ProviderInfo, Routing, TabToolName, TargetElement, Tier, Trigger } from "../../shared/protocol.js";
 
 export interface AppliedSummary {
   id: string;
@@ -15,6 +15,7 @@ export type UiEvent =
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
+  | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
   | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
   | { type: "error"; runId: string; message: string };
 

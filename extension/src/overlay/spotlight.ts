@@ -1,5 +1,5 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
-import type { Routing, TargetElement } from "../../../shared/protocol.js";
+import type { ChoiceOption, Routing, TargetElement } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { load, save, type SavedCommand, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
@@ -44,6 +44,8 @@ interface RunState {
   runId: string | null;
   message: string;
   target?: string;
+  targetFull?: TargetElement;
+  options?: { question: string; choices: ChoiceOption[]; picked?: string };
   status: "pending" | "queued" | "running" | "done";
   steps: Step[];
   model?: string;
@@ -477,9 +479,9 @@ export class Spotlight {
   ask(message: string, fresh: boolean) {
     if (!message) return;
     window.clearTimeout(this.closeTimer);
-    for (const run of this.runs) if (run.status === "done") run.open = false;
+    for (const run of this.runs) if (run.status === "done" && !this.awaitingPick(run)) run.open = false;
     const target = this.target ?? undefined;
-    this.runs.push({ runId: null, message, target: target?.label, status: "pending", steps: [{ text: "Reading the page", tone: "info" }], startedAt: Date.now(), open: true, expanded: false, shownSteps: 0, shownResult: false, seen: false, saving: false, undone: false });
+    this.runs.push({ runId: null, message, target: target?.label, targetFull: target, status: "pending", steps: [{ text: "Reading the page", tone: "info" }], startedAt: Date.now(), open: true, expanded: false, shownSteps: 0, shownResult: false, seen: false, saving: false, undone: false });
     while (this.runs.length > MAX_THREAD) {
       const oldest = this.runs.findIndex((run) => run.status === "done");
       if (oldest < 0) break;
@@ -539,7 +541,15 @@ export class Spotlight {
 
     if (run.status === "done" && !run.open && run.result) {
       const { kind, applied } = run.result;
-      const summary = kind === "done" ? (applied.length ? `${applied.length} change${applied.length === 1 ? "" : "s"}` : "no changes") : kind === "blocked" ? "blocked" : "stopped or failed";
+      const summary = this.awaitingPick(run)
+        ? "pick an option"
+        : kind === "done"
+          ? applied.length
+            ? `${applied.length} change${applied.length === 1 ? "" : "s"}`
+            : "no changes"
+          : kind === "blocked"
+            ? "blocked"
+            : "stopped or failed";
       const row = h("button", `card mini-card ${kind}${enter}`, "", [icon(kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 13), h("span", "q", run.message), h("span", "meta", summary)]);
       row.type = "button";
       row.setAttribute("aria-label", `${run.message}: ${summary}. Show details`);
@@ -602,6 +612,22 @@ export class Spotlight {
           }),
         ),
       );
+    }
+    if (run.options) {
+      const choices = run.options.choices.map((choice) => {
+        const button = h("button", `choice${run.options!.picked === choice.label ? " picked" : ""}`, choice.label);
+        button.type = "button";
+        button.title = choice.request;
+        button.disabled = Boolean(run.options!.picked);
+        button.addEventListener("click", () => {
+          run.options!.picked = choice.label;
+          // Keep the same element selected so the chosen option applies to it.
+          if (run.targetFull) this.target = run.targetFull;
+          this.ask(choice.request, false);
+        });
+        return button;
+      });
+      children.push(h("div", "choices", "", [h("span", "choices-q", run.options.question), ...choices]));
     }
     const count = run.steps.filter((step) => step.tone === "info").length;
     const fold = h("button", "fold", `${run.expanded ? "Hide" : "Show"} ${count} step${count === 1 ? "" : "s"} · ${this.elapsed(run)}${run.model ? ` · ${run.model}` : ""}`);
@@ -730,6 +756,11 @@ export class Spotlight {
     if (this.view === "commands") this.renderCommands();
   }
 
+  // A request waiting for the user to pick an option stays open so its choices remain visible.
+  private awaitingPick(run: RunState) {
+    return Boolean(run.options && !run.options.picked);
+  }
+
   private latestUndoable(): RunState | undefined {
     return [...this.runs].reverse().find((run) => run.status === "done" && !run.undone && run.result?.kind === "done" && run.result.applied.length > 0);
   }
@@ -855,7 +886,7 @@ export class Spotlight {
         run.startedAt = Date.now();
         run.steps = [{ text: "Reading the page", tone: "info" }];
         run.shownSteps = 0;
-        for (const other of this.runs) if (other !== run && other.status === "done") other.open = false;
+        for (const other of this.runs) if (other !== run && other.status === "done" && !this.awaitingPick(other)) other.open = false;
       }
     } else {
       run = this.runs.find((candidate) => candidate.runId === event.runId);
@@ -871,6 +902,9 @@ export class Spotlight {
           break;
         case "blocked":
           run.result = { kind: "blocked", text: "Blocked. This page tried to give the agent instructions.", applied: [] };
+          break;
+        case "options":
+          run.options = { question: event.question, choices: event.options };
           break;
         case "done":
           if (!run.result) run.result = { kind: "done", text: event.reply || "Done.", applied: event.applied };

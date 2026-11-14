@@ -28,7 +28,10 @@ function selectTarget(element: Element) {
   ensureBaseStyle();
   targetElement = element;
   element.setAttribute("data-ba-target", "");
-  ensureOverlay().spotlight.showWithTarget({ selector: uniqueSelector(element), label: describeElement(element), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 160) });
+  // Same snapshot the inspect tool returns, so the model sees a selected element the way it sees any inspected one.
+  const selector = uniqueSelector(element);
+  const styles = inspect(selector).samples[0]?.styles;
+  ensureOverlay().spotlight.showWithTarget({ selector, label: describeElement(element), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 160), styles });
 }
 const suggestionCache = new Map<string, Promise<string | null>>();
 
@@ -69,6 +72,7 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
     notify: (text) => ensureOverlay().showToast(text, []),
     turnOff: () => void load().then((state) => save({ camera: { ...state.camera, enabled: false } })),
     select: selectTarget,
+    hasSelection: () => Boolean(targetElement) || picker.isActive,
     cancel: () => {
       const hadSomething = Boolean(targetElement) || Boolean(overlay?.spotlight.isOpen()) || picker.isActive;
       picker.stop();
