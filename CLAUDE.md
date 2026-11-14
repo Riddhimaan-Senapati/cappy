@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for Claude Code and teammates working in this repo. The full product brief is [PROJECT.md](PROJECT.md); provider rules are in [LLM-PROVIDERS.md](LLM-PROVIDERS.md). This file is the engineering contract: read it before writing code.
+Guidance for Claude Code and teammates working in this repo. The full product brief is [PROJECT.md](PROJECT.md). This file is the engineering contract: read it before writing code.
 
 ## What we are building
 
@@ -102,7 +102,7 @@ Other scripts: `bun run typecheck`, `bun run build:ext`, `bun run server`, `bun 
 
 ## LLM providers
 
-Full rules in [LLM-PROVIDERS.md](LLM-PROVIDERS.md). Summary:
+Summary:
 - `LLM_PROVIDER=gemini` (default, the one we pitch for MLH) or `anthropic-key`. Missing key fails at startup; never fall back silently.
 - A provider implements `AgentProvider.run(session)` ([server/agent/providers/types.ts](server/agent/providers/types.ts)): drive the tool loop over the shared `tools` list and return the final reply. Tools, safety and prompt are shared, so providers stay small.
 - Anthropic uses the SDK tool runner (`client.beta.messages.toolRunner` + `betaZodTool`) with server-side refusal fallbacks enabled. Default model `claude-opus-5-5` at effort `low`; override with `ANTHROPIC_MODEL` / `AGENT_EFFORT`.
