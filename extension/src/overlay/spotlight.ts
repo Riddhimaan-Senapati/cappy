@@ -77,7 +77,7 @@ export class Spotlight {
   private view: View = "list";
   private items: Item[] = [];
   private selected = 0;
-  private queuedRequests: string[] = [];
+  private queuedRequests: Array<{ message: string; thread: string }> = [];
   private historyRequest = "";
   private run: RunState | null = null;
   private opened = false;
@@ -434,13 +434,14 @@ export class Spotlight {
     );
   }
 
-  ask(message: string, fresh: boolean, interrupt = false) {
+  ask(message: string, fresh: boolean, interrupt = false, thread = this.historyRequest) {
     if (!message || (this.working && !interrupt)) return;
     window.clearTimeout(this.closeTimer);
     this.run = { runId: null, message, steps: [{ text: "Sending to the agent", tone: "info" }], memory: [], shownSteps: 0, shownResult: false };
     this.input.value = "";
     this.setView("run");
-    this.deps.ask(message, fresh, interrupt, this.historyRequest || undefined);
+    this.historyRequest = thread;
+    this.deps.ask(message, fresh, interrupt, thread || undefined);
   }
 
   private queueRequest() {
@@ -450,7 +451,7 @@ export class Spotlight {
       this.ask(message, false);
       return;
     }
-    this.queuedRequests.push(message);
+    this.queuedRequests.push({ message, thread: this.historyRequest });
     this.input.value = "";
     this.onInput();
     this.input.focus({ preventScroll: true });
@@ -477,11 +478,11 @@ export class Spotlight {
     }
     if (this.queuedRequests.length) {
       const rows = this.queuedRequests.map((request, index) => h("div", "queue-actions", "", [
-        h("span", "queue-text", request),
+        h("span", "queue-text", request.message),
         button("Send now", () => {
           this.queuedRequests.splice(index, 1);
           const draft = this.input.value;
-          this.ask(request, false, true);
+          this.ask(request.message, false, true, request.thread);
           this.input.value = draft;
           this.renderFoot();
         }),
@@ -615,7 +616,7 @@ export class Spotlight {
     if (event.type === "done" && this.queuedRequests.length) {
       const next = this.queuedRequests.shift()!;
       const draft = this.input.value;
-      this.ask(next, false);
+      this.ask(next.message, false, false, next.thread);
       this.input.value = draft;
       if (this.opened) this.renderFoot();
       return true;

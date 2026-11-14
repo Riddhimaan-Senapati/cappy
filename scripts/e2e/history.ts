@@ -13,9 +13,15 @@ await runE2E("history", async ({ browser }) => {
   await panel.locator("textarea").fill("remvoe clickbait");
   await panel.getByRole("button", { name: "remove clickbait", exact: true }).click();
   await panel.getByText("Request history", { exact: true }).waitFor();
-  assert.equal(await panel.locator("textarea").inputValue(), "remvoe clickbait");
+  assert.equal(await panel.locator("textarea").inputValue(), "");
   await panel.getByRole("button", { name: "Use request again" }).click();
   assert.equal(await panel.locator("textarea").inputValue(), "remove clickbait");
-  await panel.locator("textarea").fill("remove clickbait only here");
-  assert.equal(await panel.locator("textarea").inputValue(), "remove clickbait only here");
+  const followUp = "remove clickbait only here";
+  await sendChat(panel, demo, followUp);
+  await waitFor("the follow-up saved in the original session", () => panel.evaluate(async (message) => {
+    const { requestSessions } = await chrome.storage.local.get("requestSessions");
+    return Array.isArray(requestSessions) && requestSessions.some((session) =>
+      session.message === message && session.thread === "remove clickbait" && session.outcome === "done",
+    );
+  }, followUp));
 });
