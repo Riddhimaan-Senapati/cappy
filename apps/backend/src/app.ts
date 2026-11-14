@@ -14,7 +14,7 @@ import {
 } from "@browser-agent/shared";
 import type { z } from "zod";
 import type { Adapter } from "./adapter";
-import { BLOCKED_ADAPTER_ERROR, guardAdaptResponse } from "./guard";
+import { BLOCKED_ADAPTER_ERROR, guardAdaptResponse, guardSnapshotTargets } from "./guard";
 import { injectionGate } from "./injection-guard";
 import type { LlmClient } from "./llm";
 import type { Requester } from "./requester";
@@ -62,7 +62,7 @@ export function createApp(deps: AppDeps) {
     } catch {
       return c.json(BLOCKED_ADAPTER_ERROR, 502);
     }
-    return c.json(guardAdaptResponse(raw, new URL(req.url).hostname));
+    return c.json(guardSnapshotTargets(guardAdaptResponse(raw, new URL(req.url).hostname), req.outline.elements));
   });
 
   app.post(REQUEST_PATH, async (c) => {
@@ -82,7 +82,7 @@ export function createApp(deps: AppDeps) {
     } catch {
       return c.json(BLOCKED_ADAPTER_ERROR, 502);
     }
-    return c.json(guardAdaptResponse(raw, new URL(req.url).hostname));
+    return c.json(guardSnapshotTargets(guardAdaptResponse(raw, new URL(req.url).hostname), req.outline.elements));
   });
 
   app.post(VERIFY_PATH, async (c) => {

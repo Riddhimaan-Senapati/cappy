@@ -4,7 +4,7 @@ import type { BlockOf } from "@browser-agent/shared";
 import { applyFormFixer } from "./form-fixer";
 
 beforeAll(() => {
-  GlobalRegistrator.register();
+  if (!globalThis.document) GlobalRegistrator.register();
 });
 
 beforeEach(() => {
