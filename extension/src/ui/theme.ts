@@ -57,6 +57,7 @@ export const SETTINGS_CSS = `
 .s-on { font-size: 11.5px; font-weight: 600; color: var(--good); }
 .s-active { border-color: rgba(74, 222, 128, 0.22); }
 .s-error { color: var(--bad) !important; }
+.s-seg4 { grid-template-columns: repeat(4, 1fr); }
 .s-note { margin: 2px 4px 0; color: var(--faint); font-size: 11.5px; }
 .s-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .s-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 4px 4px 10px; border-radius: 999px; background: rgba(139, 155, 255, 0.14); color: #dfe3ff; animation: s-pop 0.3s var(--spring); }

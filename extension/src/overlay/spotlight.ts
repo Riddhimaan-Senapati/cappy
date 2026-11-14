@@ -265,6 +265,20 @@ export class Spotlight {
     const state = this.cache;
     return [
       { id: "commands", icon: "bookmark", title: "Saved commands", hint: "→", kind: "command", section: "Commands", keywords: "shortcuts presets saved favorites", run: () => this.setView("commands") },
+      {
+        id: "camera",
+        icon: "eye",
+        title: state?.camera.enabled ? "Turn off camera control" : "Turn on camera control",
+        hint: "gestures",
+        kind: "command",
+        section: "Commands",
+        keywords: "camera gestures hands head pointer webcam mediapipe",
+        run: async () => {
+          const current = (await load()).camera;
+          await save({ camera: { ...current, enabled: !current.enabled } });
+          this.hide();
+        },
+      },
       { id: "history", icon: "history", title: "Change history", hint: "→", kind: "command", section: "Commands", keywords: "changes log toggle before after compare", run: () => this.setView("history") },
       { id: "settings", icon: "settings", title: "Settings", kind: "command", section: "Commands", keywords: "preferences profile model options", run: () => this.setView("settings") },
       ...(changes.length ? [{ id: "undo-all", icon: "undo" as IconName, title: "Undo all changes on this page", kind: "command" as const, section: "Commands", keywords: "revert reset", run: async () => (await this.deps.revertAll(), this.hide()) }] : []),
