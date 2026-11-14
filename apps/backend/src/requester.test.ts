@@ -1,21 +1,25 @@
 import { describe, expect, test } from "bun:test";
 import { Profile, RequestBody, SnapshotOp } from "@browser-agent/shared";
-import { stubRequester } from "./requester";
+import { buildRequestPrompt, clockRangeFor, scheduleFor, stubRequester } from "./requester";
 
 const profile = Profile.parse({ version: 0, summary: "", needs: [] });
 
-type Group = { selector: string; count: number; samples: string[] };
+type Group = { selector: string; count: number; samples: string[]; label?: string };
+
+const NOV_14 = { iso: "2026-11-14T10:00:00-05:00", timeZone: "America/New_York" };
 
 function body(
   request: string,
   elements?: Array<{ id: string; tag: string; role?: string; text: string }>,
   groups?: Group[],
+  clientTime: { iso: string; timeZone: string } | undefined = NOV_14,
 ) {
   return RequestBody.parse({
     url: "https://example.com/watch",
     outline: { title: "Feed", headings: [], forms: 0, images: 0, videos: 0, canvases: 0, elements, groups },
     profile,
     request,
+    clientTime,
   });
 }
 
@@ -79,10 +83,10 @@ describe("stub requester content filters", () => {
     ]);
   });
 
-  test("with no keyword match the largest group is used", async () => {
+  test("with no group mentioning the keyword the filter omits itemSelector", async () => {
     const res = await stubRequester(body("hide crypto", undefined, FEED));
     expect(res.kind === "adaptation" && res.adaptation.filters).toEqual([
-      { itemSelector: "ytd-rich-item-renderer", keywords: ["crypto", "cryptos"], action: "hide" },
+      { keywords: ["crypto", "cryptos"], action: "hide" },
     ]);
   });
 
@@ -97,5 +101,116 @@ describe("stub requester content filters", () => {
     expect(hide.kind === "adaptation" && hide.adaptation.ops).toBeDefined();
     const invert = await stubRequester(body("invert this page", undefined, FEED));
     expect(invert.kind === "adaptation" && invert.adaptation.css).toContain("invert(1)");
+  });
+});
+
+describe("stub requester schedules", () => {
+  const filterOf = async (request: string, clientTime = NOV_14) => {
+    const res = await stubRequester(body(request, undefined, FEED, clientTime));
+    return res.kind === "adaptation" ? res.adaptation.filters?.[0] : undefined;
+  };
+
+  test("a clock range with weekdays becomes a 9 to 5 weekday schedule", async () => {
+    expect(await filterOf("hide podcasts 9 to 5 on weekdays")).toEqual({
+      itemSelector: "ytd-rich-item-renderer",
+      keywords: ["podcasts", "podcast"],
+      action: "hide",
+      schedule: { start: "09:00", end: "17:00", days: ["mon", "tue", "wed", "thu", "fri"] },
+    });
+  });
+
+  test("clock ranges with am and pm and minutes", () => {
+    expect(clockRangeFor("9:00 am to 5:00 pm")).toEqual({ start: "09:00", end: "17:00" });
+    expect(clockRangeFor("9 - 5")).toEqual({ start: "09:00", end: "17:00" });
+    expect(clockRangeFor("10 pm to 6 am")).toEqual({ start: "22:00", end: "06:00" });
+    expect(clockRangeFor("hide posts about 2026-11-05")).toBeUndefined();
+  });
+
+  test("weekends becomes sat and sun", async () => {
+    const f = await filterOf("hide sports on weekends");
+    expect(f?.schedule).toEqual({ days: ["sat", "sun"] });
+  });
+
+  test("until a date without a year uses clientTime's year", async () => {
+    const f = await filterOf("hide reels until December 15");
+    expect(f?.schedule).toEqual({ until: "2026-12-15" });
+  });
+
+  test("until a date that already passed rolls to next year", async () => {
+    const f = await filterOf("hide reels until October 3");
+    expect(f?.schedule).toEqual({ until: "2027-10-03" });
+  });
+
+  test("from and to dates become an inclusive range", async () => {
+    const f = await filterOf("hide sports news from Nov 20 to Dec 5");
+    expect(f?.keywords).toEqual(["sports", "sport"]);
+    expect(f?.schedule).toEqual({ from: "2026-11-20", until: "2026-12-05" });
+  });
+
+  test("a range that crosses the new year ends in the next year", async () => {
+    const f = await filterOf("hide sports news from Dec 20 to Jan 5", { iso: "2026-12-01T09:00:00Z", timeZone: "UTC" });
+    expect(f?.schedule).toEqual({ from: "2026-12-20", until: "2027-01-05" });
+  });
+
+  test("everywhere or on every site sets everywhere", async () => {
+    expect((await filterOf("remove promoted posts everywhere"))?.everywhere).toBe(true);
+    expect((await filterOf("hide promoted posts on every site"))?.everywhere).toBe(true);
+    expect((await filterOf("hide podcasts 9 to 5"))?.everywhere).toBeUndefined();
+  });
+
+  test("a promoted-posts rule with no matching group keeps the keyword and drops the selector", async () => {
+    const res = await stubRequester(body("remove promoted posts everywhere", undefined, FEED));
+    expect(res.kind === "adaptation" && res.adaptation.filters).toEqual([
+      { keywords: ["promoted", "promoteds"], action: "hide", everywhere: true },
+    ]);
+  });
+
+  test("without clientTime the year comes from the server clock", async () => {
+    const f = await stubRequester(body("hide shorts until December 15", undefined, FEED, undefined));
+    const until = f.kind === "adaptation" ? f.adaptation.filters?.[0]?.schedule?.until : undefined;
+    expect(until).toMatch(/^\d{4}-12-15$/);
+    expect(Number(until?.slice(0, 4))).toBeGreaterThanOrEqual(new Date().getFullYear());
+  });
+
+  test("an impossible date is ignored", () => {
+    expect(scheduleFor("until February 30", NOV_14)).toBeUndefined();
+  });
+});
+
+describe("request prompt", () => {
+  test("client time, labelled groups and schedule rules are in the prompt", () => {
+    const prompt = buildRequestPrompt(
+      body("hide podcasts 9 to 5 on weekdays", undefined, [
+        { selector: "ytd-rich-item-renderer", count: 24, samples: ["Huberman Lab Podcast"] },
+      ]),
+    );
+    expect(prompt).toContain("Current local time: 2026-11-14T10:00:00-05:00 (America/New_York)");
+    expect(prompt).toContain("For time-limited requests set filter.schedule");
+    expect(prompt).toContain("Set everywhere: true only if the user says everywhere / on every site.");
+    expect(prompt).toContain("you may omit itemSelector");
+    expect(prompt).toContain('ytd-rich-item-renderer ×24: "Huberman Lab Podcast"');
+  });
+
+  test("group labels appear in brackets", () => {
+    const prompt = buildRequestPrompt(
+      body("hide reels", [{ id: "n1", tag: "a", text: "Reel" }], [
+        { selector: 'a[href*="/reel/"]', count: 12, samples: ["Reel"], label: "Reel" },
+      ]),
+    );
+    expect(prompt).toContain('a[href*="/reel/"] ×12 [Reel]: "Reel"');
+  });
+
+  test("a retry note is repeated as a reason to choose again", () => {
+    const retry = RequestBody.parse({
+      url: "https://example.com/watch",
+      outline: { title: "Feed", headings: [], forms: 0, images: 0, videos: 0, canvases: 0 },
+      profile,
+      request: "hide podcasts",
+      retryNote: "no item matched the word podcast",
+    });
+    expect(buildRequestPrompt(retry)).toContain(
+      "Your previous filter matched nothing on this page: no item matched the word podcast. Choose a different group or keywords.",
+    );
+    expect(buildRequestPrompt(body("hide podcasts"))).not.toContain("Your previous filter matched nothing");
   });
 });
