@@ -52,7 +52,12 @@ async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
 // An earlier version made the toolbar icon open the side panel, and Chrome persists that choice.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => undefined);
 
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "adapt-element" && tab?.id) void sendToTab(tab.id, { kind: "targetContextElement" }).catch(() => undefined);
+});
+
 chrome.runtime.onInstalled.addListener(async () => {
+  chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Adaptive Agent", contexts: ["all"] }, () => void chrome.runtime.lastError);
   for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {
     if (tab.id) void injectContent(tab.id).catch(() => undefined);
   }
@@ -79,7 +84,7 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
   switch (request.kind) {
     case "runChat":
-      if (sender.tab) void agent.startRun(sender.tab, "chat", request.message, request.fresh);
+      if (sender.tab) void agent.startRun(sender.tab, "chat", request.message, request.fresh, undefined, undefined, request.target);
       break;
     case "pageReady":
       if (sender.tab) {

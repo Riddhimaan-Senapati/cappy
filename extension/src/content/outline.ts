@@ -103,7 +103,7 @@ export function readPage(): PageOutline {
   };
 }
 
-const INSPECT_STYLES = ["display", "position", "color", "background-color", "font-size", "font-family", "line-height", "filter", "z-index", "opacity", "width", "height"];
+const INSPECT_STYLES = ["display", "position", "color", "background-color", "font-size", "font-weight", "font-family", "line-height", "letter-spacing", "text-align", "padding", "margin", "border", "border-radius", "filter", "z-index", "opacity", "width", "height"];
 const INSPECT_ATTRS = /^(id|class|role|aria-.*|alt|placeholder|name|type|href|for|title|tabindex)$/;
 
 export function listItems(selector: string, keySelector: string | null, limit = 120) {

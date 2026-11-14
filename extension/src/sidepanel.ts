@@ -82,6 +82,9 @@ function onEvent(event: UiEvent) {
     case "blocked":
       run.steps.append(h("li", "bad", `Blocked: ${event.reason}`));
       break;
+    case "options":
+      run.steps.append(h("li", "", `Offered: ${event.options.map((option) => option.label).join(" / ")}`));
+      break;
     case "queued":
       run.tag.textContent = "queued";
       break;

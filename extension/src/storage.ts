@@ -16,6 +16,15 @@ export interface SavedCommand {
   createdAt: number;
 }
 
+export interface CameraSettings {
+  enabled: boolean;
+  handScroll: boolean;
+  headScroll: boolean;
+  pointer: boolean;
+  swipeNav?: boolean;
+  dwellMs: number;
+}
+
 export interface StoredState {
   profile: string[];
   history: ChatTurn[];
@@ -23,6 +32,7 @@ export interface StoredState {
   siteChanges: Record<string, ActiveChange[]>;
   recipes: Record<string, Recipe>;
   commands: SavedCommand[];
+  camera: CameraSettings;
   paused: boolean;
   proactive: boolean;
   floatingButton: boolean;
@@ -39,6 +49,7 @@ export const DEFAULTS: StoredState = {
   siteChanges: {},
   recipes: {},
   commands: [],
+  camera: { enabled: false, handScroll: true, headScroll: false, pointer: true, swipeNav: true, dwellMs: 0 },
   paused: false,
   proactive: true,
   floatingButton: true,

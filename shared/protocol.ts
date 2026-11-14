@@ -4,12 +4,25 @@ export type Trigger = "chat" | "page_load";
 export type Tier = "fast" | "frontier";
 export type Routing = "auto" | Tier;
 
+export interface TargetElement {
+  selector: string;
+  label: string;
+  text: string;
+  styles?: Record<string, string>;
+}
+
+export interface ChoiceOption {
+  label: string;
+  request: string;
+}
+
 export interface RunRequest {
   type: "run";
   runId: string;
   trigger: Trigger;
   message: string;
   provider?: string;
+  target?: TargetElement;
   routing: Routing;
   models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];
@@ -77,6 +90,7 @@ export type AgentEvent =
   | { type: "profile"; runId: string; lines: string[] }
   | { type: "warning"; runId: string; text: string }
   | { type: "blocked"; runId: string; reason: string }
+  | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
   | { type: "done"; runId: string; reply: string }
   | { type: "error"; runId: string; message: string };
 
