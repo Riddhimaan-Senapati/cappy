@@ -7,7 +7,7 @@
     "dev": "wxt",
     "build": "wxt build",
     "typecheck": "tsc --noEmit",
-    "postinstall": "wxt prepare"
+    "postinstall": "bun ../../scripts/fetch-mediapipe.ts && wxt prepare"
   },
   "dependencies": {
     "@browser-agent/blocks": "workspace:*",

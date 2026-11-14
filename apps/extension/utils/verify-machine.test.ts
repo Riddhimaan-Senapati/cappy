@@ -14,9 +14,14 @@ describe("verify machine", () => {
     expect(isTerminal(s)).toBe(true);
   });
 
-  test("no_change on the first check retries, then improved on the retry verifies", () => {
+  test("no_change on the first check keeps the adaptation", () => {
+    const s = next(next(next(proposed, { type: "applied" }), { type: "verify_started" }), { type: "verdict", verdict: "no_change" });
+    expect(s).toEqual({ tag: "verified", attempt: 1 });
+  });
+
+  test("worse on the first check retries, then improved on the retry verifies", () => {
     let s = next(next(proposed, { type: "applied" }), { type: "verify_started" });
-    s = next(s, { type: "verdict", verdict: "no_change" });
+    s = next(s, { type: "verdict", verdict: "worse" });
     expect(s).toEqual({ tag: "retrying" });
     s = next(s, { type: "retry_done" });
     expect(s).toEqual({ tag: "applied", attempt: 2 });
@@ -36,16 +41,16 @@ describe("verify machine", () => {
     expect(isTerminal(s)).toBe(true);
   });
 
-  test("no_change on the retry rolls back", () => {
+  test("no_change on the retry keeps the adaptation", () => {
     let s = next(next(proposed, { type: "applied" }), { type: "verify_started" });
     s = next(next(next(s, { type: "verdict", verdict: "worse" }), { type: "retry_done" }), { type: "verify_started" });
     s = next(s, { type: "verdict", verdict: "no_change" });
-    expect(s).toEqual({ tag: "rolling_back" });
+    expect(s).toEqual({ tag: "verified", attempt: 2 });
   });
 
   test("a retry that cannot be re-applied rolls back without verifying again", () => {
     let s = next(next(proposed, { type: "applied" }), { type: "verify_started" });
-    s = next(s, { type: "verdict", verdict: "no_change" });
+    s = next(s, { type: "verdict", verdict: "worse" });
     s = next(s, { type: "rollback_done" });
     expect(s).toEqual({ tag: "rolled_back" });
   });

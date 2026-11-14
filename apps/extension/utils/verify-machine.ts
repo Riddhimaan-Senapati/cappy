@@ -27,7 +27,8 @@ export function next(state: VerifyState, event: VerifyEvent): VerifyState {
       break;
     case "verifying":
       if (event.type === "verdict") {
-        if (event.verdict === "improved") return { tag: "verified", attempt: state.attempt };
+        // Text and color changes often leave issue counts flat, so only a page that got worse is retried or rolled back.
+        if (event.verdict !== "worse") return { tag: "verified", attempt: state.attempt };
         if (state.attempt === 1) return { tag: "retrying" };
         return { tag: "rolling_back" };
       }

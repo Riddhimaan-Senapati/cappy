@@ -227,3 +227,6 @@ node_modules/
 .env
 .env.*
 !.env.example
+
+# Fetched by scripts/fetch-mediapipe.ts
+apps/extension/public/mediapipe/
