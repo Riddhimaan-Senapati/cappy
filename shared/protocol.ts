@@ -31,6 +31,7 @@ export interface ApplyOutcome {
   matched: Record<string, number>;
   before: PageStats;
   after: PageStats;
+  note?: string;
 }
 
 export interface TabTools {

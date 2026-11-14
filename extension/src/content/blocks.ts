@@ -1,5 +1,6 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
 import { OWN_ATTR, textElements } from "./dom.js";
+import { applyDarkMode } from "./dark-mode.js";
 
 type Undo = () => void;
 type Matrix3 = [number, number, number][];
@@ -7,6 +8,7 @@ type Matrix3 = [number, number, number][];
 export interface LiveBlock {
   undo: Undo;
   reapply?: (roots: Element[]) => void;
+  note?: Promise<string>;
 }
 
 // Machado et al. 2009 simulation matrices at full severity.
@@ -157,7 +159,10 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return textScale(block.scale);
     case "stopMotion":
       return stopMotion();
-    case "darkMode":
+    case "darkMode": {
+      const dark = applyDarkMode(block);
+      return { undo: dark.undo, note: dark.note };
+    }
     case "contentFilter":
       throw new Error(`block ${block.name} is not implemented yet`);
   }
