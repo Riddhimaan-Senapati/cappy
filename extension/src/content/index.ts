@@ -81,7 +81,7 @@ function pointed(): PointedCandidate<TargetElement> | null {
 async function selectByGesture(element: Element) {
   selectTarget(element);
   const { camera: settings } = await load();
-  if (settings.speakAfterSelect !== false) await ensureOverlay().spotlight.startVoice().catch(reportExtensionError);
+  if (settings.speakAfterSelect !== false) await ensureOverlay().spotlight.startVoice({ hold: true }).catch(reportExtensionError);
 }
 
 let tornDown = false;
@@ -122,6 +122,7 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
     notify: (text) => ensureOverlay().showToast(text, []),
     turnOff: () => void load().then((state) => save({ camera: { ...state.camera, enabled: false } })),
     select: (element) => void selectByGesture(element),
+    release: () => overlay?.spotlight.finishVoice(),
     hasSelection: () => Boolean(targetElement) || picker.isActive,
     cancel: () => {
       const hadSomething = Boolean(targetElement) || Boolean(overlay?.spotlight.isOpen()) || picker.isActive;

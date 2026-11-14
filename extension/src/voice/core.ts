@@ -8,6 +8,8 @@ export interface VoiceState {
 export type VoiceEvent =
   | { type: "listening" }
   | { type: "interim"; text: string }
+  | { type: "pause"; ms: number }
+  | { type: "resume" }
   | { type: "final"; text: string }
   | { type: "error"; error: string }
   | { type: "ended" };
@@ -36,6 +38,8 @@ export function reduceVoice(state: VoiceState, input: VoiceInput): VoiceState {
       return state.phase === "error" ? state : VOICE_IDLE;
     case "interim":
     case "final":
+    case "pause":
+    case "resume":
       return state;
   }
 }
@@ -50,7 +54,11 @@ export function parseVoiceEvent(value: unknown): VoiceEvent | null {
   switch (record.type) {
     case "listening":
     case "ended":
+    case "resume":
       return { type: record.type };
+    case "pause":
+      if (typeof record.ms !== "number" || !Number.isFinite(record.ms) || record.ms < 0 || record.ms > 10_000) return null;
+      return { type: "pause", ms: record.ms };
     case "interim":
     case "final":
       if (typeof record.text !== "string") return null;

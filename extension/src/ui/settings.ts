@@ -101,7 +101,7 @@ function voiceSection(state: StoredState): Node {
       toggle("Send after speaking", "Off leaves your words in the box to edit first.", state.voiceAutoSend, (on) => save({ voiceAutoSend: on })),
       voiceLanguage(state),
       h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Chrome asks once. Allow it in the tab that opens.")]), enable]),
-      h("div", "s-note", "Press Alt+Shift+M (Option+Shift+M on Mac) on a page to speak. With the bar closed, point at something with the mouse or the camera pointer and say what to change, like \"make this red\". Change the shortcut under Shortcuts."),
+      h("div", "s-note", "Press Alt+Shift+M (Option+Shift+M on Mac) on a page to speak. With the bar closed, point at something with the mouse or the camera pointer and say what to change, like \"make this red\". It sends after a short pause (a ring shows it is about to), when you say \"done\", or after 15 seconds. Keep talking to cancel the pause. Change the shortcut under Shortcuts."),
     ],
   );
 }
@@ -116,7 +116,7 @@ function cameraSection(state: StoredState): Node {
       toggle("Hand scrolling", "Open palm high to scroll up, low to scroll down.", camera.handScroll, (on) => set({ handScroll: on })),
       toggle("Head scrolling", "Tilt your head down or up to scroll.", camera.headScroll, (on) => set({ headScroll: on })),
       toggle("Swipe to go back", "Swipe an open palm sideways for back or forward.", camera.swipeNav !== false, (on) => set({ swipeNav: on })),
-      toggle("Speak after selecting", "Pinch and hold on something, then say what to change, like \"make this red\".", camera.speakAfterSelect !== false, (on) => set({ speakAfterSelect: on })),
+      toggle("Speak after selecting", "Pinch and hold on something and keep holding while you say what to change, like \"make this red\". Let go to send.", camera.speakAfterSelect !== false, (on) => set({ speakAfterSelect: on })),
     );
     const options: Array<[number, string]> = [[0, "Off"], [800, "0.8s"], [1200, "1.2s"], [2000, "2s"]];
     const segments = options.map(([value, label]) => {

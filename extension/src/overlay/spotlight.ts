@@ -7,7 +7,7 @@ import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { deleteRequest, findRequestSessions, load, save, suggestRequests, type SavedCommand, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
-import { paintMic, liveRegion, micButton } from "../voice/button.js";
+import { paintCountdown, paintMic, liveRegion, micButton } from "../voice/button.js";
 import { VoiceController } from "../voice/controller.js";
 import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
 import { chooseTarget, type PointedCandidate } from "../voice/point.js";
@@ -129,13 +129,15 @@ export class Spotlight {
     onState: (state) => this.onVoiceState(state),
     onInterim: (text) => this.onVoiceInterim(text),
     onFinal: (text) => this.onVoiceFinal(text),
+    onCountdown: (ms) => this.onCountdown(ms),
   });
+  private pointHeard: { text: string; label?: string } = { text: "" };
 
   constructor(
     private shadow: ShadowRoot,
     private deps: SpotlightDeps,
     private onToggle: (open: boolean) => void,
-    private onPointStatus: (status: { text: string; label?: string } | null) => void = () => undefined,
+    private onPointStatus: (status: { text: string; label?: string; countdown?: number | null } | null) => void = () => undefined,
   ) {
     this.bar.setAttribute("role", "dialog");
     this.bar.setAttribute("aria-label", "Adaptive agent");
@@ -1272,21 +1274,26 @@ export class Spotlight {
     return true;
   }
 
-  async startVoice() {
+  // hold: push-to-talk from a pinch hold, so pauses keep listening until finishVoice() on release.
+  async startVoice(options: { hold?: boolean } = {}) {
     if (!this.opened) await this.show();
     if (this.input.readOnly) this.setView("list");
     window.clearTimeout(this.closeTimer);
     this.input.focus({ preventScroll: true });
-    if (!this.voice.active) this.toggleVoice();
+    if (!this.voice.active) this.toggleVoice(options);
   }
 
-  private toggleVoice() {
+  finishVoice() {
+    if (this.voice.active) this.voice.stop();
+  }
+
+  private toggleVoice(options: { hold?: boolean } = {}) {
     if (this.voice.active) {
       this.voice.stop();
       return;
     }
     this.voiceBase = this.input.value;
-    void this.voice.start();
+    void this.voice.start(options);
   }
 
   handleVoice(event: VoiceEvent) {
@@ -1304,6 +1311,7 @@ export class Spotlight {
     window.clearTimeout(this.pointTimer);
     this.pointMode = true;
     this.pointStart = null;
+    this.pointHeard = { text: "" };
     this.voiceBase = "";
     this.onPointStatus({ text: "" });
     await this.voice.start();
@@ -1319,7 +1327,15 @@ export class Spotlight {
   private onVoiceInterim(text: string) {
     if (!this.pointMode) return void (this.input.value = joinVoiceText(this.voiceBase, text));
     this.pointStart ??= this.deps.pointed();
-    this.onPointStatus({ text, label: (this.pointStart ?? this.deps.pointed())?.value.label });
+    this.pointHeard = { text, label: (this.pointStart ?? this.deps.pointed())?.value.label };
+    this.onPointStatus(this.pointHeard);
+  }
+
+  // Shown on the mic and in the Listening pill while the final pause runs; speaking again clears it.
+  private onCountdown(ms: number | null) {
+    paintCountdown(this.mic, ms);
+    if (this.pointMode) this.onPointStatus({ ...this.pointHeard, countdown: ms });
+    if (ms !== null) this.live.textContent = "Sending after this pause. Keep talking to continue.";
   }
 
   private onVoiceState(state: VoiceState) {

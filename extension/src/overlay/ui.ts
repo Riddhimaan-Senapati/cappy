@@ -2,6 +2,7 @@ import type { UiEvent } from "../messages.js";
 import type { MemoryScope, Suggestion } from "../../../shared/protocol.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
+import { countdownRing, paintCountdown } from "../voice/button.js";
 import { adoptStyles, h, icon } from "../ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "../ui/theme.js";
 import { VOICE_CSS } from "../voice/styles.js";
@@ -55,7 +56,7 @@ export class OverlayUi {
   private pointPill: HTMLElement | null = null;
 
   // Listening without the bar: a small pill shows what was heard and what the user is pointing at.
-  private showPointStatus(status: { text: string; label?: string } | null) {
+  private showPointStatus(status: { text: string; label?: string; countdown?: number | null } | null) {
     if (!status) {
       this.pointPill?.remove();
       this.pointPill = null;
@@ -69,7 +70,10 @@ export class OverlayUi {
       this.bringToFront();
     }
     const heard = status.text ? h("span", "heard", status.text) : h("span", "hint", "Listening. Point at something and say what to change.");
-    this.pointPill.replaceChildren(h("span", "dot"), heard, ...(status.label ? [h("span", "aim", "", [icon("target", 12), document.createTextNode(status.label)])] : []));
+    const dot = h("span", "dot", "", [countdownRing()]);
+    paintCountdown(dot, status.countdown ?? null);
+    const sending = status.countdown != null ? [h("span", "hint", "Sending")] : [];
+    this.pointPill.replaceChildren(dot, heard, ...(status.label ? [h("span", "aim", "", [icon("target", 12), document.createTextNode(status.label)])] : []), ...sending);
   }
 
   bringToFront() {

@@ -73,7 +73,7 @@ export type BackgroundRequest =
   | { kind: "stopRun" }
   | { kind: "suggest"; page: PageOutline; applied: string[]; friction?: FrictionCount[] }
   | { kind: "dequeue"; runId: string }
-  | { kind: "voiceStart"; lang: string }
+  | { kind: "voiceStart"; lang: string; hold?: boolean }
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }
   | { kind: "voicePermissionGranted" }

@@ -7,6 +7,7 @@ type Owner = { tabId: number } | { panel: true };
 const OFFSCREEN_PATH = "offscreen.html";
 let owner: Owner | null = null;
 let language = "";
+let hold = false;
 let setupTab: number | undefined;
 let permissionRetried = false;
 let openingSetup = false;
@@ -50,7 +51,7 @@ async function startRecognition() {
   try {
     await ensureOffscreen();
     const { voiceProvider, serverUrl } = await load();
-    if (owner) await chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: language, voiceProvider, serverUrl });
+    if (owner) await chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: language, hold, voiceProvider, serverUrl });
   } catch {
     deliver({ type: "error", error: "start-failed" });
     owner = null;
@@ -92,6 +93,7 @@ export function handleVoiceRequest(request: BackgroundRequest, sender: chrome.ru
         ? { tabId: sender.tab.id } : { panel: true };
       permissionRetried = false;
       language = request.lang;
+      hold = request.hold === true;
       respond(true);
       void startRecognition();
       return true;

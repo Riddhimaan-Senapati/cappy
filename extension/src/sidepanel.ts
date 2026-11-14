@@ -1,7 +1,7 @@
 import type { ContentRequest, DebugPortMessage, DebugPortRequest, StatusInfo, TtsRequest, TtsStateMessage, UiEvent } from "./messages.js";
 import { adoptStyles, h, icon } from "./ui/dom.js";
 import { TOKENS } from "./ui/theme.js";
-import { paintMic, liveRegion, micButton } from "./voice/button.js";
+import { paintCountdown, paintMic, liveRegion, micButton } from "./voice/button.js";
 import { VoiceController } from "./voice/controller.js";
 import { joinVoiceText, parseVoiceEvent, voiceStatusText, type VoiceState } from "./voice/core.js";
 import { VOICE_CSS } from "./voice/styles.js";
@@ -145,6 +145,9 @@ document.body.append(
 
 let voiceBase = "";
 const voice = new VoiceController({
+  onCountdown(ms) {
+    paintCountdown(mic, ms);
+  },
   onState(state: VoiceState) {
     paintMic(mic, state);
     live.textContent = voiceStatusText(state);
