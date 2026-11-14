@@ -8,11 +8,18 @@ export interface Recipe {
   at: number;
 }
 
+export interface RequestSession {
+  message: string;
+  reply: string;
+  outcome: "done" | "error";
+}
+
 export interface StoredState {
   profile: string[];
   pendingMemory: string[];
   history: ChatTurn[];
   submittedRequests: string[];
+  requestSessions: RequestSession[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
   recipes: Record<string, Recipe>;
@@ -29,8 +36,9 @@ export interface StoredState {
   ttsRate: number;
   voiceAutoSend: boolean;
   voiceLang: string;
-  voiceProvider: "chrome" | "openai";
+  voiceProvider: "chrome" | "openai" | "gemini";
   openAIVoiceVerified: boolean;
+  geminiVoiceVerified: boolean;
 }
 
 export const DEFAULTS: StoredState = {
@@ -38,6 +46,7 @@ export const DEFAULTS: StoredState = {
   pendingMemory: [],
   history: [],
   submittedRequests: [],
+  requestSessions: [],
   globalChanges: [],
   siteChanges: {},
   recipes: {},
@@ -56,6 +65,7 @@ export const DEFAULTS: StoredState = {
   voiceLang: "",
   voiceProvider: "chrome",
   openAIVoiceVerified: false,
+  geminiVoiceVerified: false,
 };
 
 const MAX_RECIPES = 60;
@@ -63,7 +73,7 @@ const MAX_RECIPES = 60;
 export async function load(): Promise<StoredState> {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
   const state = { ...DEFAULTS, ...stored } as StoredState;
-  if (!state.openAIVoiceVerified) state.voiceProvider = "chrome";
+  if ((state.voiceProvider === "openai" && !state.openAIVoiceVerified) || (state.voiceProvider === "gemini" && !state.geminiVoiceVerified)) state.voiceProvider = "chrome";
   return state;
 }
 
@@ -79,28 +89,41 @@ function requestHistory(state: Pick<StoredState, "history" | "submittedRequests"
 
 let requestWrite: Promise<void> = Promise.resolve();
 
-export function recordSubmittedRequest(message: string): Promise<void> {
-  const write = requestWrite.then(async () => {
-    const state = await load();
-    await save({ submittedRequests: [...requestHistory(state), message] });
-  });
+function updateRequestHistory(update: (state: StoredState) => Partial<StoredState>) {
+  const write = requestWrite.then(async () => save(update(await load())));
   requestWrite = write.catch(() => undefined);
   return write;
+}
+
+export function recordSubmittedRequest(message: string) {
+  return updateRequestHistory((state) => ({ submittedRequests: [...requestHistory(state), message] }));
+}
+
+export function recordRequestSession(session: RequestSession) {
+  return updateRequestHistory((state) => {
+    if (!requestHistory(state).some((request) => normalizeRequest(request) === normalizeRequest(session.message))) return {};
+    return { requestSessions: [...state.requestSessions, session] };
+  });
+}
+
+export function findRequestSessions(state: StoredState, message: string): RequestSession[] {
+  const target = normalizeRequest(message);
+  const sessions = state.requestSessions.filter((session) => normalizeRequest(session.message) === target);
+  if (sessions.length) return sessions;
+  const index = state.history.findLastIndex((turn) => turn.role === "user" && normalizeRequest(turn.text) === target);
+  const next = state.history[index + 1];
+  return index >= 0 && next?.role === "assistant" ? [{ message, reply: next.text, outcome: "done" }] : [];
 }
 
 const normalizeRequest = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
 
 export function removeSubmittedRequest(message: string): Promise<void> {
   const target = normalizeRequest(message);
-  const write = requestWrite.then(async () => {
-    const state = await load();
-    await save({
-      submittedRequests: requestHistory(state).filter((request) => normalizeRequest(request) !== target),
-      history: state.history.filter((turn) => turn.role !== "user" || normalizeRequest(turn.text) !== target),
-    });
-  });
-  requestWrite = write.catch(() => undefined);
-  return write;
+  return updateRequestHistory((state) => ({
+    submittedRequests: requestHistory(state).filter((request) => normalizeRequest(request) !== target),
+    history: state.history.filter((turn) => turn.role !== "user" || normalizeRequest(turn.text) !== target),
+    requestSessions: state.requestSessions.filter((session) => normalizeRequest(session.message) !== target),
+  }));
 }
 
 export async function deleteRequest(message: string) {

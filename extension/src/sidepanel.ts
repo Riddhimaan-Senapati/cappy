@@ -5,7 +5,7 @@ import { paintMic, liveRegion, micButton } from "./voice/button.js";
 import { VoiceController } from "./voice/controller.js";
 import { joinVoiceText, parseVoiceEvent, voiceStatusText, type VoiceState } from "./voice/core.js";
 import { VOICE_CSS } from "./voice/styles.js";
-import { deleteRequest, load, suggestRequests, type StoredState } from "./storage.js";
+import { deleteRequest, findRequestSessions, load, suggestRequests, type StoredState } from "./storage.js";
 
 const CSS = `
 html, body { margin: 0; height: 100%; background: #121217; }
@@ -64,9 +64,7 @@ function renderPreviousRequests() {
     const button = h("button", "", message);
     button.type = "button";
     button.addEventListener("click", () => {
-      input.value = message;
-      input.focus();
-      renderPreviousRequests();
+      void openRequestHistory(message);
     });
     const remove = h("button", "delete-request", "", [icon("trash")]);
     remove.type = "button";
@@ -160,6 +158,29 @@ chrome.runtime.onMessage.addListener((message: { kind?: string; event?: unknown 
   const event = parseVoiceEvent(message.event);
   if (event) voice.receive(event);
 });
+
+let historyCard: HTMLElement | undefined;
+
+async function openRequestHistory(message: string) {
+  const sessions = findRequestSessions(await load(), message);
+  const retry = h("button", "", "Use request again");
+  retry.type = "button";
+  retry.addEventListener("click", () => {
+    input.value = message;
+    input.focus();
+    renderPreviousRequests();
+  });
+  historyCard?.remove();
+  historyCard = h("div", "run", "", [
+    h("div", "top", "", [h("span", "msg", message), h("span", "tag", "Request history")]),
+    ...sessions.map(({ reply, outcome }) => h("div", outcome === "error" ? "reply bad" : "reply", reply || "Done.")),
+    ...(sessions.length ? [] : [h("p", "", "No reply was saved for this request.")]),
+    retry,
+  ]);
+  historyCard.tabIndex = -1;
+  timeline.prepend(historyCard);
+  historyCard.focus();
+}
 
 const runs = new Map<string, { card: HTMLElement; steps: HTMLElement; tag: HTMLElement }>();
 

@@ -4,7 +4,7 @@ import type { Routing } from "../../../shared/protocol.js";
 import { SUGGESTIONS } from "../defaults.js";
 import { ROUTING_LABELS, type AppliedSummary, type UiEvent } from "../messages.js";
 import { acceptProposal, forgetLine, rejectProposal } from "../memory.js";
-import { deleteRequest, load, save, suggestRequests, type StoredState } from "../storage.js";
+import { deleteRequest, findRequestSessions, load, save, suggestRequests, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
 import { paintMic, liveRegion, micButton } from "../voice/button.js";
@@ -24,7 +24,7 @@ export interface SpotlightDeps {
   settings: SettingsContext;
 }
 
-type View = "list" | "run" | "settings";
+type View = "list" | "run" | "settings" | "history";
 
 interface Item {
   id: string;
@@ -77,6 +77,7 @@ export class Spotlight {
   private items: Item[] = [];
   private selected = 0;
   private queuedRequests: string[] = [];
+  private historyRequest = "";
   private run: RunState | null = null;
   private opened = false;
   private closeTimer: number | undefined;
@@ -185,20 +186,21 @@ export class Spotlight {
 
   private render() {
     this.layer.classList.toggle("running", this.view === "run");
-    this.input.readOnly = this.view === "settings";
-    this.mic.disabled = this.view === "settings";
+    this.input.readOnly = this.view === "settings" || this.view === "history";
+    this.mic.disabled = this.input.readOnly;
     this.input.placeholder = this.view === "settings" ? "Settings" : this.view === "run" ? "Refine, or ask for something else" : this.idlePlaceholder;
     this.orb.classList.toggle("work", this.working);
     this.renderTrail();
     if (this.view === "settings") this.renderSettingsView();
     else if (this.view === "run") this.renderRun();
+    else if (this.view === "history") this.renderHistory();
     else this.renderList();
     this.renderFoot();
     this.animateBody = false;
   }
 
   private renderTrail() {
-    if (this.view === "settings") {
+    if (this.view === "settings" || this.view === "history") {
       const back = h("button", "back", "", [icon("back", 14), document.createTextNode("Back")]);
       back.type = "button";
       back.addEventListener("click", () => this.setView("list"));
@@ -299,7 +301,7 @@ export class Spotlight {
         run: () => (this.deps.enableMicrophone(), this.hide()),
       },
       { id: "debug", icon: "bug", title: "Open debug panel", hint: "chat + tool log", kind: "command", section: "Commands", keywords: "developer console logs", run: () => (this.deps.openDebug(), this.hide()) },
-      { id: "clear-chat", icon: "text", title: "Clear chat", hint: "memory is kept", kind: "command", section: "Commands", keywords: "history reset conversation", run: async () => { await save({ history: [], submittedRequests: [] }); this.run = null; } },
+      { id: "clear-chat", icon: "text", title: "Clear chat", hint: "memory is kept", kind: "command", section: "Commands", keywords: "history reset conversation", run: async () => { await save({ history: [], submittedRequests: [], requestSessions: [] }); this.run = null; } },
     ];
 
     const tries: Item[] = SUGGESTIONS.map((text) => ({ id: `try:${text}`, icon: "sparkle", title: text, kind: "try", section: "Try asking", run: () => this.ask(text, false) }));
@@ -310,10 +312,10 @@ export class Spotlight {
       id: `previous:${text}`,
       icon: "text",
       title: text,
-      hint: "Previous request",
+      hint: "Open request history",
       kind: "previous",
       section: "",
-      run: () => this.complete(text),
+      run: () => this.openHistory(text),
     })) : [];
     const matched = [...undo, ...commands.filter((item) => item.id !== "model-cycle"), ...modelChoices].filter(matches);
     const lowered = q.toLowerCase();
@@ -389,10 +391,29 @@ export class Spotlight {
     if (this.opened && this.view === "list") this.renderList();
   }
 
-  private complete(text: string) {
-    this.input.value = text;
-    this.input.focus({ preventScroll: true });
-    this.onInput();
+  private async openHistory(message: string) {
+    this.cache = await load();
+    if (!this.opened) return;
+    this.historyRequest = message;
+    this.input.value = message;
+    this.setView("history");
+  }
+
+  private renderHistory() {
+    const sessions = this.cache ? findRequestSessions(this.cache, this.historyRequest) : [];
+    const retry = h("button", "link", "Use request again");
+    retry.type = "button";
+    retry.addEventListener("click", () => {
+      this.input.value = this.historyRequest;
+      this.setView("list");
+      this.input.focus({ preventScroll: true });
+    });
+    this.body.replaceChildren(
+      h("h3", "sec", "Request history"),
+      ...sessions.map(({ reply, outcome }) => h("div", `result ${outcome}`, reply || "Done.")),
+      ...(sessions.length ? [] : [h("p", "you", "No reply was saved for this request.")]),
+      retry,
+    );
   }
 
   ask(message: string, fresh: boolean, interrupt = false) {
@@ -407,6 +428,10 @@ export class Spotlight {
   private queueRequest() {
     const message = this.input.value.trim();
     if (!message) return;
+    if (!this.working) {
+      this.ask(message, false);
+      return;
+    }
     this.queuedRequests.push(message);
     this.input.value = "";
     this.onInput();
@@ -531,7 +556,7 @@ export class Spotlight {
     if (this.run?.tier && this.view === "run") nodes.push(h("span", `chip ${this.run.tier.tier}`, `${this.run.tier.tier} · ${this.run.tier.model}`));
     const queueWasOpen = this.foot.querySelector("details")?.open;
     const shortcuts = h("div", "queue-actions", "", nodes);
-    this.foot.replaceChildren(shortcuts, ...(this.view === "settings" ? [] : this.queueControls()));
+    this.foot.replaceChildren(shortcuts, ...(this.input.readOnly ? [] : this.queueControls()));
     const queue = this.foot.querySelector("details");
     if (queue) queue.open = queueWasOpen ?? true;
   }
@@ -569,6 +594,14 @@ export class Spotlight {
         run.result = { kind: "error", text: event.message, applied: [] };
         break;
     }
+    if (event.type === "done" && this.queuedRequests.length) {
+      const next = this.queuedRequests.shift()!;
+      const draft = this.input.value;
+      this.ask(next, false);
+      this.input.value = draft;
+      if (this.opened) this.renderFoot();
+      return true;
+    }
     if (this.opened) {
       this.render();
       if (run.result) {
@@ -586,7 +619,7 @@ export class Spotlight {
 
   async startVoice() {
     if (!this.opened) await this.show();
-    if (this.view === "settings") this.setView("list");
+    if (this.view === "settings" || this.view === "history") this.setView("list");
     window.clearTimeout(this.closeTimer);
     this.input.focus({ preventScroll: true });
     if (!this.voice.active) this.toggleVoice();
@@ -639,15 +672,15 @@ export class Spotlight {
         this.voice.stop();
         return true;
       }
-      if (this.view === "settings") this.setView("list");
+      if (this.view === "settings" || this.view === "history") this.setView("list");
       else this.hide();
       return true;
     }
-    if (this.view !== "settings" && key === "Enter" && (event.metaKey || event.ctrlKey)) {
+    if (!this.input.readOnly && key === "Enter" && (event.metaKey || event.ctrlKey)) {
       this.ask(this.input.value.trim(), false, true);
       return true;
     }
-    if (this.view !== "settings" && key === "Enter" && (event.altKey || (this.working && this.input.value.trim()))) {
+    if (!this.input.readOnly && key === "Enter" && (event.altKey || (this.working && this.input.value.trim()))) {
       this.queueRequest();
       return true;
     }

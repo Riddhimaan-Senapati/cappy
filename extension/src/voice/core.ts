@@ -83,6 +83,8 @@ export function voiceErrorText(error: string): string {
       return "The speech service could not be reached. Check your connection.";
     case "language-not-supported":
       return "Speech recognition does not support this language yet.";
+    case "gemini-audio":
+      return "Gemini transcription failed. Check the Gemini API key and local server.";
     case "openai-audio":
       return "OpenAI audio failed. Check the OpenAI API key and local server.";
     case "start-failed":

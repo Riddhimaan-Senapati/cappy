@@ -1,3 +1,4 @@
+import { load } from "../storage.js";
 import type { BackgroundRequest } from "../messages.js";
 import { parseVoiceEvent, type VoiceEvent } from "../voice/core.js";
 
@@ -48,7 +49,8 @@ async function openMicSetup() {
 async function startRecognition() {
   try {
     await ensureOffscreen();
-    if (owner) await chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: language });
+    const { voiceProvider, serverUrl } = await load();
+    if (owner) await chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: language, voiceProvider, serverUrl });
   } catch {
     deliver({ type: "error", error: "start-failed" });
     owner = null;

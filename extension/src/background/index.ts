@@ -1,6 +1,6 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
-import { load, recordSubmittedRequest, removeSubmittedRequest } from "../storage.js";
+import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
 import { acceptFriction, registerFriction } from "./friction.js";
@@ -9,6 +9,7 @@ import { registerTts } from "./tts.js";
 registerTts();
 registerFriction();
 
+const sessionRequests = new Map<string, string>();
 const debugPorts = new Set<chrome.runtime.Port>();
 
 function broadcast(message: DebugPortMessage) {
@@ -17,6 +18,15 @@ function broadcast(message: DebugPortMessage) {
 
 const agent = new AgentClient({
   event(tabId: number, event: UiEvent) {
+    if (event.type === "start" && event.trigger === "chat") sessionRequests.set(event.runId, event.message);
+    if (event.type === "done" || event.type === "error") {
+      const message = sessionRequests.get(event.runId);
+      sessionRequests.delete(event.runId);
+      if (message !== undefined) {
+        void recordRequestSession({ message, reply: event.type === "done" ? event.reply : event.message, outcome: event.type })
+          .catch(() => console.warn("Could not save request session history."));
+      }
+    }
     void chrome.tabs.sendMessage(tabId, { kind: "ui", event }).catch(() => undefined);
     broadcast({ type: "event", tabId, at: Date.now(), event });
   },
@@ -96,7 +106,7 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       break;
     case "verifyVoice":
       if (sender.id !== chrome.runtime.id || typeof request.key !== "string" || request.key.length > 4096) return false;
-      void requestAudio("verify", JSON.stringify(request.key ? { key: request.key } : {}), "application/json", AbortSignal.timeout(28_000))
+      void requestAudio("verify", JSON.stringify(request.key ? { key: request.key } : {}), "application/json", AbortSignal.timeout(28_000), request.provider)
         .then(() => sendResponse({ ok: true }), (error: Error) => sendResponse({
           ok: false,
           error: error instanceof TypeError ? "Could not reach the local audio server. Check that it is running." : error.message,

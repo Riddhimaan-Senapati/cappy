@@ -1,4 +1,3 @@
-import { load } from "../storage.js";
 import { requestAudio } from "../voice/audio-api.js";
 import type { VoiceEvent } from "../voice/core.js";
 
@@ -104,7 +103,7 @@ let recordingTimer: ReturnType<typeof setTimeout> | undefined;
 let playback: AbortController | undefined;
 let player: HTMLAudioElement | undefined;
 
-async function record() {
+async function record(provider: "openai" | "gemini", serverUrl: string) {
   let stream: MediaStream | undefined;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -121,11 +120,11 @@ async function record() {
       stream?.getTracks().forEach((track) => track.stop());
       if (recording !== recorder) return;
       try {
-        const response = await requestAudio("transcribe", new Blob(chunks, { type: "audio/webm" }), "audio/webm", AbortSignal.timeout(25_000));
+        const response = await requestAudio("transcribe", new Blob(chunks, { type: "audio/webm" }), "audio/webm", AbortSignal.timeout(25_000), provider, serverUrl);
         const { text } = await response.json() as { text: string };
         emit({ type: "final", text });
       } catch {
-        emit({ type: "error", error: "openai-audio" });
+        emit({ type: "error", error: provider === "gemini" ? "gemini-audio" : "openai-audio" });
       } finally {
         recording = undefined;
         emit({ type: "ended" });
@@ -156,17 +155,18 @@ function stopPlayback() {
   player?.pause();
 }
 
-async function playSpeech(text: string, rate: number) {
+async function playSpeech(text: string, rate: number, provider: "openai" | "gemini", serverUrl: string) {
   stopPlayback();
   const controller = new AbortController();
   playback = controller;
   let url: string | undefined;
   try {
-    const response = await requestAudio("speech", JSON.stringify({ text, rate }), "application/json", AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
+    const response = await requestAudio("speech", JSON.stringify({ text, rate }), "application/json", AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), provider, serverUrl);
     const blob = await response.blob();
     controller.signal.throwIfAborted();
     url = URL.createObjectURL(blob);
     const element = new Audio(url);
+    if (provider === "gemini") element.playbackRate = rate;
     player = element;
     await new Promise<void>((resolve, reject) => {
       controller.signal.addEventListener("abort", () => resolve(), { once: true });
@@ -183,16 +183,18 @@ async function playSpeech(text: string, rate: number) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string; text?: string; rate?: number }, _sender, respond) => {
+chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string; text?: string; rate?: number; provider?: "openai" | "gemini"; voiceProvider?: "chrome" | "openai" | "gemini"; serverUrl?: string }, _sender, respond) => {
   if (message?.target !== "offscreen") return;
   if (message.kind === "voiceStart") {
-    void load().then(async ({ voiceProvider }) => {
-      const permission = await navigator.permissions.query({ name: "microphone" }).catch(() => undefined);
-      if (permission && permission.state !== "granted") {
+    respond(true);
+    const voiceProvider = message.voiceProvider ?? "chrome";
+    void Promise.resolve().then(async () => {
+      const permission = await Promise.resolve().then(() => navigator.permissions.query({ name: "microphone" })).catch(() => undefined);
+      if (permission && permission.state !== "granted" && voiceProvider === "chrome") {
         emit({ type: "error", error: "microphone-setup" });
         return;
       }
-      await (voiceProvider === "openai" ? record() : start(message.lang ?? ""));
+      await (voiceProvider === "chrome" ? start(message.lang ?? "") : record(voiceProvider, message.serverUrl ?? ""));
     }).catch(() => {
       emit({ type: "error", error: "start-failed" });
       emit({ type: "ended" });
@@ -204,7 +206,7 @@ chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string;
   }
   if (message.kind === "speechStop") stopPlayback();
   if (message.kind === "speechPlay" && typeof message.text === "string") {
-    void playSpeech(message.text, message.rate ?? 1).then(() => respond(true), () => respond(false));
+    void playSpeech(message.text, message.rate ?? 1, message.provider ?? "openai", message.serverUrl ?? "").then(() => respond(true), () => respond(false));
     return true;
   }
 });

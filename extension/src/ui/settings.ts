@@ -116,6 +116,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let speechError = "";
   let voiceCheck = "";
   let checkingVoice = false;
+  let pendingVoice: "openai" | "gemini" | undefined;
 
   const paint = async () => {
     const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false })), loadVoices()]);
@@ -197,31 +198,36 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
 
     const voiceProvider = h("select", "s-select");
     voiceProvider.setAttribute("aria-label", "Voice provider");
-    for (const [id, label] of [["chrome", "Chrome"], ["openai", "OpenAI"]]) {
+    for (const [id, label] of [["chrome", "Chrome"], ["openai", "OpenAI"], ["gemini", "Gemini"]]) {
       const option = h("option", "", label);
       option.value = id;
       voiceProvider.append(option);
     }
-    const activeVoice = state.openAIVoiceVerified ? state.voiceProvider : "chrome";
+    const activeVoice = state.voiceProvider;
     voiceProvider.value = activeVoice;
-    const openAIOption = voiceProvider.options[1];
-    openAIOption.disabled = activeVoice !== "openai";
+    const provider = pendingVoice ?? (activeVoice === "gemini" ? "gemini" : "openai");
+    const label = provider === "gemini" ? "Gemini" : "OpenAI";
     voiceProvider.disabled = checkingVoice;
     voiceProvider.addEventListener("change", () => {
       if (voiceProvider.value === "chrome") {
+        pendingVoice = undefined;
         voiceCheck = "";
         void save({ voiceProvider: "chrome" });
+      } else if (voiceProvider.value === "gemini" || voiceProvider.value === "openai") {
+        pendingVoice = voiceProvider.value;
+        voiceCheck = "";
+        queue();
       }
     });
     const voiceKey = h("input");
     voiceKey.type = "password";
     voiceKey.autocomplete = "off";
-    voiceKey.placeholder = "OpenAI API key";
-    voiceKey.setAttribute("aria-label", "OpenAI voice API key");
+    voiceKey.placeholder = `${label} API key`;
+    voiceKey.setAttribute("aria-label", `${label} voice API key`);
     voiceKey.disabled = checkingVoice;
-    const keyHelp = h("small", "", "Add an OpenAI API key to enable OpenAI audio models. Leave blank if you already saved a key.");
-    const voiceKeyField = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Add an OpenAI API key"), keyHelp]), voiceKey]);
-    const verify = h("button", "s-btn", activeVoice === "openai" ? "Verify OpenAI audio again" : "Verify and enable OpenAI");
+    const keyHelp = h("small", "", `Add a ${label} API key to enable its audio models. Leave blank to use a saved key.`);
+    const voiceKeyField = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", `Add a ${label} API key`), keyHelp]), voiceKey]);
+    const verify = h("button", "s-btn", `Verify and enable ${label}`);
     verify.type = "button";
     verify.disabled = checkingVoice;
     verify.addEventListener("click", async () => {
@@ -232,12 +238,12 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       voiceCheck = "Checking speech and transcription with a short sample…";
       queue();
       try {
-        const result = await chrome.runtime.sendMessage({ kind: "verifyVoice", key } satisfies BackgroundRequest);
+        const result = await chrome.runtime.sendMessage({ kind: "verifyVoice", key, provider } satisfies BackgroundRequest);
         if (!result?.ok) throw new Error(result?.error ?? "Could not verify OpenAI audio.");
-        await save({ voiceProvider: "openai", openAIVoiceVerified: true });
-        voiceCheck = "OpenAI audio verified.";
+        await save(provider === "openai" ? { voiceProvider: provider, openAIVoiceVerified: true } : { voiceProvider: provider, geminiVoiceVerified: true });
+        pendingVoice = undefined;
+        voiceCheck = `${label} audio verified.`;
       } catch (error) {
-        await save({ voiceProvider: "chrome" });
         voiceCheck = error instanceof Error ? error.message : "Could not verify OpenAI audio.";
       } finally {
         checkingVoice = false;
@@ -245,7 +251,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       }
     });
     const voiceProviderRow = h("label", "s-row", "", [
-      h("div", "grow", "", [h("div", "", "Voice provider"), h("small", "", "OpenAI sends recorded audio and spoken text to its API. Verification uses a short sample and may incur API usage.")]),
+      h("div", "grow", "", [h("div", "", "Voice provider"), h("small", "", "OpenAI and Gemini process recorded audio and spoken text through their APIs. Verification uses a short sample and may incur API usage.")]),
       voiceProvider,
     ]);
     const verificationStatus = h("div", "s-note", voiceCheck);
