@@ -75,10 +75,17 @@ export const tools: AgentTool[] = [
         return { text: `REJECTED by safety layer: ${problem}. Rewrite the change within the rules.` };
       }
       session.progress(`Applying: ${change.summary}`);
-      const outcome = await session.callTab("apply_change", { change });
+      // Remember which selected element a change was made for, so later requests can tell changes apart.
+      const target = session.request.target;
+      let id = change.id;
+      // Reusing the id of a change on a different element would silently replace it, so give this one its own id.
+      const clash = target && session.request.active.find((active) => active.id === id && active.targetLabel && active.targetLabel !== target.label);
+      if (clash) id = `${id.slice(0, 36)}-${Math.random().toString(36).slice(2, 5)}`;
+      const annotated: Change & { targetLabel?: string } = target ? { ...change, id, targetLabel: target.label } : change;
+      const outcome = await session.callTab("apply_change", { change: annotated });
       const counts = Object.values(outcome.matched);
       if (!outcome.ok || (counts.length > 0 && counts.every((count) => count === 0))) session.failures++;
-      if (outcome.ok) session.appliedIds.add(change.id);
+      if (outcome.ok) session.appliedIds.add(annotated.id);
       return { text: JSON.stringify(outcome) };
     },
   }),
@@ -88,6 +95,11 @@ export const tools: AgentTool[] = [
     description: "Undo an active change by id.",
     schema: z.object({ id: z.string() }),
     async run({ id }, session) {
+      const target = session.request.target;
+      const other = target && session.request.active.find((active) => active.id === id && active.targetLabel && active.targetLabel !== target.label);
+      if (other) {
+        return { text: `REFUSED: "${id}" was made on a different element (${other.targetLabel}). The user selected ${target.label} for this request; change that element instead and leave earlier changes alone.` };
+      }
       session.progress("Undoing an earlier change");
       session.appliedIds.delete(id);
       return { text: JSON.stringify(await session.callTab("revert_change", { id })) };
@@ -131,6 +143,22 @@ export const tools: AgentTool[] = [
       }
       session.escalation = reason.slice(0, 120) || "needs a stronger model";
       return { text: "Handed off. Stop now and reply with an empty message." };
+    },
+  }),
+
+  defineTool({
+    name: "offer_options",
+    description:
+      "Show the user 2 to 4 choices as buttons, only when they reject something (its look, size, layout, wording or anything else) without saying what they want instead (e.g. 'I don't like this', 'this looks off') and their profile does not settle it. Each option has a short label and the full request to run if picked. Every option must differ from the current state. Never use it when the user already named what they want. After calling it, finish with a one-line reply.",
+    schema: z.object({
+      question: z.string(),
+      options: z.array(z.object({ label: z.string(), request: z.string() })),
+    }),
+    async run({ question, options }, session) {
+      const clean = options.filter((option) => option.label.trim() && option.request.trim()).slice(0, 4).map((option) => ({ label: option.label.slice(0, 40), request: option.request.slice(0, 200) }));
+      if (clean.length < 2) return { text: "Give at least two distinct options." };
+      session.send({ type: "options", runId: session.request.runId, question: question.slice(0, 120), options: clean });
+      return { text: "Options shown to the user. Finish with a one-line reply." };
     },
   }),
 
