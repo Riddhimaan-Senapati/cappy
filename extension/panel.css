@@ -1,0 +1,54 @@
+:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #263d34; background: #f8faf7; font-size: 14px; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 280px; height: 100vh; display: flex; flex-direction: column; }
+[hidden] { display: none !important; }
+button, select, textarea { font: inherit; }
+button { cursor: pointer; border: 0; transition: background .15s; }
+button:disabled { cursor: wait; opacity: .55; }
+button:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 2px solid #568571; outline-offset: 3px; }
+header { padding: 22px 20px; display: flex; gap: 12px; align-items: center; border-bottom: 1px solid #e2e8df; }
+header strong { font-size: 15px; letter-spacing: -.3px; }
+header span { display: block; font-size: 11px; color: #7c897e; margin-top: 4px; }
+.logo { width: 35px; height: 35px; background: #dce8d7; color: #3d614b; border-radius: 12px; display: grid; place-items: center; font-size: 25px; }
+.quiet { background: transparent; color: #637a6a; font-size: 12px; padding: 7px; border-radius: 6px; }
+.quiet:hover { background: #e8eee4; }
+#signout { margin-left: auto; }
+#setup { padding: 36px 24px; overflow-y: auto; }
+.eyebrow { font-size: 10px; letter-spacing: 1.8px; color: #6f8570; }
+h1 { font-family: Georgia, serif; font-size: 31px; font-weight: 400; line-height: 1.2; letter-spacing: -.8px; margin: 18px 0; }
+p { color: #758175; line-height: 1.65; }
+.preview { background: #eff3eb; border: 1px solid #e2e8dd; padding: 21px; border-radius: 16px; margin: 28px 0; }
+.preview span { font-size: 9px; letter-spacing: 1.4px; color: #83907e; }
+.preview p { font-size: 12px; color: #4e6652; margin: 8px 0 20px; }
+.preview p:last-child { margin-bottom: 0; }
+label { display: block; font-size: 12px; margin-bottom: 8px; }
+select { max-width: 100%; background: transparent; color: #5c725e; border: 1px solid #dce3d7; padding: 8px; border-radius: 8px; }
+#account { width: 100%; margin-bottom: 12px; }
+.primary { width: 100%; padding: 14px; border-radius: 10px; background: #365b45; color: white; font-weight: 500; }
+.primary:hover { background: #294b37; }
+#setup-status { font-size: 12px; overflow-wrap: anywhere; }
+.footnote { font-size: 11px; }
+#chat { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.context { display: flex; align-items: center; gap: 8px; margin: 14px 20px 0; font-size: 11px; color: #6c806d; }
+.context button { margin-left: auto; }
+.dot { width: 6px; height: 6px; background: #7d9b6c; border-radius: 50%; }
+#messages { flex: 1; overflow-y: auto; padding: 24px 20px; }
+.message { margin-bottom: 23px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; font-size: 13px; }
+.message::before { display: block; margin-bottom: 7px; font-size: 9px; letter-spacing: 1.4px; color: #8a9586; content: 'BROWSER AGENT'; }
+.message.user { background: #eaf0e5; padding: 13px 16px; border-radius: 14px 14px 3px 14px; margin-left: 24px; }
+.message.user::before { content: 'YOU'; }
+.message.error { color: #9c4934; }
+#suggestions { display: flex; gap: 6px; padding: 0 20px 14px; flex-wrap: wrap; }
+#suggestions button { background: transparent; border: 1px solid #dce4d6; color: #687c60; padding: 8px 10px; border-radius: 8px; font-size: 11px; }
+#composer { margin: 0 16px; padding: 12px; border: 1px solid #d8e1d1; border-radius: 14px; background: white; box-shadow: 0 4px 14px #293f2305; }
+textarea { width: 100%; resize: none; border: 0; color: #344c37; background: transparent; padding: 2px; font-size: 13px; line-height: 1.6; }
+textarea::placeholder { color: #9aa594; }
+.composer-bottom { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+#model { border: 0; font-size: 11px; padding: 4px; flex: 1; min-width: 0; }
+#send { border-radius: 9px; width: 32px; height: 32px; background: #3b6046; color: white; font-size: 21px; }
+footer { display: flex; justify-content: space-between; gap: 12px; padding: 14px 21px 20px; font-size: 10px; color: #929d8c; }
+footer a { color: #778b70; text-decoration: none; }
+#identity { overflow: hidden; text-overflow: ellipsis; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+.context-size { padding: 0 21px 10px; color: #7c897e; font-size: 10px; }

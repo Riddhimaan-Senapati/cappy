@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browser Agent</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <header><div class="logo" aria-hidden="true">↗</div><div><strong>Browser Agent</strong><span>Make the page your own</span></div><button id="signout" class="quiet" hidden>Sign out</button></header>
+  <section id="setup">
+    <div class="eyebrow">YOUR BROWSER, IN YOUR WORDS</div>
+    <h1>A little help with<br>what’s on your page.</h1>
+    <p>Rearrange a feed, hide distractions, or change how a page looks. Watch it update beside this chat.</p>
+    <div class="preview"><span>YOU</span><p>Sort these posts alphabetically</p><span>BROWSER AGENT</span><p>A fresh layout, right on the page. ✦</p></div>
+    <label for="account">ChatGPT account</label>
+    <select id="account"><option value="">Add a ChatGPT account</option></select>
+    <button id="connect" class="primary">Continue with ChatGPT</button>
+    <p id="setup-status" role="status">Starting local helper connection…</p>
+    <button id="retry" class="quiet">Check connection again</button>
+    <p class="footnote">Uses your ChatGPT plan. Sends a compact view of the current page to OpenAI when you send a message.</p>
+  </section>
+  <main id="chat" hidden>
+    <div class="context"><span class="dot"></span><span id="page-label">Current page</span><button id="undo" class="quiet">Undo change</button></div>
+    <div id="messages" role="log" aria-live="polite"></div>
+    <div id="suggestions"><button data-prompt="Sort these posts alphabetically">Sort titles A–Z ↗</button><button data-prompt="Make the page background dark and the text light while keeping it readable">Dark theme ↗</button></div>
+    <div id="context-size" class="context-size">A compact view of this page is sent with your message.</div>
+    <form id="composer">
+      <label class="sr-only" for="message">Message Browser Agent</label>
+      <textarea id="message" placeholder="What would you like to change?" rows="2" maxlength="4000" required></textarea>
+      <div class="composer-bottom"><label class="sr-only" for="model">ChatGPT model</label><select id="model" aria-label="ChatGPT model"></select><button id="send" type="submit" aria-label="Send message">↑</button></div>
+    </form>
+    <footer><span id="identity"></span><a href="https://chatgpt.com/settings/usage" target="_blank" rel="noreferrer">Usage ↗</a></footer>
+  </main>
+  <script src="panel.js" type="module"></script>
+</body>
+</html>

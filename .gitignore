@@ -218,3 +218,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node.js and local browser tooling
+node_modules/
+.env
+.env.*
+!.env.example
+playwright-report/
+test-results/
+
+# Local OAuth credentials
+credentials.json
+credentials.json.*.tmp

@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Browser Agent",
+  "version": "0.2.0",
+  "description": "Chat with the current page. Rearrange, hide, restyle, or edit content using your ChatGPT account.",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "scripting",
+    "sidePanel",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://youtube.com/*",
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*"
+  ],
+  "action": {
+    "default_title": "Open Browser Agent"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src http://127.0.0.1:3210"
+  },
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA04qo0tgwsnL+J7Sb5XnZKpbAzlvXM483K3jVqblk0cgS37syiGjHIcWyN9kwD7cN/+LASjKq7oMPisd9Wge8JONUZy8e2nFu+M5IMSPKdqDS9rZd+Q+rKGLls5kR1vEjyDBNAh6NEZvzt2HBe5hudDf6UmvNLMLCtbGZnQMTCg3XTNyEYJA9G/KljPGJuWcnJ7UDv8XeYPTSr6Ky5ZPusNagNa0gtbc2mS/sxXUuI7U74+GqnQdoYe8uwaYYe5UjxQIlWB0t3tvylTWlT6KV3UMUaodhS1fTTdoZgF7WjGRW6jNQSCY8/tCGA+ozQdl0e85xvDPEhtvthllc8Ts3lQIDAQAB",
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "browser-agent",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "A ChatGPT-powered Chrome side panel that edits the current page from natural language.",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test",
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/planner.js && node --check extension/background.js && node --check extension/panel.js && node --check extension/content.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "jose": "^6.1.0"
+  },
+  "devDependencies": {
+    "jsdom": "^27.0.0"
+  }
+}
