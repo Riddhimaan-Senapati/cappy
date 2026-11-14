@@ -45,6 +45,7 @@ import { clientTime, loadClock, now } from "../utils/clock";
 import { RULES_KEY, addRulesFromAdaptation, loadRules, parseRules, rulesForHost, saveRules } from "../utils/rules";
 
 const APPLIED_KEY = KEYS.applied;
+const RULES_BY_ADAPTATION = "rulesByAdaptation";
 const FRICTION_PROMPT = "Make text bigger on every site?";
 
 export default defineBackground(() => {
@@ -311,8 +312,26 @@ async function handleUserRequest(text: string): Promise<void> {
 async function rememberRules(url: string, adaptation: Adaptation, text: string): Promise<void> {
   const host = hostOf(url);
   if (!host) return;
-  const next = addRulesFromAdaptation(await loadRules(), adaptation, host, text, now());
+  const before = await loadRules();
+  const next = addRulesFromAdaptation(before, adaptation, host, text, now());
   await saveRules(next).catch((err: unknown) => console.warn("could not save rules", err));
+  const known = new Set(before.map((r) => r.id));
+  const created = next.filter((r) => !known.has(r.id)).map((r) => r.id);
+  if (created.length === 0) return;
+  const stored = await chrome.storage.session.get(RULES_BY_ADAPTATION);
+  const map = { ...(stored[RULES_BY_ADAPTATION] as Record<string, string[]> | undefined), [adaptation.id]: created };
+  await chrome.storage.session.set({ [RULES_BY_ADAPTATION]: map });
+}
+
+// Undoing a change the user just asked for also deletes the standing rules that change created.
+async function forgetRulesFrom(adaptationId: string): Promise<void> {
+  const stored = await chrome.storage.session.get(RULES_BY_ADAPTATION);
+  const map = (stored[RULES_BY_ADAPTATION] as Record<string, string[]> | undefined) ?? {};
+  const ids = new Set(map[adaptationId] ?? []);
+  if (ids.size === 0) return;
+  await saveRules((await loadRules()).filter((r) => !ids.has(r.id)));
+  delete map[adaptationId];
+  await chrome.storage.session.set({ [RULES_BY_ADAPTATION]: map });
 }
 
 async function applyRulesToTab(tabId: number, url: string): Promise<void> {
@@ -397,6 +416,7 @@ async function handleUndo(adaptationId: AdaptationId): Promise<void> {
 
   const host = hostOf((await chrome.tabs.get(tabId).catch(() => undefined))?.url);
   if (host) await updateSaved((saved) => forget(saved, host)).catch((err: unknown) => console.warn("forget failed", err));
+  await forgetRulesFrom(adaptationId).catch((err: unknown) => console.warn("could not remove rules", err));
 
   await chrome.scripting.removeCSS({ target: { tabId }, css }).catch((err: unknown) => {
     console.warn("removeCSS failed, tab may be gone", err);
