@@ -233,3 +233,6 @@ apps/extension/public/mediapipe/
 
 # ChatGPT sign-in credentials (refresh token); written by bun run chatgpt:login
 apps/backend/.chatgpt-credentials.json
+
+# Shortcut to the built extension (Load unpacked this folder)
+chrome-extension
