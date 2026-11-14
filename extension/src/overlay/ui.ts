@@ -92,18 +92,19 @@ export class OverlayUi {
     this.host.remove();
   }
 
-  // The chip never takes focus; the suggestion also waits pre-selected in the bar.
+  // Ghost text above the floating button. It never takes focus; the suggestion also waits pre-selected in the bar.
   nudge(suggestion: Suggestion) {
     this.spotlight.setNudge(suggestion);
     if (this.spotlight.isOpen()) return;
     this.hideNudge();
 
-    const accept = h("button", "link", "Do it");
+    const accept = h("button", "ghost", suggestion.text);
     accept.type = "button";
+    if (suggestion.reason) accept.title = suggestion.reason;
     const dismiss = h("button", "x", "", [icon("x", 12)]);
     dismiss.type = "button";
     dismiss.setAttribute("aria-label", "Dismiss suggestion");
-    const chip = h("div", "nudge", "", [icon("sparkle", 14), h("div", "text", "", [h("b", "", suggestion.text), h("span", "why", suggestion.reason)]), accept, dismiss]);
+    const chip = h("div", "nudge", "", [accept, dismiss]);
     chip.setAttribute("role", "group");
     chip.setAttribute("aria-label", "Suggestion");
 
@@ -121,13 +122,22 @@ export class OverlayUi {
 
     this.chip = chip;
     this.shadow.append(chip);
+    this.placeNudge();
     this.fabOrb.classList.add("notice");
     this.chipTimer = window.setTimeout(() => this.hideNudge(), NUDGE_MS);
   }
 
+  // The toast uses the same corner, so a suggestion waiting above the button moves up to stay clear of it.
+  private placeNudge() {
+    if (!this.chip) return;
+    const lift = this.toast ? this.toast.offsetHeight + 16 : 0;
+    this.chip.style.bottom = `${68 + lift}px`;
+  }
+
   // Shown when an accepted suggestion finishes, so one toast offers both Undo and where to keep the preference.
   proposeMemory(lines: string[], host: string, scope: MemoryScope, undoIds: string[] = []) {
-    this.announceMemory("proposed", lines, host, scope, undoIds);
+    // The open bar already has the gray Undo on the result. The toast's Undo is the purple one, so it stays off while that bar is up.
+    this.announceMemory("proposed", lines, host, scope, this.spotlight.isOpen() ? [] : undoIds);
   }
 
   private hideNudge() {
@@ -141,6 +151,12 @@ export class OverlayUi {
   setFab(visible: boolean) {
     this.fabWanted = visible;
     requestAnimationFrame(() => this.fab.classList.toggle("show", this.fabWanted));
+  }
+
+  setFocus(on: boolean) {
+    this.fab.classList.toggle("focus", on);
+    this.fab.setAttribute("aria-label", on ? "Focus is on. Open adaptive agent" : "Open adaptive agent");
+    this.spotlight.setFocus(on);
   }
 
   captureKey(event: KeyboardEvent) {
@@ -233,8 +249,12 @@ export class OverlayUi {
     close.addEventListener("click", () => this.dismissToast());
     this.toast = toast;
     this.shadow.append(toast);
+    this.placeNudge();
     this.bringToFront();
-    requestAnimationFrame(() => toast.classList.add("show"));
+    requestAnimationFrame(() => {
+      toast.classList.add("show");
+      this.placeNudge();
+    });
     if (!sticky) this.toastTimer = window.setTimeout(() => this.dismissToast(), TOAST_MS);
   }
 
@@ -261,6 +281,7 @@ export class OverlayUi {
     if (!toast) return;
     this.toast = null;
     toast.classList.remove("show");
+    this.placeNudge();
     setTimeout(() => toast.remove(), 350);
   }
 }

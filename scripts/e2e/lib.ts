@@ -193,6 +193,16 @@ async function pierce(page: Page) {
   return { session, root };
 }
 
+export async function shadowButtonVisible(page: Page, label: string): Promise<boolean> {
+  const { session, root } = await pierce(page);
+  try {
+    for (const node of walk(root)) if (node.nodeName === "BUTTON" && textOf(node) === label) return true;
+    return false;
+  } finally {
+    await session.detach();
+  }
+}
+
 export async function shadowTextVisible(page: Page, fragment: string): Promise<boolean> {
   const { session, root } = await pierce(page);
   try {

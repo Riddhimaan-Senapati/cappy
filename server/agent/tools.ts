@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Change, validateChange } from "../../shared/adaptation.js";
 import { detectInjection, detectInjectionText } from "../safety.js";
 import { rememberFacts } from "./memory.js";
+import { withSpokenSchedule } from "./schedule.js";
 import { loadSkills } from "./skills.js";
 import type { AgentSession } from "./session.js";
 
@@ -100,8 +101,10 @@ export const tools: AgentTool[] = [
     description:
       "Apply one change to the live page (animated for the user). Reusing an id replaces that change. Returns how many elements each selector matched and page stats before and after, so you can verify it worked.",
     schema: z.object({ change: Change }),
-    async run({ change }, session) {
+    async run({ change: incoming }, session) {
       if (session.blockedReason) return { text: "BLOCKED: no changes allowed on this page." };
+      const now = session.request.clientTime?.iso ? new Date(session.request.clientTime.iso) : new Date();
+      const change = withSpokenSchedule(incoming, session.request.message, now);
       if (change.scope === "everywhere" && change.block?.name === "contentFilter" && change.block.itemSelector !== null) {
         return { text: "REJECTED: a content filter with a site-specific itemSelector requires site scope. For a cross-site preference, remember the general intent." };
       }

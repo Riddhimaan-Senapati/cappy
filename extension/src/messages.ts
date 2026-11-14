@@ -8,6 +8,8 @@ export interface AppliedSummary {
   summary: string;
   reason: string;
   scope: "site" | "everywhere";
+  // When a time-based rule is on, in plain words, with whether it is on right now.
+  schedule?: string;
 }
 
 export type UiEvent =
@@ -83,7 +85,7 @@ export type BackgroundRequest =
   | { kind: "openShortcuts" }
   | { kind: "verifyVoice"; key: string; provider?: "openai" | "gemini" }
   | { kind: "status" }
-  | { kind: "setKey"; provider: string; key: string | null }
+  | { kind: "setKey"; provider: string; key: string | null; baseURL?: string | null }
   | { kind: "chatgptLogin" }
   | { kind: "chatgptLogout" }
   | { kind: "stopRun" }

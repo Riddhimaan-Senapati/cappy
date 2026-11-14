@@ -120,4 +120,4 @@ export async function activityFor(host: string, now = Date.now()): Promise<Frict
   return summarizeActivity((await load()).activity ?? emptyActivity(), host, now);
 }
 
-export const clearActivity = () => save({ activity: emptyActivity(), frictionLog: [], nudgedAt: {} });
+export const clearActivity = () => save({ activity: emptyActivity(), frictionLog: [], nudgedAt: {}, suggestionFeedback: [] });

@@ -7,6 +7,7 @@ import { recentFeedback } from "../feedback.js";
 import { emptyActivity, summarizeActivity } from "../friction-log.js";
 import { findRequestSessions, load, recipeKey, save, saveRecipe, saveSiteNotes } from "../storage.js";
 import { speakIfEnabled } from "./tts.js";
+import { scheduleStatus } from "../../../shared/validate.js";
 
 interface Run {
   runId: string;
@@ -128,9 +129,9 @@ export class AgentClient {
     });
   }
 
-  async setKey(provider: string, key: string | null) {
+  async setKey(provider: string, key: string | null, baseURL?: string | null) {
     await this.ensureConnected();
-    this.send({ type: "setKey", provider, key });
+    this.send({ type: "setKey", provider, key, ...(baseURL != null ? { baseURL } : {}) });
   }
 
   async signOut() {
@@ -355,7 +356,7 @@ export class AgentClient {
   }
 
   private summaries(run: Run): AppliedSummary[] {
-    return [...run.applied.values(), ...run.siteControls.values()].map(({ id, summary, reason, scope }) => ({ id, summary, reason, scope }));
+    return [...run.applied.values(), ...run.siteControls.values()].map(({ id, summary, reason, scope, schedule }) => ({ id, summary, reason, scope, ...(schedule ? { schedule: scheduleStatus(schedule) ?? undefined } : {}) }));
   }
 
   private async onMessage(message: ServerMessage) {

@@ -66,6 +66,7 @@ export const Schedule = z.object({
   end: z.string().nullish().describe("Local end time HH:MM (24h). Overnight ranges like 22:00 to 06:00 are allowed. Omit when no time of day was stated."),
   from: z.string().nullish().describe("First active local date YYYY-MM-DD, inclusive. Omit when no start date was stated."),
   until: z.string().nullish().describe("Last active local date YYYY-MM-DD, inclusive. Omit when no end date was stated."),
+  untilAt: z.string().nullish().describe("ISO datetime when a short span ends, such as 'for the next 30 seconds'. The change turns off at this instant. Omit for rules that repeat by day or clock."),
 });
 export type Schedule = z.infer<typeof Schedule>;
 

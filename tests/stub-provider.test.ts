@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { validateChange, type PageOutline } from "../shared/adaptation.js";
-import { planStubRun, type StubCall } from "../server/agent/providers/stub.js";
+import { planStubRun, stubSchedule, type StubCall } from "../server/agent/providers/stub.js";
 import { describeProviders, resolveProvider } from "../server/agent/providers/index.js";
 
 const page = (extra: Partial<PageOutline> = {}): PageOutline => ({
@@ -70,6 +70,25 @@ describe("stub provider routing", () => {
     assert.deepEqual(plan.calls.at(-1), { name: "remember", input: { lines: ["Red-green colorblind"], scope: "everywhere" } });
   });
 
+  it("reads time windows and day sets into a schedule on the filter", () => {
+    assert.deepEqual(stubSchedule("hide podcasts between 9am and 5pm"), { days: null, start: "09:00", end: "17:00" });
+    assert.deepEqual(stubSchedule("hide shorts from 22:30 to 6 on weekdays"), { days: ["mon", "tue", "wed", "thu", "fri"], start: "22:30", end: "06:00" });
+    assert.deepEqual(stubSchedule("hide podcasts on weekends"), { days: ["sat", "sun"], start: null, end: null });
+    assert.equal(stubSchedule("hide podcasts"), null);
+    const now = new Date(2026, 10, 14, 16, 33, 0);
+    const brief = stubSchedule("for the next 30 seconds, don't show videos", now);
+    assert.equal(brief?.untilAt, new Date(now.getTime() + 30_000).toISOString());
+    const ignored = chat("ignore podcasts on weekends");
+    assert.deepEqual(applied(ignored.calls)[0]?.schedule, { days: ["sat", "sun"], start: null, end: null });
+    assert.ok(ignored.calls.some((call) => call.name === "remember"));
+    const fleeting = chat("don't show videos for the next 30 seconds");
+    assert.equal(applied(fleeting.calls)[0]?.block?.name, "contentFilter");
+    assert.ok(applied(fleeting.calls)[0]?.schedule?.untilAt);
+    assert.equal(fleeting.calls.some((call) => call.name === "remember"), false);
+    const [call] = applied(chat("hide podcasts between 12am and 11pm").calls);
+    assert.deepEqual(call.schedule, { days: null, start: "00:00", end: "23:00" });
+  });
+
   it("offers options instead of guessing on a vague request", () => {
     const plan = chat("make this easier to read");
     assert.equal(plan.calls.length, 1);
@@ -103,7 +122,7 @@ describe("stub provider routing", () => {
   });
 
   it("only produces changes that pass the shared validator", () => {
-    const messages = ["make the text bigger", "dark mode", "invert", "hide ads", "colorblind", "remove all popups"];
+    const messages = ["make the text bigger", "dark mode", "invert", "hide ads", "colorblind", "remove all popups", "don't show videos for the next 30 seconds", "ignore podcasts on weekends"];
     for (const message of messages) {
       for (const change of applied(chat(message).calls)) {
         assert.equal(validateChange(change), null, `${message}: ${change.id}`);
@@ -131,7 +150,7 @@ describe("provider registry", () => {
     delete process.env.LLM_PROVIDER;
     try {
       const ids = (await describeProviders()).map(({ id }) => id);
-      assert.deepEqual(ids, ["chatgpt-signin", "anthropic-key", "openai-key", "gemini"]);
+      assert.deepEqual(ids, ["chatgpt-signin", "anthropic-key", "openai-key", "gemini", "xai", "openai-compat", "anthropic-compat"]);
     } finally {
       if (previous !== undefined) process.env.LLM_PROVIDER = previous;
     }
