@@ -12,6 +12,19 @@ export const OutlineElement = z
 export type OutlineElement = z.infer<typeof OutlineElement>;
 import { Profile } from "./profile";
 
+export const PageStats = z
+  .object({
+    inputsWithoutLabel: z.number().int().nonnegative(),
+    smallTargets: z.number().int().nonnegative(),
+    smallText: z.number().int().nonnegative(),
+    lowContrastText: z.number().int().nonnegative(),
+    imagesWithoutAlt: z.number().int().nonnegative(),
+    runningAnimations: z.number().int().nonnegative(),
+    visibleAdsOrPopups: z.number().int().nonnegative(),
+  })
+  .strict();
+export type PageStats = z.infer<typeof PageStats>;
+
 export const PageOutline = z
   .object({
     title: z.string().max(200),
@@ -22,6 +35,7 @@ export const PageOutline = z
     canvases: z.number().int().nonnegative(),
     text: z.string().max(6000).optional(),
     elements: z.array(OutlineElement).max(300).optional(),
+    stats: PageStats.optional(),
   })
   .strict();
 export type PageOutline = z.infer<typeof PageOutline>;
@@ -68,6 +82,8 @@ export const VerifyRequest = z
     after: Screenshot,
     axeBefore: z.number().int().nonnegative(),
     axeAfter: z.number().int().nonnegative(),
+    statsBefore: PageStats.optional(),
+    statsAfter: PageStats.optional(),
   })
   .strict();
 export type VerifyRequest = z.infer<typeof VerifyRequest>;

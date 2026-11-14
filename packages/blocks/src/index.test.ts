@@ -125,3 +125,10 @@ describe("compileAdaptationCss", () => {
     ).toBe("");
   });
 });
+
+test("stop_motion pauses animations and transitions; text_scale is runtime-only", () => {
+  const css = blockCss({ block: "stop_motion", pauseMedia: true });
+  expect(css).toContain("animation-play-state: paused");
+  expect(css).toContain("transition: none");
+  expect(blockCss({ block: "text_scale", scale: 1.4 })).toBe("");
+});

@@ -46,7 +46,28 @@ export const GestureScroll = z
   })
   .strict();
 
-export const BlockConfig = z.discriminatedUnion("block", [TextFocus, ColorFix, FormFixer, GestureScroll]);
+export const StopMotion = z
+  .object({
+    block: z.literal("stop_motion"),
+    pauseMedia: z.boolean(),
+  })
+  .strict();
+
+export const TextScale = z
+  .object({
+    block: z.literal("text_scale"),
+    scale: z.number().min(1).max(2),
+  })
+  .strict();
+
+export const BlockConfig = z.discriminatedUnion("block", [
+  TextFocus,
+  ColorFix,
+  FormFixer,
+  GestureScroll,
+  StopMotion,
+  TextScale,
+]);
 export type BlockConfig = z.infer<typeof BlockConfig>;
 export type BlockName = BlockConfig["block"];
 export type BlockOf<N extends BlockName> = Extract<BlockConfig, { block: N }>;
@@ -80,7 +101,7 @@ export const Adaptation = z
     id: AdaptationId,
     sites: z.array(HostPattern).min(1).max(10),
     reason: z.object({ text: z.string().min(1).max(160), needId: NeedId }).strict(),
-    blocks: z.array(BlockConfig).max(4),
+    blocks: z.array(BlockConfig).max(6),
     css: z.string().max(6000).optional(),
     ops: z.array(SnapshotOp).max(20).optional(),
   })

@@ -72,7 +72,13 @@ export function blockCss(config: BlockConfig): string {
     case "form_fixer":
       return formFixerCss(config);
     case "gesture_scroll":
+    case "text_scale":
       return "";
+    case "stop_motion":
+      return [
+        "*, *::before, *::after { animation-play-state: paused !important; animation-iteration-count: 1 !important; transition: none !important; scroll-behavior: auto !important; }",
+        "marquee { display: none !important; }",
+      ].join("\n");
     default: {
       const unreachable: never = config;
       throw new Error(`unknown block: ${JSON.stringify(unreachable)}`);

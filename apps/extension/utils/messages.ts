@@ -42,7 +42,7 @@ export const GetOutline = z.object({ type: z.literal("get-outline") }).strict();
 export const OutlineReply = z.object({ url: z.string().max(2048), outline: PageOutline }).strict();
 export type OutlineReply = z.infer<typeof OutlineReply>;
 export const ApplyRuntime = z
-  .object({ type: z.literal("apply-runtime"), adaptationId: AdaptationId, blocks: z.array(BlockConfig).max(4) })
+  .object({ type: z.literal("apply-runtime"), adaptationId: AdaptationId, blocks: z.array(BlockConfig).max(6) })
   .strict();
 export const UndoRuntime = z.object({ type: z.literal("undo-runtime") }).strict();
 export const ApplyOps = z
