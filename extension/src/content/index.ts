@@ -80,7 +80,7 @@ async function restore(animate: boolean) {
 
 function ensureOverlay(): OverlayUi {
   overlay ??= new OverlayUi({
-    ask: (message, fresh) => void send({ kind: "runChat", message, fresh }),
+    ask: (message, fresh, interrupt) => void send({ kind: "runChat", message, fresh, interrupt }),
     listChanges: activeChanges,
     revert: async (id) => void (await revert(id)),
     revertAll: async () => {

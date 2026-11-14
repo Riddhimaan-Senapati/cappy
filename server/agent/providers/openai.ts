@@ -28,6 +28,7 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
   const input: ResponseInputItem[] = [{ role: "user", content: buildUserTurn(session.request) }];
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    session.signal.throwIfAborted();
     const client = await getClient();
     // store:false + stream:true are required by the ChatGPT plan route; harmless with an API key.
     const stream = await client.responses.create({
@@ -37,7 +38,7 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
       tools: [namespaceTool],
       store: false,
       stream: true,
-    });
+    }, { signal: session.signal });
 
     let output: ResponseOutputItem[] | null = null;
     for await (const event of stream) {

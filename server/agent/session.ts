@@ -13,6 +13,8 @@ export class AgentSession {
   failures = 0;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private closed = false;
+  private cancellation = new AbortController();
+  readonly signal = this.cancellation.signal;
 
   constructor(
     private socket: WebSocket,
@@ -68,6 +70,7 @@ export class AgentSession {
 
   close() {
     this.closed = true;
+    this.cancellation.abort(new RunCancelledError("Request interrupted"));
     for (const waiter of this.pending.values()) waiter.reject(new RunCancelledError("Extension disconnected"));
     this.pending.clear();
   }

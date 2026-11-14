@@ -33,10 +33,10 @@ async function activeTab() {
   return tab;
 }
 
-async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean) {
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false) {
   if (!message.trim()) return;
   await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
-  if (tab) await agent.startRun(tab, "chat", message, fresh);
+  if (tab) await agent.startRun(tab, "chat", message, fresh, interrupt);
 }
 
 async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
@@ -76,7 +76,7 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
   if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
     case "runChat":
-      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh).finally(() => sendResponse());
+      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt).finally(() => sendResponse());
       return !!sender.tab;
     case "deleteRequest":
       if (typeof request.message !== "string") return false;

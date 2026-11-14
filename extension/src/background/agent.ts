@@ -137,11 +137,7 @@ export class AgentClient {
     this.setStatus({});
   }
 
-  private busyTab(tabId: number) {
-    return [...this.runs.values()].some((run) => run.tabId === tabId);
-  }
-
-  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false) {
+  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, interrupt = false) {
     if (!tab.id || !tab.url?.startsWith("http")) return;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
@@ -149,20 +145,29 @@ export class AgentClient {
     const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map() };
 
     this.emit(run, { type: "start", runId, trigger, message });
-    if (this.busyTab(tabId)) return this.emit(run, { type: "error", runId, message: "Still working on the last request." });
+    const activeRun = [...this.runs.values()].find((entry) => entry.tabId === tabId);
+    if (activeRun) {
+      if (!interrupt) return this.emit(run, { type: "error", runId, message: "Still working on the last request." });
+      this.send({ type: "cancel", runId: activeRun.runId });
+      this.fail(activeRun, "Interrupted by a new request.");
+    }
+    this.runs.set(runId, run);
 
     const state = await load();
-    if (state.paused) return this.emit(run, { type: "error", runId, message: "Adaptations are paused. Turn them on in settings." });
+    if (!this.runs.has(runId)) return;
+    if (state.paused) return this.fail(run, "Adaptations are paused. Turn them on in settings.");
 
     if (trigger === "chat" && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) return;
+    if (!this.runs.has(runId)) return;
 
     try {
       await this.ensureConnected();
     } catch (error) {
-      return this.emit(run, { type: "error", runId, message: error instanceof Error ? error.message : String(error) });
+      if (this.runs.has(runId)) this.fail(run, error instanceof Error ? error.message : String(error));
+      return;
     }
 
-    this.runs.set(runId, run);
+    if (!this.runs.has(runId)) return;
     this.setStatus({ connected: true, error: undefined });
     if (trigger === "page_load") await sendToTab(tabId, { kind: "busy", on: true }).catch(() => undefined);
 
@@ -185,10 +190,11 @@ export class AgentClient {
         clientTime: localClock(),
       };
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: message }].slice(-20) });
+      if (!this.runs.has(runId)) return;
       this.send(request);
       return true;
     } catch (error) {
-      this.fail(run, error instanceof Error ? error.message : String(error));
+      if (this.runs.has(runId)) this.fail(run, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -197,10 +203,13 @@ export class AgentClient {
     try {
       this.step(run, "Using your saved version of this request", "info");
       for (const change of changes) {
+        if (!this.runs.has(run.runId)) return true;
         const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change } });
         if (!outcome.ok) return false;
         run.applied.set(change.id, change);
       }
+      if (!this.runs.has(run.runId)) return true;
+      this.finish(run);
       const reply = "Done, from your saved version. Hold Shift+Enter to ask the AI again.";
       void speakIfEnabled(reply, run.tabId);
       this.emit(run, { type: "done", runId: run.runId, trigger: run.trigger, reply, applied: this.summaries(run), fromCache: true });
@@ -278,6 +287,7 @@ export class AgentClient {
       } else {
         result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input });
       }
+      if (!this.runs.has(run.runId)) return;
       if (message.name === "apply_change") this.afterApply(run, (message.input as { change: Change }).change, result as ApplyOutcome);
       if (message.name === "use_site_control") {
         const outcome = result as SiteControlOutcome;

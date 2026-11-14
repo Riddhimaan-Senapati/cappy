@@ -54,7 +54,7 @@ export interface StatusInfo {
 }
 
 export type BackgroundRequest =
-  | { kind: "runChat"; message: string; fresh: boolean }
+  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean }
   | { kind: "deleteRequest"; message: string }
   | { kind: "frictionAccept" }
   | { kind: "pageReady"; origin: string; restored: number }

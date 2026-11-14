@@ -51,7 +51,7 @@ export function createAnthropicProvider(): AgentProvider {
         system: SYSTEM_PROMPT,
         tools: runnableTools,
         messages: [{ role: "user", content: buildUserTurn(session.request) }],
-      });
+      }, { signal: session.signal });
 
       if (finalMessage.stop_reason === "refusal") return "I can't help with that one.";
       return finalMessage.content

@@ -34,7 +34,7 @@ export function createGeminiProvider(): AgentProvider {
         const response = await ai.models.generateContent({
           model,
           contents,
-          config: { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }] },
+          config: { abortSignal: session.signal, systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }] },
         });
 
         const calls = response.functionCalls ?? [];

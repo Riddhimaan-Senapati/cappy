@@ -156,6 +156,10 @@ wss.on("connection", (socket, request) => {
 
     if (!message || typeof message !== "object") return;
     if (message.type === "providerSetup") return configureProvider(socket, message);
+    if (message.type === "cancel") {
+      sessions.get(message.runId)?.close();
+      return;
+    }
     if (message.type === "toolResult") {
       for (const session of sessions.values()) session.handleToolResult(message);
       return;

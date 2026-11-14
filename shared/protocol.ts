@@ -98,5 +98,5 @@ export type ProviderSetup = { type: "providerSetup"; id: string; provider: strin
 export type ProviderOptions = Array<{ id: string; ready: boolean }>;
 export type ProviderSetupResult = { type: "providerSetupResult"; id: string; error?: string };
 
-export type ClientMessage = ProviderSetup | RunRequest | ToolResultMessage | PingMessage;
+export type ClientMessage = { type: "cancel"; runId: string } | ProviderSetup | RunRequest | ToolResultMessage | PingMessage;
 export type ServerMessage = ProviderSetupResult | ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models?: Record<Tier, string>; available: string[]; providers?: ProviderOptions };

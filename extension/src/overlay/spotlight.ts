@@ -12,7 +12,7 @@ import { VoiceController } from "../voice/controller.js";
 import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
 
 export interface SpotlightDeps {
-  ask(message: string, fresh: boolean): void;
+  ask(message: string, fresh: boolean, interrupt?: boolean): void;
   listChanges(): ActiveChange[];
   revert(id: string): Promise<void>;
   revertAll(): Promise<void>;
@@ -381,13 +381,13 @@ export class Spotlight {
     this.onInput();
   }
 
-  ask(message: string, fresh: boolean) {
-    if (!message || this.working) return;
+  ask(message: string, fresh: boolean, interrupt = false) {
+    if (!message || (this.working && !interrupt)) return;
     window.clearTimeout(this.closeTimer);
     this.run = { runId: null, message, steps: [{ text: "Sending to the agent", tone: "info" }], memory: [], shownSteps: 0, shownResult: false };
     this.input.value = "";
     this.setView("run");
-    this.deps.ask(message, fresh);
+    this.deps.ask(message, fresh, interrupt);
   }
 
   private queueRequest() {
@@ -412,8 +412,10 @@ export class Spotlight {
     const controls: Node[] = [];
     if (message) {
       controls.push(h("div", "queue-actions", "", [
-        button("Send now", () => this.ask(this.input.value.trim(), false), this.working),
+        button("Send now", () => this.ask(this.input.value.trim(), false, true)),
+        h("span", "hint", "Ctrl/⌘ + Enter"),
         button("Queue for later", () => this.queueRequest()),
+        h("span", "hint", "Alt/Option + Enter"),
       ]));
     }
     if (this.queuedRequests.length) {
@@ -422,10 +424,10 @@ export class Spotlight {
         button("Send now", () => {
           this.queuedRequests.splice(index, 1);
           const draft = this.input.value;
-          this.ask(request, false);
+          this.ask(request, false, true);
           this.input.value = draft;
           this.renderFoot();
-        }, this.working),
+        }),
         button("Remove", () => {
           this.queuedRequests.splice(index, 1);
           this.renderFoot();
@@ -625,6 +627,10 @@ export class Spotlight {
       }
       if (this.view === "settings") this.setView("list");
       else this.hide();
+      return true;
+    }
+    if (this.view !== "settings" && key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      this.ask(this.input.value.trim(), false, true);
       return true;
     }
     if (this.view !== "settings" && key === "Enter" && (event.altKey || (this.working && this.input.value.trim()))) {
