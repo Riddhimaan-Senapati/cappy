@@ -5,6 +5,26 @@
     "": {
       "name": "browser-agent",
     },
+    "packages/blocks": {
+      "name": "@browser-agent/blocks",
+      "dependencies": {
+        "@browser-agent/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.9.0",
+      },
+    },
+    "packages/companion": {
+      "name": "@browser-agent/companion",
+      "dependencies": {
+        "@browser-agent/shared": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.9.0",
+      },
+    },
     "packages/shared": {
       "name": "@browser-agent/shared",
       "dependencies": {
@@ -17,6 +37,10 @@
     },
   },
   "packages": {
+    "@browser-agent/blocks": ["@browser-agent/blocks@workspace:packages/blocks"],
+
+    "@browser-agent/companion": ["@browser-agent/companion@workspace:packages/companion"],
+
     "@browser-agent/shared": ["@browser-agent/shared@workspace:packages/shared"],
 
     "@types/bun": ["@types/bun@1.4.4", "", { "dependencies": { "bun-types": "1.4.4" } }, "sha512-9wkRDXUXK124pEnAutE6n/l18j+i9GC5IAHK8TmX/2nlySETmky0OU6yL5U8pW1AoKh++AN9auDCr647BfurjQ=="],
