@@ -2,6 +2,7 @@ import { GoogleGenAI, ThinkingLevel, type Part } from "@google/genai";
 import { VerifyRequest, VerifyResponse, type Verdict } from "@browser-agent/shared";
 import { z } from "zod";
 import { toGeminiSchema } from "./gemini-adapter";
+import { problemTotal } from "./stats";
 
 export type Verifier = (req: VerifyRequest) => Promise<VerifyResponse>;
 
@@ -15,6 +16,12 @@ export function splitDataUrl(url: string): { mimeType: string; data: string } {
 
 export const stubVerifier: Verifier = async (req): Promise<VerifyResponse> => {
   const { axeBefore: before, axeAfter: after } = req;
+  if (req.statsBefore && req.statsAfter) {
+    const from = problemTotal(req.statsBefore);
+    const to = problemTotal(req.statsAfter);
+    if (to < from) return { verdict: "improved", notes: `measured page problems fell from ${from} to ${to}` };
+    if (to > from) return { verdict: "worse", notes: `measured page problems rose from ${from} to ${to}` };
+  }
   let verdict: Verdict = "no_change";
   let notes = `axe violations unchanged at ${after}`;
   if (after < before) {
