@@ -1,5 +1,14 @@
 import { z } from "zod";
-import { Adaptation, SnapshotId } from "./adaptation";
+import { Adaptation, ItemSelector, SnapshotId } from "./adaptation";
+
+export const ItemGroup = z
+  .object({
+    selector: ItemSelector,
+    count: z.number().int().positive(),
+    samples: z.array(z.string().max(100)).max(3),
+  })
+  .strict();
+export type ItemGroup = z.infer<typeof ItemGroup>;
 
 export const OutlineElement = z
   .object({
@@ -36,6 +45,7 @@ export const PageOutline = z
     text: z.string().max(6000).optional(),
     elements: z.array(OutlineElement).max(300).optional(),
     stats: PageStats.optional(),
+    groups: z.array(ItemGroup).max(20).optional(),
   })
   .strict();
 export type PageOutline = z.infer<typeof PageOutline>;

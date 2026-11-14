@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Adaptation, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
+import { Adaptation, filtersTargetKnownGroups, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
 
 const valid = {
   id: "a1",
@@ -44,4 +44,14 @@ test("ops must target ids the page actually had", () => {
   const a = Adaptation.parse({ id: "a3", sites: ["example.com"], reason: { text: "Hide ads", needId: "n1" }, blocks: [], ops: [{ op: "hide", ids: ["n3"] }] });
   expect(opsTargetKnownIds(a, new Set(["n1", "n3"]))).toBe(true);
   expect(opsTargetKnownIds(a, new Set(["n1"]))).toBe(false);
+});
+
+test("content filters target repeated item groups by keyword", () => {
+  const base = { id: "a4", sites: ["www.youtube.com"], reason: { text: "Remove podcasts", needId: "request" }, blocks: [] };
+  const filter = { itemSelector: "ytd-rich-item-renderer", keywords: ["podcast", "episode"], action: "hide" };
+  const a = Adaptation.parse({ ...base, filters: [filter] });
+  expect(filtersTargetKnownGroups(a, new Set(["ytd-rich-item-renderer"]))).toBe(true);
+  expect(filtersTargetKnownGroups(a, new Set(["div.card"]))).toBe(false);
+  expect(Adaptation.safeParse({ ...base, filters: [{ ...filter, itemSelector: "a{} body{display:none" }] }).success).toBe(false);
+  expect(Adaptation.safeParse({ ...base, filters: [{ ...filter, keywords: [] }] }).success).toBe(false);
 });

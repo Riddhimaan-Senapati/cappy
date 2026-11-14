@@ -93,6 +93,21 @@ export const SnapshotOp = z.discriminatedUnion("op", [
 ]);
 export type SnapshotOp = z.infer<typeof SnapshotOp>;
 
+export const ItemSelector = z
+  .string()
+  .min(1)
+  .max(160)
+  .regex(/^[^{};@\\<]+$/, "a plain CSS selector");
+
+export const ContentFilter = z
+  .object({
+    itemSelector: ItemSelector,
+    keywords: z.array(z.string().trim().min(2).max(40)).min(1).max(12),
+    action: z.enum(["hide", "dim"]),
+  })
+  .strict();
+export type ContentFilter = z.infer<typeof ContentFilter>;
+
 export const AdaptationId = z.string().min(1).max(64).brand<"AdaptationId">();
 export type AdaptationId = z.infer<typeof AdaptationId>;
 
@@ -104,6 +119,7 @@ export const Adaptation = z
     blocks: z.array(BlockConfig).max(6),
     css: z.string().max(6000).optional(),
     ops: z.array(SnapshotOp).max(20).optional(),
+    filters: z.array(ContentFilter).max(6).optional(),
   })
   .strict()
   .superRefine((a, ctx) => {
@@ -111,7 +127,7 @@ export const Adaptation = z
     if (new Set(names).size !== names.length) {
       ctx.addIssue({ code: "custom", path: ["blocks"], message: "each block may appear once" });
     }
-    if (a.blocks.length === 0 && !a.css && !a.ops?.length) {
+    if (a.blocks.length === 0 && !a.css && !a.ops?.length && !a.filters?.length) {
       ctx.addIssue({ code: "custom", path: ["blocks"], message: "adaptation changes nothing" });
     }
     if (a.css) {
@@ -141,4 +157,8 @@ export function matchesHost(pattern: HostPattern, host: string): boolean {
 
 export function opsTargetKnownIds(adaptation: Adaptation, known: ReadonlySet<string>): boolean {
   return (adaptation.ops ?? []).every((op) => op.ids.every((id) => known.has(id)));
+}
+
+export function filtersTargetKnownGroups(adaptation: Adaptation, known: ReadonlySet<string>): boolean {
+  return (adaptation.filters ?? []).every((f) => known.has(f.itemSelector));
 }
