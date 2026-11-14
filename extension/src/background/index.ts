@@ -1,3 +1,4 @@
+import { requestAudio } from "../voice/audio-api.js";
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
 import { load, recordSubmittedRequest, removeSubmittedRequest } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
@@ -93,6 +94,14 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "openShortcuts":
       void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
       break;
+    case "verifyVoice":
+      if (sender.id !== chrome.runtime.id || typeof request.key !== "string" || request.key.length > 4096) return false;
+      void requestAudio("verify", JSON.stringify(request.key ? { key: request.key } : {}), "application/json", AbortSignal.timeout(28_000))
+        .then(() => sendResponse({ ok: true }), (error: Error) => sendResponse({
+          ok: false,
+          error: error instanceof TypeError ? "Could not reach the local audio server. Check that it is running." : error.message,
+        }));
+      return true;
     case "providerSetup":
       if (sender.url !== chrome.runtime.getURL("popup.html")) return false;
       void agent.configureProvider({ provider: request.provider, action: request.action, key: request.key })

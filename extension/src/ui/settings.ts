@@ -1,4 +1,3 @@
-import { requestAudio } from "../voice/audio-api.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
@@ -220,22 +219,21 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     voiceKey.placeholder = "OpenAI API key";
     voiceKey.setAttribute("aria-label", "OpenAI voice API key");
     voiceKey.disabled = checkingVoice;
-    const inPopup = location.href === chrome.runtime.getURL("popup.html");
     const keyHelp = h("small", "", "Add an OpenAI API key to enable OpenAI audio models. Leave blank if you already saved a key.");
-    const voiceKeyField = inPopup ? h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Add an OpenAI API key"), keyHelp]), voiceKey]) : null;
-    const voiceKeyPrompt = inPopup ? null : h("p", "s-note", "To enable OpenAI audio models, open the extension popup and add an OpenAI API key under Model → Voice provider.");
+    const voiceKeyField = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Add an OpenAI API key"), keyHelp]), voiceKey]);
     const verify = h("button", "s-btn", activeVoice === "openai" ? "Verify OpenAI audio again" : "Verify and enable OpenAI");
     verify.type = "button";
     verify.disabled = checkingVoice;
     verify.addEventListener("click", async () => {
       if (checkingVoice) return;
-      const key = inPopup ? voiceKey.value.trim() : "";
+      const key = voiceKey.value.trim();
       voiceKey.value = "";
       checkingVoice = true;
       voiceCheck = "Checking speech and transcription with a short sample…";
       queue();
       try {
-        await requestAudio("verify", JSON.stringify(key ? { key } : {}), "application/json", AbortSignal.timeout(28_000));
+        const result = await chrome.runtime.sendMessage({ kind: "verifyVoice", key } satisfies BackgroundRequest);
+        if (!result?.ok) throw new Error(result?.error ?? "Could not verify OpenAI audio.");
         await save({ voiceProvider: "openai", openAIVoiceVerified: true });
         voiceCheck = "OpenAI audio verified.";
       } catch (error) {
@@ -261,7 +259,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
         toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
       ),
-      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, ...(voiceKeyField ? [voiceKeyField] : []), ...(voiceKeyPrompt ? [voiceKeyPrompt] : []), verify, verificationStatus),
+      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, voiceKeyField, verify, verificationStatus),
       memory.render(state, toggle),
       section(
         "Speech",

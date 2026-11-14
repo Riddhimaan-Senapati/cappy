@@ -60,6 +60,7 @@ export type BackgroundRequest =
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
+  | { kind: "verifyVoice"; key: string }
   | { kind: "status" }
   | ({ kind: "providerSetup" } & Omit<ProviderSetup, "id" | "type">)
   | { kind: "voiceStart"; lang: string }
