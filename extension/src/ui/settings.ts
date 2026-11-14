@@ -6,6 +6,7 @@ import { scheduleStatus } from "../../../shared/validate.js";
 import { usageCard, USAGE_CSS } from "./usage.js";
 import { adoptStyles, h, icon } from "./dom.js";
 import { createMemoryView } from "./memory.js";
+import { createProfilesView } from "./profiles.js";
 
 let voicesRequest: Promise<string[]> | null = null;
 
@@ -242,7 +243,9 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false })), loadVoices()]);
     if (disposed) return;
     const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
-    const hadFocus = focused instanceof HTMLInputElement && root.contains(focused);
+    const field = (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && root.contains(focused) ? focused : null;
+    const focusLabel = field?.getAttribute("aria-label");
+    const selection = field?.selectionStart;
 
     const segments = (["auto", "fast", "frontier"] as Routing[]).map((value) => {
       const button = h("button", "", ROUTING_LABELS[value]);
@@ -379,6 +382,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     verificationStatus.setAttribute("role", "status");
 
     root.replaceChildren(
+      profiles(state),
       usageCard(state.usage),
       ...providerSection(status, state),
       section(
@@ -403,7 +407,13 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       section("On this page", ...changeRows),
       h("div", "s-foot", "", [shortcuts, debug]),
     );
-    if (hadFocus) root.querySelector<HTMLInputElement>(".s-add input")?.focus();
+    if (field) {
+      const next = focusLabel
+        ? root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${CSS.escape(focusLabel)}"]`)
+        : root.querySelector<HTMLInputElement>(".s-add input");
+      next?.focus();
+      if (selection != null) next?.setSelectionRange(selection, selection);
+    }
   };
 
   const queue = () => {
@@ -416,6 +426,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   };
 
   const memory = createMemoryView(queue);
+  const profiles = createProfilesView(queue);
   const onStorage = () => queue();
   chrome.storage.onChanged.addListener(onStorage);
   const onSpeechError = (message: { type?: string; message?: string }) => {

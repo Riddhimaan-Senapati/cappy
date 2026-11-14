@@ -228,3 +228,6 @@ extension/dist/
 
 .agent-keys.json*
 extension/vendor/
+
+llm_logs
+poc_playground

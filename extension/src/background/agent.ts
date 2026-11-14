@@ -212,6 +212,14 @@ export class AgentClient {
     for (const run of [...this.runs.values()].filter((existing) => existing.tabId === tabId)) this.cancelRun(run, "Stopped.");
   }
 
+  stopForProfileSwitch() {
+    for (const [tabId, queue] of this.queues) {
+      for (const item of queue) this.hooks.event(tabId, { type: "cancelled", runId: item.runId, reason: "Profile switched." });
+    }
+    this.queues.clear();
+    for (const run of [...this.runs.values()]) this.cancelRun(run, "Profile switched.");
+  }
+
   private cancelRun(run: Run, reason: string) {
     this.send({ type: "cancel", runId: run.runId });
     this.finish(run);
@@ -354,6 +362,7 @@ export class AgentClient {
   private async onMessage(message: ServerMessage) {
     if (message.type === "usage") {
       const run = message.runId ? this.runs.get(message.runId) : undefined;
+      if (run) this.emit(run, { type: "usage", runId: run.runId, usage: message.usage });
       const tabId = run?.tabId ?? (message.requestId ? this.suggestionTabs.get(message.requestId) : undefined);
       if (tabId) void sendToTab(tabId, { kind: "usage", usage: message.usage, model: message.model, purpose: run ? (run.trigger === "page_load" ? "Automatic page adaptation" : "Chat adaptation") : "Page suggestion" }).catch(() => undefined);
       this.usageUpdates = this.usageUpdates.then(async () => {

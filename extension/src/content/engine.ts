@@ -488,6 +488,10 @@ export function changeHistory(): Array<{ change: ActiveChange; active: boolean }
   return [...changeLog.values()].reverse().map((change) => ({ change, active: applied.has(change.id) }));
 }
 
+export function clearChangeHistory() {
+  changeLog.clear();
+}
+
 export function activeChanges(): ActiveChange[] {
   return [...applied.values(), ...siteControls.values()].map((entry) => entry.change);
 }

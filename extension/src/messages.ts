@@ -1,6 +1,7 @@
 import type { ActiveChange, PageOutline } from "../../shared/adaptation.js";
 import type { ChoiceOption, FrictionCount, FrictionKind, MemoryScope, ProviderInfo, Routing, TabToolName, TargetElement, Tier, TokenUsage, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
+import type { ProfileAction } from "./profiles.js";
 
 export interface AppliedSummary {
   id: string;
@@ -17,6 +18,7 @@ export type UiEvent =
   | { type: "cancelled"; runId: string; reason?: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
+  | { type: "usage"; runId: string; usage: TokenUsage }
   | { type: "blocked"; runId: string; reason: string }
   | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
   | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[]; host?: string; scope?: MemoryScope }
@@ -33,6 +35,7 @@ export interface PageInspection {
 }
 
 export type ContentRequest =
+  | { kind: "prepareProfileSwitch" }
   | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown; source?: "llm" | "recipe" }
   | { kind: "useSiteControl"; input: unknown; userMessage: string }
   | { kind: "list" }
@@ -76,7 +79,8 @@ export interface StatusInfo {
 export type BackgroundRequest =
   | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement }
   | { kind: "deleteRequest"; message: string }
-  | { kind: "pageReady"; origin: string; restored: number }
+  | ({ kind: "profileAction" } & ProfileAction)
+  | { kind: "pageReady"; origin: string; restored: number; profileChanged?: boolean }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
   | { kind: "verifyVoice"; key: string; provider?: "openai" | "gemini" }
