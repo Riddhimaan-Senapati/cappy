@@ -1,2 +1,75 @@
 # browser-agent
-hackumass project
+
+Take control of the web with AI agents.
+
+A Chrome extension that adapts the website you're on to how you need it. Built at HackUMass XIV.
+
+## The problem
+
+Most websites are built for one kind of user. If you're colorblind, sensitive to bright pages, have low vision or a tremor, or lose focus in a busy feed, you end up working around the page instead of using it. Site settings differ everywhere, and browser zoom often breaks the layout.
+
+This extension lets you change the page yourself. You say what you need, or point at something and say it, and an agent edits the live page. It checks the result against the page's own stats and reverts anything that made it worse. Anything it learns about you is saved only after you approve it.
+
+## Your feed, your rules
+
+Most sites decide what you see and in what order. Here you can change that on the live page.
+
+- Rerank what a site recommends: sort videos, posts or results by what you care about. The agent reads each item with `list_items` and reorders them, or sorts alphabetically.
+- Filter or hide content: "hide podcasts", "dim anything about crypto", "hide Shorts". Filters match item text and keep applying as the page loads more.
+- Time-based rules: "hide Shorts and gaming videos on weekdays 9am to 5pm", "dark mode after 10pm", "until December 15". The bar and Settings show each rule's schedule and whether it's on right now.
+
+## Features
+
+- Plain-language requests like "dim this page", "hide podcasts" or "make the form easier". The agent writes CSS, uses an allowlisted DOM operation, or runs one of the built-in blocks: dark mode, colorblind filter, text scaling, stop motion, content filter and form fixer.
+- Point and speak. Hover the mouse or point with a camera hand pointer and say "make this red". With the camera you can pinch and hold to select, then let go to send.
+- Voice input stops after a short pause, when you say "done", or at 15 seconds. A ring shows when it's about to send.
+- Friction detection. Repeated zooming or missed clicks on small targets produce one suggested fix, and the suggestions adjust to what you accept, dismiss or undo.
+- Memory with consent. Each preference asks whether it applies to this site, all sites, or neither.
+- Hands-free control with an air pointer, pinch or dwell click, hand and head scrolling, and swipes for back and forward.
+- Every change can be undone from the toast or the change history, and one switch pauses all of them.
+
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph ext[Chrome extension]
+    UI[Bar, voice, camera,<br/>friction sensors]
+    CS[Content script<br/>reads page, applies and<br/>verifies changes]
+    SW[Service worker<br/>queue, tool calls]
+    ST[(chrome.storage<br/>profile, saved changes,<br/>activity counts)]
+  end
+  subgraph srv[Local server]
+    AG[Agent loop<br/>Claude, OpenAI, Gemini]
+    SF[Safety<br/>CSS scan, op allowlist,<br/>injection check]
+  end
+  UI -- request + pointed element --> SW
+  SW <-- WebSocket --> AG
+  AG -- tool call --> SW
+  SW -- read_page, apply_change --> CS
+  CS -- matched counts, before/after stats --> SW
+  AG --- SF
+  CS --- ST
+  SW --- ST
+```
+
+Each request runs as one tool-use loop. The agent reads an outline of the page, applies a change, looks at how many elements matched and how the accessibility stats moved, then keeps, fixes or reverts the change. Saved changes replay on page load without a model call. API keys stay on the local server and never ship in the extension.
+
+## Safety
+
+- The model never writes JavaScript. CSS is scanned before use, and DOM operations and attributes come from an allowlist.
+- Page text is untrusted. An injection check runs before any model call, and a hit blocks all changes on that page.
+- The model sees short profile lines and friction counts. It does not see your browsing history or text from other sites.
+
+## Run it
+
+```bash
+bun install
+bun run build:ext
+bun server/index.ts
+```
+
+Load `extension/` unpacked at `chrome://extensions`, sign in with ChatGPT or add an API key from the extension popup, then press Cmd/Ctrl+Shift+Space on any page. `http://localhost:8787/demo/campus.html` is a good page to try it on.
+
+Tests: `bun run typecheck`, `bun run test` and `bun run e2e`. The e2e suite needs port 8787 free.
+
+Engineering details are in [CLAUDE.md](CLAUDE.md).
