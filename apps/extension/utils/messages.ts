@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdaptationId, PageOutline } from "@browser-agent/shared";
+import { AdaptationId, BlockConfig, PageOutline } from "@browser-agent/shared";
 
 export const PageReady = z
   .object({ type: z.literal("page-ready"), url: z.string().max(2048), outline: PageOutline })
@@ -41,6 +41,11 @@ export const GetOutline = z.object({ type: z.literal("get-outline") }).strict();
 
 export const OutlineReply = z.object({ url: z.string().max(2048), outline: PageOutline }).strict();
 export type OutlineReply = z.infer<typeof OutlineReply>;
+export const ApplyRuntime = z
+  .object({ type: z.literal("apply-runtime"), adaptationId: AdaptationId, blocks: z.array(BlockConfig).max(4) })
+  .strict();
+export const UndoRuntime = z.object({ type: z.literal("undo-runtime") }).strict();
+export const AxeCount = z.object({ type: z.literal("axe-count") }).strict();
 
 export const ToContentMessage = z.discriminatedUnion("type", [
   ShowBanner,
@@ -50,6 +55,9 @@ export const ToContentMessage = z.discriminatedUnion("type", [
   FrictionPrompt,
   GetOutline,
   Gesture,
+  ApplyRuntime,
+  UndoRuntime,
+  AxeCount,
 ]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;
 
@@ -62,5 +70,8 @@ export const Message = z.discriminatedUnion("type", [
   Gesture,
   UserRequest,
   FrictionAccept,
+  ApplyRuntime,
+  UndoRuntime,
+  AxeCount,
 ]);
 export type Message = z.infer<typeof Message>;

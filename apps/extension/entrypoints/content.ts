@@ -6,6 +6,8 @@ import {
 import { Message, ToContentMessage } from "../utils/messages";
 import { startPreblur } from "../utils/preblur";
 import { buildPageText } from "../utils/outline";
+import { countViolations } from "../utils/axe";
+import { applyRuntimeBlocks } from "../utils/runtime-blocks";
 
 const FILTER_ID = "adaptive-agent-filters";
 
@@ -38,6 +40,13 @@ export default defineContentScript({
     const stopPreblur = () => {
       endPreblur?.();
       endPreblur = undefined;
+    };
+
+    let undoRuntime: (() => void) | undefined;
+
+    const revertRuntime = () => {
+      undoRuntime?.();
+      undoRuntime = undefined;
     };
 
     const removeAdaptationUi = () => {
@@ -127,6 +136,7 @@ export default defineContentScript({
           break;
         case "remove-banner":
           removeAdaptationUi();
+          revertRuntime();
           break;
         case "gesture":
           if (msg.action === "back") history.back();
@@ -141,6 +151,19 @@ export default defineContentScript({
         case "get-outline":
           sendResponse({ url: location.href, outline: buildOutline() });
           break;
+        case "apply-runtime":
+          revertRuntime();
+          undoRuntime = applyRuntimeBlocks(msg.blocks);
+          break;
+        case "undo-runtime":
+          revertRuntime();
+          break;
+        case "axe-count":
+          countViolations().then(
+            (count) => sendResponse({ count }),
+            () => sendResponse({ count: null }),
+          );
+          return true;
       }
       return false;
     });
