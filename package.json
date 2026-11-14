@@ -10,7 +10,14 @@
     "test": "bun test",
     "typecheck": "bun run --filter '*' typecheck",
     "e2e": "cd apps/extension && bunx wxt build && cd ../.. && bun scripts/e2e-gate.ts",
-    "bench:gemini": "bun scripts/bench-gemini.ts"
+    "bench:gemini": "bun scripts/bench-gemini.ts",
+    "e2e:build": "cd apps/extension && bunx wxt build",
+    "e2e:injection": "bun scripts/e2e-injection.ts",
+    "e2e:companion": "bun scripts/e2e-companion.ts",
+    "e2e:form": "bun scripts/e2e-form.ts",
+    "e2e:request": "bun scripts/e2e-request.ts",
+    "e2e:live": "bun scripts/e2e-live.ts",
+    "e2e:all": "bun run e2e:build && bun scripts/e2e-gate.ts && bun scripts/e2e-injection.ts && bun scripts/e2e-companion.ts && bun scripts/e2e-form.ts && bun scripts/e2e-request.ts"
   },
   "devDependencies": {
     "playwright": "1"
