@@ -96,10 +96,22 @@ function addMissingLabels(doc: Document, journal: Journal): void {
     const label = doc.createElement("label");
     label.setAttribute("for", field.id);
     label.textContent = text;
+    // Added labels must not inherit a page's low-contrast or tiny text, or the fix itself fails axe color-contrast.
+    for (const [prop, value] of LABEL_STYLE) label.style.setProperty(prop, value, "important");
     field.before(label);
     journal.add(() => label.remove());
   }
 }
+
+const LABEL_STYLE: ReadonlyArray<readonly [string, string]> = [
+  ["display", "block"],
+  ["color", "#111111"],
+  ["background-color", "#ffffff"],
+  ["font-size", "16px"],
+  ["font-weight", "600"],
+  ["line-height", "1.4"],
+  ["margin", "6px 0 2px"],
+];
 
 function watchErrors(doc: Document, journal: Journal): void {
   const shown = new Map<Field, HTMLElement>();
