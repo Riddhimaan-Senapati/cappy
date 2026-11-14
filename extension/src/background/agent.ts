@@ -1,5 +1,5 @@
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
-import type { ApplyOutcome, ClientMessage, ProviderInfo, RunRequest, ServerMessage, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
+import type { ApplyOutcome, ClientMessage, ProviderInfo, RunRequest, ServerMessage, TargetElement, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
 import { load, recipeKey, save, saveRecipe } from "../storage.js";
 
@@ -12,6 +12,7 @@ interface Run {
   message: string;
   applied: Map<string, ActiveChange>;
   commandId?: string;
+  target?: TargetElement;
 }
 
 export interface AgentHooks {
@@ -48,7 +49,7 @@ export class AgentClient {
   private notice: StatusInfo["notice"];
   private modelsRequested = new Set<string>();
   private suggestions = new Map<string, (text: string | null) => void>();
-  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string }>>();
+  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; target?: TargetElement }>>();
 
   constructor(private hooks: AgentHooks) {}
 
@@ -202,20 +203,20 @@ export class AgentClient {
     if (!item) return;
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return void this.queues.delete(tabId);
-    await this.startRun(tab, "chat", item.message, item.fresh, item.runId, item.commandId);
+    await this.startRun(tab, "chat", item.message, item.fresh, item.runId, item.commandId, item.target);
   }
 
-  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, queuedId?: string, commandId?: string) {
+  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, queuedId?: string, commandId?: string, target?: TargetElement) {
     if (!tab.id || !tab.url?.startsWith("http")) return;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const runId = queuedId ?? crypto.randomUUID();
-    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), commandId };
+    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), commandId, target };
 
     const busy = [...this.runs.values()].some((existing) => existing.tabId === tabId);
     if (busy && trigger === "page_load") return;
     if (busy && !queuedId) {
-      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId }]);
+      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId, target }]);
       return this.emit(run, { type: "queued", runId, message });
     }
     this.emit(run, { type: "start", runId, trigger, message });
@@ -226,7 +227,7 @@ export class AgentClient {
       return void this.next(tabId);
     }
 
-    if (trigger === "chat" && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) {
+    if (trigger === "chat" && !fresh && !target && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) {
       await this.markCommandApplied(run);
       return void this.next(tabId);
     }
@@ -253,6 +254,7 @@ export class AgentClient {
         trigger,
         message,
         provider: (await this.getStatus()).activeProvider ?? undefined,
+        target,
         routing: state.routing,
         models: state.modelChoices[(await this.getStatus()).activeProvider ?? ""] ?? {},
         history: state.history.slice(-8),
@@ -349,7 +351,7 @@ export class AgentClient {
   private async complete(run: Run, reply: string) {
     const state = await load();
     if (reply) await save({ history: [...state.history, { role: "assistant" as const, text: reply }].slice(-20) });
-    if (run.trigger === "chat" && run.applied.size) {
+    if (run.trigger === "chat" && run.applied.size && !run.target) {
       await saveRecipe(recipeKey(run.origin, run.message), { message: run.message, changes: [...run.applied.values()], at: Date.now() });
     }
     const applied = this.summaries(run);

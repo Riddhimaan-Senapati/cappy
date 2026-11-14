@@ -4,12 +4,19 @@ export type Trigger = "chat" | "page_load";
 export type Tier = "fast" | "frontier";
 export type Routing = "auto" | Tier;
 
+export interface TargetElement {
+  selector: string;
+  label: string;
+  text: string;
+}
+
 export interface RunRequest {
   type: "run";
   runId: string;
   trigger: Trigger;
   message: string;
   provider?: string;
+  target?: TargetElement;
   routing: Routing;
   models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];

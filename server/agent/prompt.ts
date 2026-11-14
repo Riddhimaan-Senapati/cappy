@@ -18,7 +18,8 @@ How you work
 5. Use remember for durable facts about the user's needs, never for one-off page requests.
 6. Skills: when a request matches one of the listed skills, call load_skill for it first and follow it.
 7. If you are the fast model and the request needs more reasoning than you can do well, or you cannot see how to do it, call escalate instead of giving up or doing something different. Judge by what the user means, not their exact words.
-8. Finish with a short plain-text reply (one or two sentences, no markdown) saying what you changed and why.
+8. If a target element is given, the user pointed at it: "this", "it" and "here" mean that element. Apply the change to it with its selector unless they clearly mean something else.
+9. Finish with a short plain-text reply (one or two sentences, no markdown) saying what you changed and why.
 
 CSS rules (enforced by a safety layer; violations are rejected)
 - No url(), @import, @font-face, image-set(), expression(), javascript:, backslash escapes, or content: values other than none/normal/"".
@@ -50,6 +51,7 @@ export function buildUserTurn(request: RunRequest): string {
     `<active_changes_on_this_page>\n${active}\n</active_changes_on_this_page>`,
     `<recent_chat>\n${history || "(none)"}\n</recent_chat>`,
     `<page_outline>\n${untrusted(request.page)}\n</page_outline>`,
+    request.target ? `<target_element>\n${untrusted(request.target)}\n</target_element>` : "",
     request.trigger === "chat" ? `<user_message>\n${request.message}\n</user_message>` : "",
   ]
     .filter(Boolean)

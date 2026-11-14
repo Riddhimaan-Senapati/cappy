@@ -1,5 +1,5 @@
 import type { PageOutline } from "../../shared/adaptation.js";
-import type { ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { ProviderInfo, Routing, TabToolName, TargetElement, Tier, Trigger } from "../../shared/protocol.js";
 
 export interface AppliedSummary {
   id: string;
@@ -24,6 +24,8 @@ export type ContentRequest =
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
+  | { kind: "targetContextElement" }
+  | { kind: "pickElement" }
   | { kind: "ui"; event: UiEvent };
 
 export type ContentResponse = { ok: true; result: unknown } | { ok: false; error: string };
@@ -41,7 +43,7 @@ export interface StatusInfo {
 }
 
 export type BackgroundRequest =
-  | { kind: "runChat"; message: string; fresh: boolean }
+  | { kind: "runChat"; message: string; fresh: boolean; target?: TargetElement }
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }

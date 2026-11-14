@@ -72,7 +72,7 @@ function cameraSection(state: StoredState): Node {
       button.addEventListener("click", () => set({ dwellMs: value }));
       return button;
     });
-    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click, for when pinching is hard."), h("div", "s-seg s-seg4", "", segments), h("div", "s-note", "Hold a fist for a second to pause or resume."));
+    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click, for when pinching is hard."), h("div", "s-seg s-seg4", "", segments), h("div", "s-note", "Thumbs down to cancel. Hold a fist for a second to pause or resume."));
   }
   return h("section", "s-sec", "", [h("h3", "", "Camera"), ...rows]);
 }

@@ -1,12 +1,14 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
-import type { Routing } from "../../../shared/protocol.js";
+import type { Routing, TargetElement } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { load, save, type SavedCommand, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
 
 export interface SpotlightDeps {
-  ask(message: string, fresh: boolean): void;
+  ask(message: string, fresh: boolean, target?: TargetElement): void;
+  clearTarget(): void;
+  pick(): void;
   listChanges(): ActiveChange[];
   history(): Array<{ change: ActiveChange; active: boolean }>;
   reapply(change: ActiveChange): Promise<void>;
@@ -41,6 +43,7 @@ interface Step {
 interface RunState {
   runId: string | null;
   message: string;
+  target?: string;
   status: "pending" | "queued" | "running" | "done";
   steps: Step[];
   model?: string;
@@ -54,6 +57,7 @@ interface RunState {
   shownResult: boolean;
   seen: boolean;
   saving: boolean;
+  undone: boolean;
 }
 
 const MAX_THREAD = 6;
@@ -67,6 +71,9 @@ export class Spotlight {
   private orb = h("div", "orb");
   private input = h("input", "input");
   private pill = h("button", "pill");
+  private pickButton = h("button", "pick");
+  private chip = h("div", "target-chip");
+  private target: TargetElement | null = null;
   private body = h("div", "body");
   private hints = h("div", "hints");
   private view: View = "list";
@@ -98,7 +105,13 @@ export class Spotlight {
     this.body.setAttribute("role", "listbox");
     this.pill.type = "button";
 
-    this.bar.append(h("div", "row", "", [this.orb, this.input, this.pill]), this.body, this.hints);
+    this.chip.hidden = true;
+    this.pickButton.type = "button";
+    this.pickButton.title = "Choose an element on the page";
+    this.pickButton.setAttribute("aria-label", "Choose an element on the page");
+    this.pickButton.append(icon("target", 15));
+    this.pickButton.addEventListener("click", () => this.startPicking());
+    this.bar.append(h("div", "row", "", [this.orb, this.chip, this.input, this.pickButton, this.pill]), this.body, this.hints);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
 
@@ -170,8 +183,42 @@ export class Spotlight {
     requestAnimationFrame(() => this.input.focus({ preventScroll: true }));
   }
 
+  private startPicking() {
+    this.hide();
+    this.deps.pick();
+  }
+
+  showWithTarget(target: TargetElement) {
+    this.setTarget(target);
+    if (this.opened) {
+      this.setView("list");
+      this.input.focus({ preventScroll: true });
+    } else void this.show("list");
+  }
+
+  private setTarget(target: TargetElement | null) {
+    this.target = target;
+    this.chip.hidden = !target;
+    if (!target) {
+      this.deps.clearTarget();
+      this.chip.replaceChildren();
+      return;
+    }
+    const remove = h("button", "chip-x", "", [icon("x", 11)]);
+    remove.type = "button";
+    remove.setAttribute("aria-label", "Clear the selected element");
+    remove.addEventListener("click", () => {
+      this.setTarget(null);
+      this.render();
+      this.input.focus({ preventScroll: true });
+    });
+    this.chip.replaceChildren(icon("target", 12), h("span", "", target.label), remove);
+    this.chip.title = `Selected: ${target.label}`;
+  }
+
   hide() {
     if (!this.opened) return;
+    if (this.target) this.setTarget(null);
     this.opened = false;
     window.clearTimeout(this.closeTimer);
     this.layer.classList.remove("open");
@@ -200,8 +247,9 @@ export class Spotlight {
     this.layer.classList.toggle("running", this.view === "run");
     this.input.readOnly = this.view === "settings" || this.view === "history" || this.view === "commands";
     this.input.placeholder =
-      this.view === "settings" ? "Settings" : this.view === "history" ? "Changes on this page  ·  Space to turn on or off" : this.view === "commands" ? "Saved commands  ·  Enter to run  ·  Space for every site" : this.view === "run" ? (this.working ? "Add another request" : "Ask a follow-up") : this.placeholder;
+      this.view === "settings" ? "Settings" : this.view === "history" ? "Changes on this page  ·  Space to turn on or off" : this.view === "commands" ? "Saved commands  ·  Enter to run  ·  Space for every site" : this.target ? "What should change about this?" : this.view === "run" ? (this.working ? "Add another request" : "Ask a follow-up") : this.placeholder;
     this.orb.classList.toggle("work", this.working);
+    this.pickButton.hidden = this.view !== "list" && this.view !== "run";
     this.renderPill();
     if (this.view === "settings") this.renderSettingsView();
     else if (this.view === "history") this.renderHistory();
@@ -264,6 +312,7 @@ export class Spotlight {
   private commands(changes: ActiveChange[]): Item[] {
     const state = this.cache;
     return [
+      { id: "pick", icon: "target", title: "Select an element on the page", hint: "then say what to change", kind: "command", section: "Commands", keywords: "pick choose this element point target inspect", run: () => this.startPicking() },
       { id: "commands", icon: "bookmark", title: "Saved commands", hint: "→", kind: "command", section: "Commands", keywords: "shortcuts presets saved favorites", run: () => this.setView("commands") },
       {
         id: "camera",
@@ -319,6 +368,7 @@ export class Spotlight {
       run: () => this.deps.revert(change.id),
     }));
 
+    if (!raw && this.target) return [];
     if (!raw) {
       const last = [...changes].sort((a, b) => b.appliedAt - a.appliedAt)[0];
       const items: Item[] = [];
@@ -395,15 +445,21 @@ export class Spotlight {
     if (!message) return;
     window.clearTimeout(this.closeTimer);
     for (const run of this.runs) if (run.status === "done") run.open = false;
-    this.runs.push({ runId: null, message, status: "pending", steps: [{ text: "Reading the page", tone: "info" }], startedAt: Date.now(), open: true, expanded: false, shownSteps: 0, shownResult: false, seen: false, saving: false });
+    const target = this.target ?? undefined;
+    this.runs.push({ runId: null, message, target: target?.label, status: "pending", steps: [{ text: "Reading the page", tone: "info" }], startedAt: Date.now(), open: true, expanded: false, shownSteps: 0, shownResult: false, seen: false, saving: false, undone: false });
     while (this.runs.length > MAX_THREAD) {
       const oldest = this.runs.findIndex((run) => run.status === "done");
       if (oldest < 0) break;
       this.runs.splice(oldest, 1);
     }
     this.input.value = "";
+    if (target) {
+      this.target = null;
+      this.chip.hidden = true;
+      this.chip.replaceChildren();
+    }
     this.setView("run");
-    this.deps.ask(message, fresh);
+    this.deps.ask(message, fresh, target);
   }
 
   private elapsed(run: RunState) {
@@ -462,7 +518,7 @@ export class Spotlight {
     }
 
     const live = run.status !== "done";
-    const head = h("div", "ask-line", "", [h("span", "q", run.message)]);
+    const head = h("div", "ask-line", "", [h("span", "q", run.target ? `${run.message} (${run.target})` : run.message)]);
     if (live) {
       const stop = h("button", "link stop", "Stop");
       stop.type = "button";
@@ -480,9 +536,17 @@ export class Spotlight {
     });
     head.append(hide);
     const { kind, text, applied } = run.result!;
-    const children: Node[] = [head, h("div", `result ${kind === "done" ? "" : kind}${run.shownResult ? "" : " new"}`, "", [icon(kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 15), h("span", "", text)])];
+    const resultRow = h("div", `result ${kind === "done" ? "" : kind}${run.shownResult ? "" : " new"}${run.undone ? " undone" : ""}`, "", [icon(run.undone ? "undo" : kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 15), h("span", "", run.undone ? "Undone. The page is back to how it was before this request." : text)]);
+    if (kind === "done" && applied.length && !run.undone) {
+      const undoAll = h("button", "undo-all", "", [icon("undo", 13), document.createTextNode(applied.length > 1 ? " Undo all" : " Undo")]);
+      undoAll.type = "button";
+      undoAll.title = "Undo everything this request changed (Ctrl+Z)";
+      undoAll.addEventListener("click", () => void this.undoRun(run));
+      resultRow.append(undoAll);
+    }
+    const children: Node[] = [head, resultRow];
     run.shownResult = true;
-    if (applied.length) {
+    if (applied.length && !run.undone) {
       children.push(
         h(
           "div",
@@ -514,8 +578,9 @@ export class Spotlight {
       this.renderRun();
     });
     const footer = h("div", "card-foot", "", [fold]);
+    if (kind === "done" && applied.length && !run.undone && run === this.latestUndoable()) footer.append(h("span", "fold hint-z", "Ctrl+Z to undo"));
     const alreadySaved = (this.cache?.commands ?? []).some((command) => command.prompt.toLowerCase() === run.message.toLowerCase());
-    if (kind === "done" && applied.length && !alreadySaved && !run.saving) {
+    if (kind === "done" && applied.length && !alreadySaved && !run.saving && !run.undone) {
       const saveButton = h("button", "fold", "", [icon("bookmark", 11), document.createTextNode(" Save as command")]);
       saveButton.type = "button";
       saveButton.addEventListener("click", () => {
@@ -627,6 +692,18 @@ export class Spotlight {
     await save({ commands: commands.filter((command) => command.id !== id) });
     this.cache = await load();
     if (this.view === "commands") this.renderCommands();
+  }
+
+  private latestUndoable(): RunState | undefined {
+    return [...this.runs].reverse().find((run) => run.status === "done" && !run.undone && run.result?.kind === "done" && run.result.applied.length > 0);
+  }
+
+  private async undoRun(run: RunState) {
+    if (!run.result || run.undone) return;
+    for (const change of run.result.applied) await this.deps.revert(change.id);
+    run.undone = true;
+    run.open = true;
+    if (this.view === "run") this.renderRun();
   }
 
   private ticker: number | undefined;
@@ -756,6 +833,8 @@ export class Spotlight {
       if (run.result && run.status !== "done") {
         run.status = "done";
         run.endedAt = Date.now();
+        // The outline marks what the agent is working on; clear it once that request is finished.
+        if (run.target && !this.target) this.deps.clearTarget();
       }
     }
 
@@ -786,6 +865,12 @@ export class Spotlight {
       return true;
     }
     const inSearchField = this.shadow.activeElement === this.input;
+    // Focus sits in the search field, outside the scrollable panel, so scroll keys would otherwise scroll the page behind.
+    if ((this.view === "settings" || this.view === "run") && inSearchField && !this.input.value) {
+      const step: Record<string, number> = { ArrowDown: 56, ArrowUp: -56, PageDown: this.body.clientHeight * 0.85, PageUp: -this.body.clientHeight * 0.85 };
+      if (key in step) return this.body.scrollBy({ top: step[key], behavior: "smooth" }), true;
+      if (key === "Home" || key === "End") return this.body.scrollTo({ top: key === "Home" ? 0 : this.body.scrollHeight, behavior: "smooth" }), true;
+    }
     if (this.view === "history") {
       if (key === "ArrowDown") return this.moveHistory(1), true;
       if (key === "ArrowUp") return this.moveHistory(-1), true;
@@ -808,6 +893,11 @@ export class Spotlight {
       if (key === "Enter" && commands[this.commandSelected]) return this.ask(commands[this.commandSelected].prompt, false), true;
       if (key === "Delete" && commands[this.commandSelected]) return void this.deleteCommand(commands[this.commandSelected].id), true;
       if (key === "Backspace" || key === "ArrowLeft") return this.setView("list"), true;
+    }
+    if (this.view === "run" && inSearchField && !this.input.value && (event.ctrlKey || event.metaKey) && key.toLowerCase() === "z") {
+      const run = this.latestUndoable();
+      if (run) void this.undoRun(run);
+      return true;
     }
     if (this.view === "list" && !this.input.value) {
       if (key === "ArrowRight" && this.deps.history().length) return this.setView("history"), true;

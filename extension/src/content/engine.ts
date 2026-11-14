@@ -23,10 +23,11 @@ const BASE_CSS = `
 @keyframes ba-pulse { 0% { box-shadow: 0 0 0 0 rgba(124, 140, 255, 0.75); } 100% { box-shadow: 0 0 0 12px rgba(124, 140, 255, 0); } }
 .ba-pulse { animation: ba-pulse 0.9s ease-out 2 !important; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.45s; animation-timing-function: ease-in-out; }
+[data-ba-target] { outline: 3px solid #8b9bff !important; outline-offset: 3px !important; border-radius: 4px; }
 html.ba-busy body { filter: blur(3px) saturate(0.7); transition: filter 0.3s ease; }
 `;
 
-function ensureBaseStyle() {
+export function ensureBaseStyle() {
   if (document.querySelector(`style[${OWN_ATTR}="base"]`)) return;
   const style = document.createElement("style");
   style.setAttribute(OWN_ATTR, "base");

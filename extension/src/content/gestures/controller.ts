@@ -1,11 +1,13 @@
 import type { HandFrame, HeadFrame } from "../../camera/vision.js";
 import type { CameraSettings } from "../../storage.js";
-import { OWN_ATTR } from "../dom.js";
+import { describeElement, OWN_ATTR } from "../dom.js";
 import { OneEuroFilter } from "./filter.js";
 
 export interface CameraHooks {
   notify(text: string): void;
   turnOff(): void;
+  select(element: Element): void;
+  cancel(): boolean;
 }
 
 const CSS = `
@@ -41,6 +43,9 @@ const PINCH_ON = 0.26;
 const PINCH_OFF = 0.4;
 const DWELL_RADIUS = 28;
 const PAUSE_HOLD_MS = 1200;
+const TAP_MS = 450;
+const SELECT_HOLD_MS = 700;
+const STOP_HOLD_MS = 400;
 const HEAD_DEADZONE = 0.06;
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
@@ -53,12 +58,6 @@ function findScroller(x: number, y: number): Element {
     element = element.parentElement;
   }
   return document.scrollingElement ?? document.documentElement;
-}
-
-function describe(element: Element): string {
-  const name = element.getAttribute("aria-label") || (element as HTMLInputElement).placeholder || element.textContent?.replace(/\s+/g, " ").trim() || "";
-  const kind = element.matches("a[href]") ? "link" : element.matches("button, [role=button]") ? "button" : element.matches("input, textarea, select") ? "field" : element.tagName.toLowerCase();
-  return name ? `${name.slice(0, 40)} · ${kind}` : kind;
 }
 
 export class CameraController {
@@ -78,6 +77,11 @@ export class CameraController {
   private fistSince: number | null = null;
   private fistFired = false;
   private pinching = false;
+  private pinchStart = 0;
+  private pinchTarget: Element | null = null;
+  private holdFired = false;
+  private stopSince: number | null = null;
+  private stopFired = false;
   private stable = { x: 0, y: 0 };
   private dwellAnchor: { x: number; y: number; since: number } | null = null;
   private dwellFired = false;
@@ -224,6 +228,20 @@ export class CameraController {
       mode = speed ? (speed < 0 ? "Scrolling up" : "Scrolling down") : "Palm: move up or down";
     }
 
+    // Thumbs-down held briefly cancels: a selection in progress, a chosen target or the open bar.
+    if (hand?.pose === "thumbs_down") {
+      this.stopSince ??= t;
+      if (!this.stopFired && t - this.stopSince > STOP_HOLD_MS) {
+        this.stopFired = true;
+        this.pinching = false;
+        this.pinchTarget = null;
+        mode = this.hooks.cancel() ? "Cancelled" : "Nothing to cancel";
+      } else if (!this.stopFired) mode = "Thumbs down: cancelling";
+    } else {
+      this.stopSince = null;
+      this.stopFired = false;
+    }
+
     if (head && this.settings.headScroll) {
       this.lastHeadAt = t;
       if (this.headBaseline === null) {
@@ -260,7 +278,7 @@ export class CameraController {
     const y = this.filterY.filter(ny * innerHeight, t);
 
     const startPinch = hand.pinch < PINCH_ON && !this.pinching;
-    if (hand.pinch > PINCH_OFF) this.pinching = false;
+    if (this.pinching && hand.pinch > PINCH_OFF) this.endPinch(t);
     if (!this.pinching && !startPinch) this.stable = { x, y };
 
     this.cursor.style.translate = `${this.stable.x}px ${this.stable.y}px`;
@@ -273,11 +291,33 @@ export class CameraController {
 
     if (startPinch) {
       this.pinching = true;
-      this.activate();
+      this.pinchStart = t;
+      this.pinchTarget = this.hovered;
+      this.holdFired = false;
       this.dwellAnchor = null;
+    }
+    if (this.pinching) {
+      // A quick pinch clicks; holding the pinch selects the element as the agent's target.
+      const held = t - this.pinchStart;
+      this.setRing(held > 200 ? (held - 200) / (SELECT_HOLD_MS - 200) : 0);
+      if (!this.holdFired && held >= SELECT_HOLD_MS && this.pinchTarget) {
+        this.holdFired = true;
+        this.setRing(0);
+        this.hooks.select(this.pinchTarget);
+      }
       return;
     }
     this.updateDwell(t);
+  }
+
+  private endPinch(t: number) {
+    this.pinching = false;
+    if (!this.holdFired && t - this.pinchStart < TAP_MS && this.pinchTarget) {
+      this.hovered = this.pinchTarget;
+      this.activate();
+    }
+    this.pinchTarget = null;
+    this.setRing(0);
   }
 
   private updateDwell(t: number) {
@@ -312,7 +352,7 @@ export class CameraController {
     const rect = target.getBoundingClientRect();
     Object.assign(this.outline.style, { left: `${rect.left - 3}px`, top: `${rect.top - 3}px`, width: `${rect.width + 6}px`, height: `${rect.height + 6}px` });
     this.outline.classList.add("on");
-    this.label.textContent = describe(target);
+    this.label.textContent = describeElement(target);
     Object.assign(this.label.style, { left: `${Math.min(innerWidth - 270, Math.max(8, rect.left))}px`, top: `${rect.top > 32 ? rect.top - 28 : rect.bottom + 6}px` });
     this.label.classList.add("on");
   }
@@ -328,6 +368,8 @@ export class CameraController {
   }
 
   private hidePointer() {
+    this.pinching = false;
+    this.pinchTarget = null;
     this.cursor.classList.remove("on", "press");
     this.outline.classList.remove("on");
     this.label.classList.remove("on");

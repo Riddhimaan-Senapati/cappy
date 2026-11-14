@@ -2,13 +2,34 @@ import type { ActiveChange, Change } from "../../../shared/adaptation.js";
 import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "../messages.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
-import { activeChanges, applyChange, changeHistory, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { describeElement, uniqueSelector } from "./dom.js";
+import { activeChanges, applyChange, changeHistory, ensureBaseStyle, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
+import { ElementPicker } from "./picker.js";
 import { inspect, listItems, readPage } from "./outline.js";
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
 let camera: CameraController | null = null;
+let lastContextElement: Element | null = null;
+let targetElement: Element | null = null;
+const picker = new ElementPicker(
+  (element) => selectTarget(element),
+  () => ensureOverlay().spotlight.show(),
+);
+
+function clearTarget() {
+  targetElement?.removeAttribute("data-ba-target");
+  targetElement = null;
+}
+
+function selectTarget(element: Element) {
+  clearTarget();
+  ensureBaseStyle();
+  targetElement = element;
+  element.setAttribute("data-ba-target", "");
+  ensureOverlay().spotlight.showWithTarget({ selector: uniqueSelector(element), label: describeElement(element), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 160) });
+}
 const suggestionCache = new Map<string, Promise<string | null>>();
 
 let tornDown = false;
@@ -47,6 +68,15 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
   camera = new CameraController(settings, {
     notify: (text) => ensureOverlay().showToast(text, []),
     turnOff: () => void load().then((state) => save({ camera: { ...state.camera, enabled: false } })),
+    select: selectTarget,
+    cancel: () => {
+      const hadSomething = Boolean(targetElement) || Boolean(overlay?.spotlight.isOpen()) || picker.isActive;
+      picker.stop();
+      clearTarget();
+      overlay?.spotlight.hide();
+      if (hadSomething) ensureOverlay().showToast("Cancelled.", []);
+      return hadSomething;
+    },
   });
   camera.start();
 }
@@ -93,7 +123,9 @@ async function restore(animate: boolean) {
 
 function ensureOverlay(): OverlayUi {
   overlay ??= new OverlayUi({
-    ask: (message, fresh) => void send({ kind: "runChat", message, fresh }),
+    ask: (message, fresh, target) => void send({ kind: "runChat", message, fresh, target }),
+    clearTarget,
+    pick: () => picker.start(),
     listChanges: activeChanges,
     history: changeHistory,
     reapply: async (change) => void (await apply(change)),
@@ -151,6 +183,12 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return setBusy(request.on);
     case "toast":
       return ensureOverlay().showToast(request.text, request.undoIds);
+    case "pickElement":
+      overlay?.spotlight.hide();
+      return picker.start();
+    case "targetContextElement":
+      if (lastContextElement?.isConnected) selectTarget(lastContextElement);
+      return;
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
     case "ui":
@@ -170,6 +208,8 @@ function start() {
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   });
+
+  addEventListener("contextmenu", (event) => (lastContextElement = event.composedPath()[0] instanceof Element ? (event.composedPath()[0] as Element) : null), true);
 
   for (const type of KEY_EVENTS) {
     // Registered at document_start so these run before page scripts and keep page hotkeys from firing while the bar has focus.
