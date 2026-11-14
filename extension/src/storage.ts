@@ -262,6 +262,17 @@ export async function recordApplied(origin: string, change: ActiveChange) {
   await save({ globalChanges, siteChanges: { ...state.siteChanges, [origin]: site } });
 }
 
+export async function forgetStoredChange(host: string | null, id: string) {
+  const state = await load();
+  const siteChanges = { ...state.siteChanges };
+  if (host != null) {
+    const next = without(siteChanges[host] ?? [], id);
+    if (next.length) siteChanges[host] = next;
+    else delete siteChanges[host];
+  }
+  await save({ globalChanges: host == null ? without(state.globalChanges, id) : state.globalChanges, siteChanges });
+}
+
 export async function recordReverted(origin: string, id: string) {
   const state = await load();
   await save({

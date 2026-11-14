@@ -11,7 +11,7 @@ Any `Change` can carry a `schedule`. Besides days, an HH:MM window, and from/unt
 `server/agent/schedule.ts` reads the user's words and `apply_change` (`server/agent/tools.ts`) writes the result onto the change, using `clientTime` when the request has one:
 
 - "for the next 30 seconds", "in 30 seconds", and the same shapes for minutes and hours. chrono-node finds the phrase (`chrono.parse` with `forwardDate: true`). date-fns `addSeconds` turns the count into the end instant. A span like this replaces the whole schedule, so a clock the model guessed does not also apply.
-- "on weekdays" and "on weekends" stay day lists (`mon` to `fri`, `sat` and `sun`). Chrono returns nothing for "on weekends". "this weekend" is supposed to be that one Saturday and Sunday (`from` and `until`, no repeating day list). The parser still returns every Saturday and Sunday. `tests/schedule.test.ts` fails on that for Saturday 14 Nov 2026 and Wednesday 11 Nov 2026.
+- "on weekdays" and "on weekends" stay day lists (`mon` to `fri`, `sat` and `sun`). Chrono returns nothing for "on weekends". "this weekend" is that one Saturday and Sunday (`from` and `until`, no repeating day list). On a weekday it is the upcoming weekend. On Saturday or Sunday it is the weekend already underway.
 - "between 9am and 5pm" and "from 14:00 to 15:00" stay on the regex that was already there. A duration and a clock window in the same sentence keep the duration and drop the window.
 
 `isScheduleActive` is false at and after `untilAt`. `describeSchedule` adds the local time with seconds, hour without a leading zero, for example "Until 16:33:30". The word between two clock times is "to".
@@ -35,7 +35,7 @@ These landed in the same commit. Leave them as they are.
 
 ## Tests
 
-- `tests/schedule.test.ts`: `untilAt` on and off, the "Until 16:33:30" label, and `parseSpokenSchedule` for 30 seconds and weekends. Newer cases require one weekend for "this weekend", a length that drops a clock window, and no schedule for "for a minute". The two "this weekend" cases fail.
+- `tests/schedule.test.ts`: `untilAt` on and off, the "Until 16:33:30" label, `parseSpokenSchedule` for 30 seconds and weekends, one weekend for "this weekend", a length that drops a clock window, and no schedule for "for a minute".
 - `tests/stub-provider.test.ts`: the old clock windows, plus "don't show videos for the next 30 seconds" (a filter, an `untilAt`, no `remember`) and "ignore podcasts on weekends" (Saturday and Sunday, and a `remember`).
 - `scripts/e2e/schedule.ts` on `/demo/youtube.html` still hides podcasts inside a window computed from the clock, leaves shorts visible outside theirs, and checks "on now" / "off right now". It then sends "don't show shorts for the next 8 seconds" and waits until the shorts come back (15 s budget). There is no weekend visibility assertion, because that depends on the weekday. Saturday 14 Nov 2026 would hide them; a Monday run would not.
 - `scripts/e2e/verification.ts` waits for a button whose text is "make the text bigger" (`shadowButtonVisible` in `scripts/e2e/lib.ts`). `shadowTextVisible` is the wrong wait: the hidden bar still contains that phrase after the first run.
@@ -54,7 +54,7 @@ After `5207ee7`: `bun run test` was 124 passing, and `PLAYWRIGHT_BROWSERS_PATH="
 
 These were deferred on purpose. Do not start them unless asked.
 
-1. **No list of all rules.** Status only shows for changes on the current page. A Rules view would list every scheduled change from `siteChanges` and `globalChanges`.
+1. **Focus list.** Settings has a Focus section. It lists every scheduled change from `siteChanges` and `globalChanges`, with whether it is on, and Remove. These rules are the study and work clutter cuts. The other four items below are still open.
 2. **No next switch time.** "off right now" could say when it turns on ("on at 9:00"). That needs a `nextScheduleChange(schedule, now)` next to `isScheduleActive`. `untilAt` already has an absolute end, so this is for repeating windows.
 3. **No way to edit a schedule.** Users undo and ask again. An inline edit of days and times on the Settings row, saved through `recordApplied`, is the cheap version. `untilAt` is an instant, so an edit there is a different control.
 4. **Remembered schedules.** A memory line such as "Hide podcasts" does not carry the days. Page-load replay of a saved change keeps the `schedule` on that change, because saved changes skip the model. A later page-load run that re-implements the memory line is not checked. A prompt test or a stub page-load case would catch a dropped schedule. The stub's weekend memory line is still `Hide <word>`.

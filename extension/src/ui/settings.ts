@@ -1,7 +1,7 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
-import { load, save, type StoredState } from "../storage.js";
+import { forgetStoredChange, load, save, type StoredState } from "../storage.js";
 import { scheduleStatus } from "../../../shared/validate.js";
 import { usageCard, USAGE_CSS } from "./usage.js";
 import { adoptStyles, h, icon } from "./dom.js";
@@ -277,6 +277,34 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         })
       : [h("div", "s-empty", "No changes on this page yet.")];
 
+    const focusRules = [
+      ...state.globalChanges.filter((change) => change.schedule).map((change) => ({ host: null as string | null, change })),
+      ...Object.entries(state.siteChanges).flatMap(([host, list]) => list.filter((change) => change.schedule).map((change) => ({ host, change }))),
+    ];
+    const focusRows = focusRules.length
+      ? focusRules.map(({ host, change }) => {
+          const remove = h("button", "s-link", "Remove");
+          remove.type = "button";
+          remove.addEventListener("click", async () => {
+            if (changes.some((active) => active.id === change.id)) await ctx.revert(change.id);
+            else await forgetStoredChange(host, change.id);
+            queue();
+          });
+          let where = "all sites";
+          if (host) {
+            try {
+              where = new URL(host).host;
+            } catch {
+              where = host;
+            }
+          }
+          return h("div", "s-change", "", [
+            h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", where), remove]),
+            h("div", "why", scheduleStatus(change.schedule) ?? ""),
+          ]);
+        })
+      : [h("div", "s-empty", "No focus rules yet. Ask to hide clutter during work or study, such as Shorts on weekdays 9 to 5.")];
+
     const shortcuts = h("button", "s-btn", "", [icon("keyboard", 15), document.createTextNode("Shortcuts")]);
     shortcuts.type = "button";
     shortcuts.addEventListener("click", () => ctx.openShortcuts());
@@ -404,6 +432,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       ),
       voiceSection(state),
       cameraSection(state),
+      section("Focus", h("div", "s-note", "Time-based rules that hide clutter while you study or work. They turn on and off with the clock."), ...focusRows),
       section("On this page", ...changeRows),
       h("div", "s-foot", "", [shortcuts, debug]),
     );

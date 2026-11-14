@@ -22,18 +22,31 @@ function spanSeconds(text: string): number | null {
   return count * (unit === "h" ? 3600 : unit === "m" ? 60 : 1);
 }
 
-// "for the next 30 seconds" becomes an absolute end; "on weekends" stays a repeating day set.
+const dateStamp = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+// Saturday through Sunday of the weekend that contains today, or the next one when today is a weekday.
+function oneWeekend(now: Date): { from: string; until: string } {
+  const day = now.getDay();
+  const saturday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (day === 0 ? -1 : 6 - day));
+  const sunday = new Date(saturday.getFullYear(), saturday.getMonth(), saturday.getDate() + 1);
+  return { from: dateStamp(saturday), until: dateStamp(sunday) };
+}
+
+// "for the next 30 seconds" becomes an absolute end. "on weekends" repeats. "this weekend" is one Saturday and Sunday.
 export function parseSpokenSchedule(message: string, now = new Date()): Schedule | null {
   const window = message.match(WINDOW);
-  const days = /\bweekdays?\b/i.test(message) ? (["mon", "tue", "wed", "thu", "fri"] as const) : /\bweekends?\b/i.test(message) ? (["sat", "sun"] as const) : null;
+  const once = /\bthis weekend\b/i.test(message);
+  const days = once ? null : /\bweekdays?\b/i.test(message) ? (["mon", "tue", "wed", "thu", "fri"] as const) : /\bweekends?\b/i.test(message) ? (["sat", "sun"] as const) : null;
   const relative = chrono.parse(message, now, { forwardDate: true }).find((result) => spanSeconds(result.text) != null);
   const seconds = relative ? spanSeconds(relative.text) : null;
   const untilAt = seconds != null ? addSeconds(now, seconds).toISOString() : null;
-  if (!window && !days && !untilAt) return null;
+  const span = once && !untilAt ? oneWeekend(now) : null;
+  if (!window && !days && !untilAt && !span) return null;
   return {
     days: days ? [...days] : null,
     start: window && !untilAt ? clock(window[1], window[2], window[3]) : null,
     end: window && !untilAt ? clock(window[4], window[5], window[6]) : null,
+    ...(span ?? {}),
     ...(untilAt ? { untilAt } : {}),
   };
 }
@@ -44,14 +57,15 @@ export function withSpokenSchedule(change: Change, message: string, now = new Da
   if (!spoken) return change;
   if (spoken.untilAt) return { ...change, schedule: spoken };
   const previous = change.schedule;
+  const once = spoken.from != null || spoken.until != null;
   return {
     ...change,
     schedule: {
-      days: spoken.days ?? previous?.days ?? null,
+      days: once ? spoken.days ?? null : spoken.days ?? previous?.days ?? null,
       start: spoken.start ?? previous?.start ?? null,
       end: spoken.end ?? previous?.end ?? null,
-      from: previous?.from ?? null,
-      until: previous?.until ?? null,
+      from: spoken.from ?? previous?.from ?? null,
+      until: spoken.until ?? previous?.until ?? null,
       ...(previous?.untilAt ? { untilAt: previous.untilAt } : {}),
     },
   };
