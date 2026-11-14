@@ -28,6 +28,7 @@ import { startFriction } from "../utils/friction";
 import { buildRequestBody, parseOutlineReply, postRequest } from "../utils/request";
 import { reasonBadge } from "../utils/badge";
 import { verifyAdaptation } from "../utils/verify";
+import { describeChoice, logForTab, startRun } from "../utils/steps";
 
 const APPLIED_KEY = KEYS.applied;
 const FRICTION_PROMPT = "Make text bigger on every site?";
@@ -69,8 +70,11 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   if (profile.needs.length === 0) return notifyDone(tabId);
 
   const host = hostOf(msg.url);
+  await startRun(tabId);
+  await logForTab(tabId, "info", `Reading ${host ?? "this page"}…`);
   const saved = host ? lookup(await readSaved(), host, profile.version) : undefined;
   if (saved) {
+    await logForTab(tabId, "good", "Restored saved change, no model call");
     const restored = await applyResponse(tabId, msg.url, { kind: "adaptation", adaptation: saved }, profile, {
       restored: true,
     });
@@ -84,6 +88,7 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   }
 
   let raw: unknown;
+  await logForTab(tabId, "info", "Asked the model for a change");
   try {
     const res = await fetch(`${DEFAULT_BACKEND_URL}${ADAPT_PATH}`, {
       method: "POST",
@@ -94,6 +99,7 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
     raw = await res.json();
   } catch (err) {
     console.warn("adapt request failed", err);
+    await logForTab(tabId, "bad", "Stopped: backend unreachable");
     await setLast({ status: "error", url: msg.url, message: "Backend unreachable" });
     return notifyDone(tabId);
   }
@@ -116,10 +122,12 @@ export async function applyResponse(
 ): Promise<boolean> {
   const restored = options.restored === true;
   if (response.kind === "none") {
+    await logForTab(tabId, "warn", `Nothing to change: ${response.reason}`);
     await setLast({ status: "none", url, reason: response.reason });
     return false;
   }
   if (response.kind === "blocked") {
+    await logForTab(tabId, "bad", "Blocked: page tried to give the agent instructions");
     await setLast({ status: "blocked", url, reason: response.reason });
     return false;
   }
@@ -143,10 +151,12 @@ export async function applyResponse(
     return false;
   }
   if (!css.trim() && !svg && !adaptation.ops?.length) {
+    await logForTab(tabId, "warn", "Nothing to change: the model proposed no page edits");
     await setLast({ status: "none", url, reason: "Nothing to change on this page" });
     return false;
   }
 
+  if (!restored) await logForTab(tabId, "info", `Model chose: ${describeChoice(adaptation)}`);
   const badged = reasonBadge(adaptation.reason.text, adaptation.reason.needId, profile);
   const reason = restored ? `Restored: ${badged}`.slice(0, 200) : badged;
 
@@ -184,6 +194,7 @@ export async function applyResponse(
       blocks: adaptation.blocks.map((b) => b.block),
       restored,
     });
+    await logForTab(tabId, "good", `Applied: ${reason}`);
     return true;
   };
 
@@ -228,8 +239,10 @@ async function handleUserRequest(text: string): Promise<void> {
     return;
   }
   const tabId = tab.id;
+  await startRun(tabId);
   const reply = await requestOutline(tabId);
   if (!reply) {
+    await logForTab(tabId, "bad", "Stopped: this page cannot be read");
     await setLast({
       status: "error",
       url: tab.url ?? "",
@@ -238,13 +251,16 @@ async function handleUserRequest(text: string): Promise<void> {
     return;
   }
 
+  await logForTab(tabId, "info", `Reading ${hostOf(reply.url) ?? "this page"}…`);
   const profile = await loadProfile();
   const body = buildRequestBody(reply, profile, text);
   let raw: unknown;
+  await logForTab(tabId, "info", "Asked the model for a change");
   try {
     raw = await postRequest(body);
   } catch (err) {
     console.warn("request failed", err);
+    await logForTab(tabId, "bad", "Stopped: backend unreachable");
     await setLast({ status: "error", url: reply.url, message: "Backend unreachable" });
     return;
   }
@@ -313,6 +329,7 @@ async function handleUndo(adaptationId: AdaptationId): Promise<void> {
   await sendToTab(tabId, { type: "remove-banner" }).catch(() => undefined);
   await sendToTab(tabId, { type: "undo-runtime" }).catch(() => undefined);
   await forgetApplied(tabId);
+  await logForTab(tabId, "info", "Undone by you");
 
   const last = await readParsed("session", KEYS.last, LastResult);
   if (last?.status === "applied" && last.adaptationId === adaptationId) {

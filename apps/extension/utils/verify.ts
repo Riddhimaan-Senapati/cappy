@@ -11,6 +11,7 @@ import { AxeCount, AxeCountReply, PageStatsReply, PageStatsRequest, ToContentMes
 import { problemTotal } from "./page-stats";
 import { VERIFICATION_KEY, Verification } from "./state";
 import { next, type Verdict, type VerifyState } from "./verify-machine";
+import { logForTab } from "./steps";
 
 const SETTLE_MS = 400;
 const AXE_TIMEOUT_MS = 3000;
@@ -70,6 +71,7 @@ export async function verifyAdaptation(
   s = next(s, { type: "verify_started" });
   await commit(s);
 
+  await logForTab(tabId, "info", "Verifying with screenshots, issue counts and page stats…");
   let result = await check(tabId, adaptation, before, axeBefore ?? 0, statsBefore);
   for (;;) {
     s = next(s, { type: "verdict", verdict: result.verdict });
@@ -80,9 +82,11 @@ export async function verifyAdaptation(
       after: result.after,
       statsAfter: result.statsAfter,
     });
+    await logForTab(tabId, s.tag === "verified" ? "good" : "warn", `Verified: ${result.verdict.replace("_", " ")} — ${result.notes}`);
     if (s.tag === "verified") return;
 
     await undoFn();
+    if (s.tag === "retrying") await logForTab(tabId, "warn", "Retrying once");
     if (s.tag === "retrying" && (await applyFn())) {
       s = next(next(s, { type: "retry_done" }), { type: "verify_started" });
       await commit(s);
@@ -90,6 +94,7 @@ export async function verifyAdaptation(
       continue;
     }
 
+    await logForTab(tabId, "bad", result.verdict === "worse" ? "Rolled back: it made the page worse" : "Rolled back: it did not help");
     s = next(s, { type: "rollback_done" });
     await commit(s);
     await chrome.tabs.sendMessage(tabId, ToContentMessage.parse({ type: "banner-note", text: ROLLBACK_NOTE })).catch(
