@@ -8,7 +8,8 @@ import type { AgentProvider } from "./types.js";
 // so validateChange, the CSS scan and the injection block all still run.
 export type StubCall =
   | { name: "apply_change"; input: { change: Change } }
-  | { name: "remember"; input: { lines: string[]; scope: "site" | "everywhere" } };
+  | { name: "remember"; input: { lines: string[]; scope: "site" | "everywhere" } }
+  | { name: "offer_options"; input: { question: string; options: Array<{ label: string; request: string }> } };
 
 export interface StubPlan {
   calls: StubCall[];
@@ -28,6 +29,7 @@ const DARK_MODE = /dark mode/i;
 const INVERT = /\binvert\b/i;
 const REMOVE = /\b(?:remove(?: all)?|hide)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30})\b/i;
 const COLORBLIND = /colou?r[- ]?blind/i;
+const VAGUE = /^make (?:this|it|the page) easier(?: to (?:read|use|see))?[.!?]?$/i;
 const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
 const SITE_ONLY = /\b(?:only (?:on |for )?this (?:site|website|page)|(?:on |for )?this (?:site|website|page) only|(?:on|for) this (?:site|website|page))\b/i;
 const SITE_PREFIX = /^On ([^\s:]+(?::\d+)?): /i;
@@ -92,6 +94,16 @@ export function planStubRun(input: StubInput): StubPlan {
   }
 
   const message = input.message.trim();
+  if (VAGUE.test(message)) {
+    return {
+      calls: [{ name: "offer_options", input: { question: "Which would help most?", options: [
+        { label: "Larger text", request: "make the text bigger" },
+        { label: "Dark mode", request: "turn on dark mode" },
+        { label: "Hide clutter", request: "hide ads and popups" },
+      ] } }],
+      reply: "Pick the option that fits best, or edit one.",
+    };
+  }
   const reason = `Request: "${message.slice(0, 100)}"`;
   const siteOnly = SITE_ONLY.test(message);
   const preference = PREFERENCE.test(message);
@@ -158,8 +170,11 @@ export function createStubProvider(): AgentProvider {
   return {
     name: "stub",
     models: { fast: "stub-fast", frontier: "stub-frontier" },
-    async complete() {
-      return "NONE";
+    // Mirrors the suggest contract: noticed zooming yields a larger-text suggestion, anything else NONE.
+    async complete(_system: string, user: string) {
+      const zooms = user.match(/- (?:zoom-in|pinch-zoom): here (\d+) \(10m\)/);
+      if (!zooms) return "NONE";
+      return JSON.stringify({ text: "make the text bigger", reason: `You zoomed in ${zooms[1]} times`, scope: "everywhere", memory: "Prefers larger text" });
     },
     async run(session: AgentSession) {
       const { trigger, message, profile, page, active } = session.request;

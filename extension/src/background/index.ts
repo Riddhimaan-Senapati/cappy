@@ -1,15 +1,15 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
-import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest } from "../storage.js";
+import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, type RequestSession } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
-import { acceptFriction, registerFriction } from "./friction.js";
+import { registerFriction } from "./friction.js";
 import { registerTts } from "./tts.js";
 
 registerTts();
 registerFriction();
 
-const sessionRequests = new Map<string, { message: string; thread?: string }>();
+const sessionRequests = new Map<string, { message: string; thread?: string; options?: RequestSession["options"] }>();
 const debugPorts = new Set<chrome.runtime.Port>();
 
 function broadcast(message: DebugPortMessage) {
@@ -20,6 +20,10 @@ const agent = new AgentClient({
   event(tabId: number, event: UiEvent) {
     if (event.type === "start" && event.trigger === "chat") sessionRequests.set(event.runId, { message: event.message, thread: event.thread });
     if (event.type === "cancelled") sessionRequests.delete(event.runId);
+    if (event.type === "options") {
+      const request = sessionRequests.get(event.runId);
+      if (request) request.options = { question: event.question, options: event.options };
+    }
     if (event.type === "done" || event.type === "error") {
       const message = sessionRequests.get(event.runId);
       sessionRequests.delete(event.runId);
@@ -119,9 +123,6 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       if (typeof request.message !== "string") return false;
       void removeSubmittedRequest(request.message).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
       return true;
-    case "frictionAccept":
-      if (sender.tab) void acceptFriction(sender.tab).catch(() => undefined);
-      break;
     case "pageReady":
       if (sender.tab) {
         void agent.runEverywhereCommands(sender.tab, request.origin);
@@ -152,7 +153,7 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       void agent.signIn().catch(() => undefined);
       break;
     case "suggest":
-      void agent.suggest(request.page, request.applied).then(sendResponse);
+      void agent.suggest(request.page, request.applied, request.friction).then(sendResponse);
       return true;
     case "stopRun":
       if (sender.tab?.id) agent.stopRun(sender.tab.id);

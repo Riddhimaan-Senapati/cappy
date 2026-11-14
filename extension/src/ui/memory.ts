@@ -1,4 +1,5 @@
 import { addLine, clearAllMemory, editLine, forgetLine, pendingSite } from "../memory.js";
+import { activityOverview, clearActivity } from "../friction-log.js";
 import { forgetSiteNotes, type StoredState } from "../storage.js";
 import { h } from "./dom.js";
 import { scopeChoices } from "./memory-choice.js";
@@ -71,6 +72,15 @@ export function createMemoryView(rerender: () => void): MemoryView {
     ]);
   };
 
+  const activityRow = (state: StoredState) => {
+    const { events, sites } = activityOverview(state.activity ?? { buckets: {}, totals: {} }, Date.now());
+    const summary = events ? `${events} event${events === 1 ? "" : "s"} across ${sites} site${sites === 1 ? "" : "s"} in the last 6 hours` : "Nothing noticed in the last 6 hours";
+    return h("div", "s-row", "", [
+      h("div", "grow", "", [h("div", "", "Activity"), h("small", "", `${summary}. Counts only, used to suggest help and give the agent context.`)]),
+      button("Clear", "s-link", () => void clearActivity()),
+    ]);
+  };
+
   const siteSkillRows = (state: StoredState): Node[] => {
     const hosts = Object.entries(state.siteSkills).sort(([, a], [, b]) => b.updatedAt - a.updatedAt);
     if (!hosts.length) return [];
@@ -130,7 +140,7 @@ export function createMemoryView(rerender: () => void): MemoryView {
       if (state.pendingMemory.length) {
         nodes.push(h("div", "s-note", "Waiting for you to choose this site or all sites"), ...state.pendingMemory.map((line) => proposalRow(state, line)));
       }
-      nodes.push(...saved, addForm, ...siteSkillRows(state), clearButton);
+      nodes.push(...saved, addForm, ...siteSkillRows(state), activityRow(state), clearButton);
 
       const section = h("section", "s-sec", "", nodes);
       if (editing !== null) setTimeout(() => editInput?.focus(), 0);

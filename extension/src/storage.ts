@@ -1,6 +1,6 @@
 import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
-import type { MemoryScope, Routing, Tier } from "../../shared/protocol.js";
+import type { FrictionKind, MemoryScope, OptionChoice, Routing, SuggestionFeedback, Tier } from "../../shared/protocol.js";
 
 export interface Recipe {
   message: string;
@@ -13,11 +13,26 @@ export interface RequestSession {
   reply: string;
   outcome: "done" | "error";
   thread?: string;
+  options?: { question: string; options: OptionChoice[] };
 }
 
 export interface PendingSite {
   host: string;
   scope: MemoryScope;
+}
+
+export type FrictionCounts = Partial<Record<FrictionKind, number>>;
+
+// Counts per bucket start, then per host. Kept small on purpose: no raw events beyond the last two minutes.
+export interface ActivityStats {
+  buckets: Record<string, Record<string, FrictionCounts>>;
+  totals: Record<string, FrictionCounts>;
+}
+
+export interface FrictionEntry {
+  host: string;
+  kind: FrictionKind;
+  at: number;
 }
 
 export interface SiteSkill {
@@ -39,6 +54,10 @@ export interface StoredState {
   pendingMemory: string[];
   pendingSites: Record<string, PendingSite>;
   siteSkills: Record<string, SiteSkill>;
+  frictionLog: FrictionEntry[];
+  activity: ActivityStats;
+  nudgedAt: Record<string, number>;
+  suggestionFeedback: SuggestionFeedback[];
   history: ChatTurn[];
   submittedRequests: string[];
   requestSessions: RequestSession[];
@@ -68,6 +87,10 @@ export const DEFAULTS: StoredState = {
   pendingMemory: [],
   pendingSites: {},
   siteSkills: {},
+  frictionLog: [],
+  activity: { buckets: {}, totals: {} },
+  nudgedAt: {},
+  suggestionFeedback: [],
   history: [],
   submittedRequests: [],
   requestSessions: [],

@@ -1,6 +1,6 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
-import type { MemoryScope, Routing } from "../../../shared/protocol.js";
+import type { MemoryScope, OptionChoice, Routing, Suggestion } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
@@ -27,7 +27,9 @@ export interface SpotlightDeps {
   isSpeaking(): boolean;
   settings: SettingsContext;
   ensureAlive(): boolean;
-  suggest(): Promise<string | null>;
+  suggest(): Promise<Suggestion | null>;
+  acceptSuggestion(suggestion: Suggestion): void;
+  dismissSuggestion(suggestion: Suggestion): void;
 }
 
 // "history" is the change history on this page; "session" is a saved request and its replies.
@@ -67,6 +69,7 @@ interface RunState {
   status: "pending" | "queued" | "running" | "done";
   steps: Step[];
   memory: MemoryEntry[];
+  options?: { question: string; options: OptionChoice[] };
   model?: string;
   tier?: string;
   startedAt: number;
@@ -205,10 +208,11 @@ export class Spotlight {
       this.renderPill();
     });
     this.opened = true;
-    this.smartSuggestion = null;
-    void this.deps.suggest().then((text) => {
-      this.smartSuggestion = text;
-      if (text && this.opened && this.view === "list" && !this.input.value) {
+    if (!this.pinnedNudge) this.smartSuggestion = null;
+    void this.deps.suggest().then((suggestion) => {
+      if (!suggestion || this.pinnedNudge) return;
+      this.smartSuggestion = suggestion;
+      if (this.opened && this.view === "list" && !this.input.value) {
         this.animateBody = true;
         this.renderList();
         this.animateBody = false;
@@ -337,12 +341,38 @@ export class Spotlight {
     );
   }
 
-  private smartSuggestion: string | null = null;
+  private smartSuggestion: Suggestion | null = null;
+  // A nudge from noticed friction stays until answered; a plain suggestion refreshes on every open.
+  private pinnedNudge = false;
+
+  // A friction nudge replaces whatever suggest() returned; the bar shows it pre-selected.
+  setNudge(suggestion: Suggestion | null) {
+    this.smartSuggestion = suggestion;
+    this.pinnedNudge = suggestion !== null;
+    if (this.opened && this.view === "list" && !this.input.value) {
+      this.animateBody = true;
+      this.renderList();
+      this.animateBody = false;
+    }
+  }
 
   private suggestion(): Item | null {
-    const text = this.smartSuggestion;
-    if (!text) return null;
-    return { id: `try:${text}`, icon: "sparkle", title: text, hint: "suggested", kind: "try", section: "", run: () => this.ask(text, false) };
+    const suggestion = this.smartSuggestion;
+    if (!suggestion) return null;
+    return {
+      id: `try:${suggestion.text}`,
+      icon: "sparkle",
+      title: suggestion.text,
+      hint: suggestion.reason || "suggested",
+      kind: "try",
+      section: "",
+      run: () => {
+        this.deps.acceptSuggestion(suggestion);
+        this.smartSuggestion = null;
+        this.pinnedNudge = false;
+        this.ask(suggestion.text, false);
+      },
+    };
   }
 
   private onInput() {
@@ -440,9 +470,9 @@ export class Spotlight {
     if (!raw) {
       const last = [...changes].sort((a, b) => b.appliedAt - a.appliedAt)[0];
       const items: Item[] = [];
-      if (last) items.push({ id: "undo-last", icon: "undo", title: `Undo ${last.summary.charAt(0).toLowerCase()}${last.summary.slice(1)}`, hint: "→ history", kind: "undo", section: "", run: () => this.deps.revert(last.id) });
       const suggestion = this.suggestion();
       if (suggestion) items.push(suggestion);
+      if (last) items.push({ id: "undo-last", icon: "undo", title: `Undo ${last.summary.charAt(0).toLowerCase()}${last.summary.slice(1)}`, hint: "→ history", kind: "undo", section: "", run: () => this.deps.revert(last.id) });
       return items;
     }
 
@@ -561,9 +591,10 @@ export class Spotlight {
     this.body.replaceChildren(
       h("div", "session", "", [
         h("div", "sec", "Request history"),
-        ...sessions.flatMap(({ message, reply, outcome }) => [
+        ...sessions.flatMap(({ message, reply, outcome, options }) => [
           h("p", "you", message),
           h("div", `result ${outcome === "done" ? "" : "error"}`, "", [icon(outcome === "done" ? "check" : "x", 15), h("span", "", reply || "Done.")]),
+          ...(options ? [this.optionsBlock(options.question, options.options, this.sessionRequest)] : []),
         ]),
         ...(sessions.length ? [] : [h("p", "you", "No reply was saved for this request.")]),
         retry,
@@ -711,6 +742,7 @@ export class Spotlight {
         ),
       );
     }
+    if (run.options) children.push(this.optionsBlock(run.options.question, run.options.options, run.thread ?? run.message));
     children.push(...memory);
     const count = run.steps.filter((step) => step.tone === "info").length;
     const fold = h("button", "fold", `${run.expanded ? "Hide" : "Show"} ${count} step${count === 1 ? "" : "s"} · ${this.elapsed(run)}${run.model ? ` · ${run.model}` : ""}`);
@@ -738,6 +770,51 @@ export class Spotlight {
     if (run.saving) children.push(this.saveForm(run));
     if (run.expanded) children.push(h("ul", "steps done", "", this.stepNodes(run, false)));
     return h("div", `card open${enter}`, "", children);
+  }
+
+  // Each option runs as a follow-up in the same session; Edit lets the user reword it before it runs.
+  private optionsBlock(question: string, options: OptionChoice[], thread: string): HTMLElement {
+    const block = h("div", "options", "", [h("div", "options-q", question)]);
+    block.setAttribute("role", "group");
+    block.setAttribute("aria-label", question);
+    for (const option of options) {
+      const row = h("div", "option");
+      const pick = h("button", "option-pick", "", [h("b", "", option.label), h("span", "", option.request)]);
+      pick.type = "button";
+      pick.addEventListener("click", () => this.ask(option.request, false, false, thread));
+      const edit = h("button", "link quiet", "Edit");
+      edit.type = "button";
+      edit.setAttribute("aria-label", `Edit option: ${option.label}`);
+      const show = () => row.replaceChildren(pick, edit);
+      edit.addEventListener("click", () => {
+        const input = h("input", "option-input");
+        input.value = option.request;
+        input.setAttribute("aria-label", `Edit request for ${option.label}`);
+        input.spellcheck = false;
+        const run = h("button", "link", "Run");
+        run.type = "submit";
+        const cancel = h("button", "link quiet", "Cancel");
+        cancel.type = "button";
+        const form = h("form", "option-edit", "", [input, run, cancel]);
+        form.addEventListener("submit", (event) => {
+          event.preventDefault();
+          const text = input.value.trim();
+          if (text) this.ask(text, false, false, thread);
+        });
+        input.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          show();
+          edit.focus({ preventScroll: true });
+        });
+        cancel.addEventListener("click", () => (show(), edit.focus({ preventScroll: true })));
+        row.replaceChildren(form);
+        queueMicrotask(() => (input.focus(), input.select()));
+      });
+      show();
+      block.append(row);
+    }
+    return block;
   }
 
   private memoryCard(entry: MemoryEntry) {
@@ -978,6 +1055,9 @@ export class Spotlight {
           run.model = event.model;
           run.steps.push({ text: "Thinking", tone: "info" });
           break;
+        case "options":
+          run.options = { question: event.question, options: event.options };
+          break;
         case "memory":
           run.memory.push(...event.lines.map((line) => ({ line, status: (event.status === "saved" ? "remembered" : "proposed") as MemoryStatus, host: event.host, scope: event.scope })));
           break;
@@ -1011,7 +1091,7 @@ export class Spotlight {
       if (this.view === "run") this.input.focus({ preventScroll: true });
       window.clearTimeout(this.closeTimer);
       this.closeTimer = window.setTimeout(() => {
-        if (this.opened && this.view === "run" && !this.working && !this.input.value && !this.voice.active && !this.bar.matches(":hover") && !this.runs.some((other) => other.expanded || other.saving)) this.hide();
+        if (this.opened && this.view === "run" && !this.working && !this.input.value && !this.voice.active && !this.bar.matches(":hover") && !this.runs.some((other) => other.expanded || other.saving || (other.options && other.open))) this.hide();
       }, AUTO_CLOSE_MS);
     }
     return true;
@@ -1060,6 +1140,7 @@ export class Spotlight {
     const focused = this.shadow.activeElement;
     // Buttons and fields inside the bar handle their own keys (Enter on Undo, typing a command name); only Escape still closes.
     if (focused && focused !== this.input && key !== "Escape") return false;
+    if (focused instanceof HTMLInputElement && focused.classList.contains("option-input")) return false;
     if (event.altKey && event.code === "KeyM" && !this.input.readOnly) {
       this.toggleVoice();
       return true;
@@ -1129,6 +1210,13 @@ export class Spotlight {
       const item = this.items[this.selected];
       if (key === "Delete" && event.shiftKey && item?.kind === "previous") {
         void this.deleteSuggestion(item.title);
+        return true;
+      }
+      if ((key === "Delete" || key === "Backspace") && !this.input.value && item?.kind === "try" && this.smartSuggestion) {
+        this.deps.dismissSuggestion(this.smartSuggestion);
+        this.smartSuggestion = null;
+        this.pinnedNudge = false;
+        this.renderList();
         return true;
       }
       if (key === "Enter") {

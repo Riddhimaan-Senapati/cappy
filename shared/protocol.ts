@@ -16,6 +16,7 @@ export interface RunRequest {
   profile: string[];
   // Notes earlier sessions saved about navigating this hostname. Derived from page content, so untrusted.
   siteSkill?: string[];
+  activity?: FrictionCount[];
   active: ActiveChange[];
   page: PageOutline;
   clientTime?: { iso: string; timeZone: string };
@@ -102,6 +103,7 @@ export type AgentEvent =
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "profile"; runId: string; lines: string[]; scope: MemoryScope }
   | { type: "siteSkill"; runId: string; notes: string[] }
+  | { type: "options"; runId: string; question: string; options: OptionChoice[] }
   | { type: "warning"; runId: string; text: string }
   | { type: "blocked"; runId: string; reason: string }
   | { type: "done"; runId: string; reply: string }
@@ -139,6 +141,45 @@ export interface SignOutMessage {
   type: "chatgptLogout";
 }
 
+// Friction the extension noticed: counts from the last few minutes, never page text.
+export type FrictionKind = "zoom-in" | "pinch-zoom" | "missed-click" | "rage-click";
+
+// Aggregated counts only. here/elsewhere/sites cover about the last 10 minutes; the rest are longer windows.
+export interface FrictionCount {
+  kind: FrictionKind;
+  here: number;
+  elsewhere: number;
+  sites: number;
+  hourHere: number;
+  sessionHere: number;
+  sessionElsewhere: number;
+  sessionSites: number;
+  totalHere: number;
+}
+
+// A concrete way to read a vague request; request is what runs when the user picks it, after any edit.
+export interface OptionChoice {
+  label: string;
+  request: string;
+}
+
+export type FeedbackOutcome = "accepted-site" | "accepted-everywhere" | "accepted" | "dismissed" | "undone";
+
+export interface SuggestionFeedback {
+  text: string;
+  host: string;
+  outcome: FeedbackOutcome;
+  at: number;
+}
+
+// text is the request to run, phrased as the user would type it; memory is the lasting preference line to propose, or null for a one-off.
+export interface Suggestion {
+  text: string;
+  reason: string;
+  scope: MemoryScope;
+  memory: string | null;
+}
+
 export interface SuggestMessage {
   type: "suggest";
   requestId: string;
@@ -147,6 +188,9 @@ export interface SuggestMessage {
   profile: string[];
   applied: string[];
   page: PageOutline;
+  host?: string;
+  friction?: FrictionCount[];
+  feedback?: SuggestionFeedback[];
 }
 
 export interface CancelMessage {
@@ -160,4 +204,4 @@ export type ServerMessage =
   | AgentEvent
   | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
   | { type: "notice"; level: "info" | "error"; text: string }
-  | { type: "suggestion"; requestId: string; text: string | null };
+  | { type: "suggestion"; requestId: string; suggestion: Suggestion | null };

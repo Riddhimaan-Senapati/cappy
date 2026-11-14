@@ -17,15 +17,21 @@ export function buildExtension() {
   execFileSync("bun", ["run", "build:ext"], { cwd: ROOT, stdio: "inherit" });
 }
 
-async function assertPortFree(port: number) {
-  await new Promise<void>((resolve, reject) => {
-    const probe = net.createServer();
-    probe.once("error", () =>
-      reject(new Error(`Port ${port} is already in use. Stop the process on it (for example bun run dev) and re-run. The e2e harness will not reuse another server.`)),
-    );
-    probe.once("listening", () => probe.close(() => resolve()));
-    probe.listen(port);
+const accepts = (host: string, port: number) =>
+  new Promise<boolean>((resolve) => {
+    const socket = net.connect({ host, port });
+    socket.setTimeout(500);
+    socket.once("connect", () => (socket.destroy(), resolve(true)));
+    socket.once("timeout", () => (socket.destroy(), resolve(false)));
+    socket.once("error", () => resolve(false));
   });
+
+// localhost may resolve to IPv4 or IPv6, so a server on either one would capture the extension's connection.
+async function assertPortFree(port: number) {
+  const taken = await Promise.all(["127.0.0.1", "::1"].map((host) => accepts(host, port)));
+  if (taken.some(Boolean)) {
+    throw new Error(`Port ${port} is already in use (IPv4 or IPv6). Stop the process on it (for example bun run dev) and re-run. The e2e harness will not reuse another server.`);
+  }
 }
 
 export interface ServerProcess {

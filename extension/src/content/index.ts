@@ -1,7 +1,11 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange, Change } from "../../../shared/adaptation.js";
-import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "../messages.js";
-import { forgetLine, hasMemoryLine } from "../memory.js";
+import type { FrictionKind, Suggestion } from "../../../shared/protocol.js";
+import { recordFeedback } from "../feedback.js";
+import { recordFriction } from "../friction-log.js";
+import { startSensors } from "./sensors.js";
+import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
+import { forgetLine, hasMemoryLine, rememberLines } from "../memory.js";
 import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
@@ -12,7 +16,11 @@ import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speec
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
-const suggestionCache = new Map<string, Promise<string | null>>();
+const suggestionCache = new Map<string, Promise<Suggestion | null>>();
+const QUICK_UNDO_MS = 30_000;
+// Tracks the latest accepted suggestion: its run, the memory line to offer, and when it finished.
+let accepted: { suggestion: Suggestion; at: number; runId?: string; memory?: string[]; applied?: string[] } | null = null;
+let stopSensors: (() => void) | null = null;
 
 let tornDown = false;
 
@@ -31,6 +39,7 @@ function teardown() {
   overlay?.destroy();
   overlay = null;
   stopEngine();
+  stopSensors?.();
   for (const type of KEY_EVENTS) window.removeEventListener(type, onKey, true);
 }
 
@@ -93,6 +102,58 @@ function revert(id: string) {
   });
 }
 
+const isTyping = () => {
+  const focused = document.activeElement;
+  return focused instanceof HTMLElement && (focused.isContentEditable || focused.matches("input, textarea, select"));
+};
+
+// Every friction event is logged; the gate in recordFriction decides when one is worth a model call.
+async function onFriction(kind: FrictionKind) {
+  if (tornDown) return;
+  const { summary, nudge } = await recordFriction(location.host, kind);
+  if (!nudge || isTyping() || overlay?.spotlight.isOpen()) return;
+  const { paused, floatingButton } = await load();
+  if (paused) return;
+  const applied = activeChanges().map((change) => change.summary);
+  const suggestion = (await send({ kind: "suggest", page: readPage(), applied, friction: summary })) as Suggestion | null | undefined;
+  if (!suggestion || tornDown) return;
+  if (floatingButton) ensureOverlay().nudge(suggestion);
+  else ensureOverlay().spotlight.setNudge(suggestion);
+}
+
+async function acceptSuggestion(suggestion: Suggestion) {
+  const entry: NonNullable<typeof accepted> = { suggestion, at: Date.now() };
+  accepted = entry;
+  await recordFeedback({ text: suggestion.text, host: location.host, outcome: "accepted" });
+  if (!suggestion.memory) return;
+  entry.memory = await rememberLines([suggestion.memory], { host: location.host, scope: suggestion.scope });
+  offerMemory();
+}
+
+function offerMemory() {
+  if (!accepted?.memory?.length || !accepted.applied) return;
+  ensureOverlay().proposeMemory(accepted.memory, location.host, accepted.suggestion.scope, accepted.applied);
+  accepted.memory = undefined;
+}
+
+function followSuggestion(event: UiEvent) {
+  if (!accepted) return;
+  if (event.type === "start" && !accepted.runId && event.message === accepted.suggestion.text) accepted.runId = event.runId;
+  if (event.type === "done" && event.runId === accepted.runId) {
+    accepted.applied = event.applied.map((change) => change.id);
+    offerMemory();
+  }
+}
+
+// Undoing right after accepting a suggestion is the strongest "not this" signal the model gets.
+function userRevert(id: string) {
+  if (accepted && Date.now() - accepted.at < QUICK_UNDO_MS) {
+    void recordFeedback({ text: accepted.suggestion.text, host: location.host, outcome: "undone" }).catch(() => undefined);
+    accepted = null;
+  }
+  return revert(id);
+}
+
 async function syncLearnedText() {
   const { paused, profile } = await load();
   const changes = activeChanges();
@@ -122,10 +183,12 @@ function ensureOverlay(): OverlayUi {
     listChanges: activeChanges,
     history: changeHistory,
     reapply: async (change) => void (await mutate(() => apply(change))),
-    revert: async (id) => void (await revert(id)),
+    revert: async (id) => void (await userRevert(id)),
     revertAll: async () => {
-      for (const change of activeChanges().reverse()) await revert(change.id);
+      for (const change of activeChanges().reverse()) await userRevert(change.id);
     },
+    acceptSuggestion: (suggestion) => void acceptSuggestion(suggestion).catch(reportExtensionError),
+    dismissSuggestion: (suggestion) => void recordFeedback({ text: suggestion.text, host: location.host, outcome: "dismissed" }).catch(reportExtensionError),
     enableMicrophone: () => void send({ kind: "voiceOpenMic" }),
     openDebug: () => void send({ kind: "openDebug" }),
     readAloud: () => {
@@ -138,13 +201,13 @@ function ensureOverlay(): OverlayUi {
       const applied = activeChanges().map((change) => change.summary);
       const key = `${location.href}|${applied.join("|")}`;
       if (!suggestionCache.has(key)) {
-        suggestionCache.set(key, send({ kind: "suggest", page: readPage(), applied }).then((text) => (typeof text === "string" ? text : null)));
+        suggestionCache.set(key, send({ kind: "suggest", page: readPage(), applied }).then((result) => (result && typeof result === "object" ? (result as Suggestion) : null)));
       }
       return suggestionCache.get(key)!;
     },
     settings: {
       listChanges: async () => activeChanges(),
-      revert: async (id) => void (await revert(id)),
+      revert: async (id) => void (await userRevert(id)),
       openDebug: () => void send({ kind: "openDebug" }),
       openShortcuts: () => void send({ kind: "openShortcuts" }),
       setKey: (provider, key) => void send({ kind: "setKey", provider, key }),
@@ -185,15 +248,8 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return activeChanges() satisfies ActiveChange[];
     case "busy":
       return setBusy(request.on);
-    case "frictionSaved":
-      if (request.origin !== origin) return;
-      return ensureOverlay().showToast("Remembered that you prefer larger text on every site.", [learnedTextScale.id]);
-    case "frictionPrompt":
-      if (request.origin !== origin) return;
-      return ensureOverlay().showToast("Make text bigger on every site?", [], false, undefined, {
-        label: "Yes, remember",
-        run: async () => void (await send({ kind: "frictionAccept" })),
-      });
+    case "frictionEvent":
+      return onFriction(request.event);
     case "toast":
       return ensureOverlay().showToast(request.text, request.undoIds);
     case "readAloud":
@@ -202,8 +258,11 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return ensureOverlay().spotlight.startVoice();
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
-    case "ui":
-      return overlay ? overlay.handleEvent(request.event) : ensureOverlay().handleEvent(request.event);
+    case "ui": {
+      const handled = (overlay ?? ensureOverlay()).handleEvent(request.event);
+      followSuggestion(request.event);
+      return handled;
+    }
     case "voiceEvent":
       return overlay?.spotlight.handleVoice(request.event);
   }
@@ -222,6 +281,8 @@ function start() {
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     return true;
   });
+
+  stopSensors = startSensors((kind) => void onFriction(kind).catch(() => undefined));
 
   for (const type of KEY_EVENTS) {
     // Registered at document_start so these run before page scripts and keep page hotkeys from firing while the bar has focus.

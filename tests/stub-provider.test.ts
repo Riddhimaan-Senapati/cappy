@@ -70,6 +70,14 @@ describe("stub provider routing", () => {
     assert.deepEqual(plan.calls.at(-1), { name: "remember", input: { lines: ["Red-green colorblind"], scope: "everywhere" } });
   });
 
+  it("offers options instead of guessing on a vague request", () => {
+    const plan = chat("make this easier to read");
+    assert.equal(plan.calls.length, 1);
+    const [call] = plan.calls;
+    assert.equal(call.name, "offer_options");
+    assert.deepEqual(call.name === "offer_options" ? call.input.options.map(({ label }) => label) : [], ["Larger text", "Dark mode", "Hide clutter"]);
+  });
+
   it("remembers preference statements without applying a change", () => {
     const plan = chat("I prefer high contrast menus");
     assert.deepEqual(applied(plan.calls), []);

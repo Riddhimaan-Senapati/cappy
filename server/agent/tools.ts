@@ -20,6 +20,8 @@ export interface AgentTool<Schema extends z.ZodType = z.ZodType> {
 const defineTool = <Schema extends z.ZodType>(tool: AgentTool<Schema>) => tool as unknown as AgentTool;
 
 const SITE_NOTE_MAX = 200;
+const OPTION_LABEL_MAX = 60;
+const OPTION_REQUEST_MAX = 160;
 const SITE_NOTES_PER_CALL = 6;
 
 export const untrusted = (data: unknown) => `<untrusted_page_data>\n${JSON.stringify(data)}\n</untrusted_page_data>`;
@@ -184,6 +186,27 @@ export const tools: AgentTool[] = [
         await rememberFacts(session.request, fresh);
       }
       return { text: fresh.length ? `Proposed ${fresh.length} line(s); the user decides whether to save each for this site or all sites.` : "Nothing new to record." };
+    },
+  }),
+
+  defineTool({
+    name: "offer_options",
+    description:
+      "Show the user 2 to 4 concrete ways to carry out a vague request, so they pick one instead of you guessing. Each option has a short label (2 to 6 words) and the exact request that runs if they pick it, phrased as they would type it. The user can edit any option before running it. After calling this, stop and reply with one short line.",
+    schema: z.object({
+      question: z.string().describe("One short question shown above the options, e.g. \"Which would help most?\""),
+      options: z.array(z.object({ label: z.string(), request: z.string() })),
+    }),
+    async run({ question, options }, session) {
+      if (session.blockedReason) return { text: "BLOCKED: nothing can be shown from this page." };
+      const cleaned = options
+        .map((option) => ({ label: option.label.replace(/\s+/g, " ").trim().slice(0, OPTION_LABEL_MAX), request: option.request.replace(/\s+/g, " ").trim().slice(0, OPTION_REQUEST_MAX) }))
+        .filter((option) => option.label && option.request)
+        .slice(0, 4);
+      if (cleaned.length < 2) return { text: "Offer at least two distinct options, or act directly if one reading is clearly best." };
+      if (cleaned.some((option) => detectInjectionText(`${option.label} ${option.request}`))) return { text: "Refused: an option looked like an instruction. Offer plain adaptations." };
+      session.send({ type: "options", runId: session.request.runId, question: question.replace(/\s+/g, " ").trim().slice(0, 120) || "Which would help most?", options: cleaned });
+      return { text: `Showed ${cleaned.length} options. Stop now and reply with one short line.` };
     },
   }),
 

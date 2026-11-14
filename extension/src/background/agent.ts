@@ -1,8 +1,10 @@
 import { LARGER_TEXT } from "../zoom-preference.js";
 import { hasMemoryLine, profileFor, rememberLines } from "../memory.js";
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
-import type { ApplyOutcome, ClientMessage, ProviderInfo, RunRequest, ServerMessage, SiteControlOutcome, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
+import type { ApplyOutcome, ClientMessage, FrictionCount, ProviderInfo, RunRequest, ServerMessage, SiteControlOutcome, Suggestion, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
+import { recentFeedback } from "../feedback.js";
+import { emptyActivity, summarizeActivity } from "../friction-log.js";
 import { findRequestSessions, load, recipeKey, save, saveRecipe, saveSiteNotes } from "../storage.js";
 import { speakIfEnabled } from "./tts.js";
 
@@ -60,7 +62,7 @@ export class AgentClient {
   private defaultProvider: string | null = null;
   private notice: StatusInfo["notice"];
   private modelsRequested = new Set<string>();
-  private suggestions = new Map<string, (text: string | null) => void>();
+  private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
   private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string }>>();
 
   constructor(private hooks: AgentHooks) {}
@@ -95,7 +97,7 @@ export class AgentClient {
     this.send({ type: "listModels", provider: active.id });
   }
 
-  async suggest(page: PageOutline, applied: string[]): Promise<string | null> {
+  async suggest(page: PageOutline, applied: string[], friction?: FrictionCount[]): Promise<Suggestion | null> {
     try {
       await this.ensureConnected();
     } catch {
@@ -105,17 +107,18 @@ export class AgentClient {
     const { activeProvider } = await this.getStatus();
     if (!activeProvider) return null;
     const requestId = crypto.randomUUID();
+    const feedback = await recentFeedback();
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.suggestions.delete(requestId);
         resolve(null);
       }, 12_000);
-      this.suggestions.set(requestId, (text) => {
+      this.suggestions.set(requestId, (suggestion) => {
         clearTimeout(timer);
-        resolve(text);
+        resolve(suggestion);
       });
       const host = (() => { try { return new URL(page.url).host; } catch { return ""; } })();
-      this.send({ type: "suggest", requestId, provider: activeProvider, models: state.modelChoices[activeProvider] ?? {}, profile: profileFor(state.profile, host), applied, page });
+      this.send({ type: "suggest", requestId, provider: activeProvider, models: state.modelChoices[activeProvider] ?? {}, profile: profileFor(state.profile, host), applied, page, host, friction, feedback });
     });
   }
 
@@ -285,6 +288,7 @@ export class AgentClient {
           : state.history.slice(-8),
         profile: profileFor(trigger === "page_load" ? state.profile.filter((line) => !hasMemoryLine([line], LARGER_TEXT)) : state.profile, host),
         siteSkill: state.siteSkills[host]?.notes,
+        activity: summarizeActivity(state.activity ?? emptyActivity(), host, Date.now()),
         active,
         page,
         clientTime: localClock(),
@@ -348,7 +352,7 @@ export class AgentClient {
       return;
     }
     if (message.type === "suggestion") {
-      this.suggestions.get(message.requestId)?.(message.text);
+      this.suggestions.get(message.requestId)?.(message.suggestion);
       this.suggestions.delete(message.requestId);
       return;
     }
@@ -376,6 +380,8 @@ export class AgentClient {
         if (proposed.length) this.emit(run, { type: "memory", runId: run.runId, status: "proposed", lines: proposed, host, scope: message.scope });
         return;
       }
+      case "options":
+        return this.emit(run, { type: "options", runId: run.runId, question: message.question, options: message.options });
       case "siteSkill":
         if (Array.isArray(message.notes)) await saveSiteNotes(new URL(run.origin).host, message.notes.filter((note) => typeof note === "string").map((note) => note.slice(0, 200)).slice(0, 6));
         return;

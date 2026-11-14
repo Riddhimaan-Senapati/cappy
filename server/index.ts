@@ -132,8 +132,8 @@ wss.on("connection", (socket, request) => {
         return void signIn(socket);
       case "suggest": {
         const provider = resolveProvider(message.provider);
-        const text = provider ? await suggestFor(provider, message).catch(() => null) : null;
-        return sendTo(socket, { type: "suggestion", requestId: message.requestId, text });
+        const suggestion = provider ? await suggestFor(provider, message).catch(() => null) : null;
+        return sendTo(socket, { type: "suggestion", requestId: message.requestId, suggestion });
       }
       case "chatgptLogout":
         signOut();

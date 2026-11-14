@@ -248,6 +248,25 @@ function onEvent(event: UiEvent) {
     case "blocked":
       run.steps.append(h("li", "bad", `Blocked: ${event.reason}`));
       break;
+    case "options": {
+      const item = h("li", "info memory-choice", `${event.question} `);
+      for (const option of event.options) {
+        const pick = h("button", "", option.label);
+        pick.type = "button";
+        pick.title = option.request;
+        pick.addEventListener("click", () => port.postMessage({ type: "chat", message: option.request, thread: historyThread } satisfies DebugPortRequest));
+        const edit = h("button", "", "Edit");
+        edit.type = "button";
+        edit.setAttribute("aria-label", `Edit option: ${option.label}`);
+        edit.addEventListener("click", () => {
+          input.value = option.request;
+          input.focus();
+        });
+        item.append(pick, edit);
+      }
+      run.steps.append(item);
+      break;
+    }
     case "memory":
       if (event.status === "saved") run.steps.append(h("li", "good", `Remembered: ${event.lines.join("; ")}`));
       else for (const line of event.lines) run.steps.append(memoryChoice(line, event.host, event.scope));

@@ -1,5 +1,5 @@
 import type { PageOutline } from "../../shared/adaptation.js";
-import type { MemoryScope, ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { FrictionCount, FrictionKind, MemoryScope, OptionChoice, ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
 
 export interface AppliedSummary {
@@ -16,6 +16,7 @@ export type UiEvent =
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
+  | { type: "options"; runId: string; question: string; options: OptionChoice[] }
   | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[]; host?: string; scope?: MemoryScope }
   | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
   | { type: "error"; runId: string; message: string };
@@ -28,11 +29,10 @@ export type ContentRequest =
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
   | { kind: "startVoice" }
-  | { kind: "frictionSaved"; origin: string }
-  | { kind: "frictionPrompt"; origin: string }
   | { kind: "ui"; event: UiEvent }
   | { kind: "readAloud" }
-  | { kind: "voiceEvent"; event: VoiceEvent };
+  | { kind: "voiceEvent"; event: VoiceEvent }
+  | { kind: "frictionEvent"; event: FrictionKind };
 
 export type TtsSource = "reply" | "announce" | "page" | "test";
 
@@ -60,7 +60,6 @@ export interface StatusInfo {
 export type BackgroundRequest =
   | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string }
   | { kind: "deleteRequest"; message: string }
-  | { kind: "frictionAccept" }
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
@@ -70,7 +69,7 @@ export type BackgroundRequest =
   | { kind: "chatgptLogin" }
   | { kind: "chatgptLogout" }
   | { kind: "stopRun" }
-  | { kind: "suggest"; page: PageOutline; applied: string[] }
+  | { kind: "suggest"; page: PageOutline; applied: string[]; friction?: FrictionCount[] }
   | { kind: "dequeue"; runId: string }
   | { kind: "voiceStart"; lang: string }
   | { kind: "voiceStop" }
