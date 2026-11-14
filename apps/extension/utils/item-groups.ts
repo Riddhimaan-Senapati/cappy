@@ -296,6 +296,9 @@ function labelled(el: Element): boolean {
 }
 
 function sameShape(members: Element[]): Element[] | undefined {
+  // Many siblings with the same custom element tag are a site's own item component, whatever their inner markup.
+  const tag = members[0]!.localName;
+  if (tag.includes("-") && members.every((m) => m.localName === tag)) return members;
   const proto = shapeOf(members[0]!);
   const kept = members.filter((member) => similarity(proto, shapeOf(member)) >= SHAPE_MIN);
   return kept.length >= Math.max(2, Math.ceil(members.length * SHAPE_KEEP)) ? kept : undefined;
