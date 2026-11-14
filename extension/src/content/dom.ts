@@ -68,6 +68,32 @@ export function cssPath(element: Element): string {
   return parts.join(" > ");
 }
 
+const SAFE_ID = /^[A-Za-z][\w-]*$/;
+
+// Built without CSS escapes so the model can reuse it in CSS (the safety layer rejects backslashes).
+export function uniqueSelector(element: Element): string {
+  const parts: string[] = [];
+  let current: Element | null = element;
+  while (current && current !== document.documentElement) {
+    if (current.id && SAFE_ID.test(current.id)) {
+      parts.unshift(`#${current.id}`);
+      if (document.querySelectorAll(parts.join(" > ")).length === 1) return parts.join(" > ");
+      break;
+    }
+    const parent: Element | null = current.parentElement;
+    parts.unshift(parent ? `${current.tagName.toLowerCase()}:nth-child(${[...parent.children].indexOf(current) + 1})` : current.tagName.toLowerCase());
+    if (document.querySelectorAll(parts.join(" > ")).length === 1) return parts.join(" > ");
+    current = parent;
+  }
+  return parts.join(" > ");
+}
+
+export function describeElement(element: Element): string {
+  const name = element.getAttribute("aria-label") || (element as HTMLInputElement).placeholder || element.textContent?.replace(/\s+/g, " ").trim() || "";
+  const kind = element.matches("a[href]") ? "link" : element.matches("button, [role=button]") ? "button" : element.matches("input, textarea, select") ? "field" : element.matches("img") ? "image" : element.tagName.toLowerCase();
+  return name ? `${name.slice(0, 40)} · ${kind}` : kind;
+}
+
 export function accessibleName(element: Element): string {
   const references = (element.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean);
   const referencedText = references.map((id) => {

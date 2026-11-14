@@ -1,5 +1,5 @@
 import type { PageOutline } from "../../shared/adaptation.js";
-import type { FrictionCount, FrictionKind, MemoryScope, OptionChoice, ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { ChoiceOption, FrictionCount, FrictionKind, MemoryScope, ProviderInfo, Routing, TabToolName, TargetElement, Tier, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
 
 export interface AppliedSummary {
@@ -16,7 +16,7 @@ export type UiEvent =
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
-  | { type: "options"; runId: string; question: string; options: OptionChoice[] }
+  | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
   | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[]; host?: string; scope?: MemoryScope }
   | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
   | { type: "error"; runId: string; message: string };
@@ -29,6 +29,8 @@ export type ContentRequest =
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
   | { kind: "startVoice" }
+  | { kind: "targetContextElement" }
+  | { kind: "pickElement" }
   | { kind: "ui"; event: UiEvent }
   | { kind: "readAloud" }
   | { kind: "voiceEvent"; event: VoiceEvent }
@@ -58,7 +60,7 @@ export interface StatusInfo {
 }
 
 export type BackgroundRequest =
-  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string }
+  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement }
   | { kind: "deleteRequest"; message: string }
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }

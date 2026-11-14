@@ -122,6 +122,7 @@ export interface PageStats {
 
 export interface ActiveChange extends Change {
   appliedAt: number;
+  targetLabel?: string;
 }
 
 export interface ChatTurn {

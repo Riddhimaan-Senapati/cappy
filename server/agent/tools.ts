@@ -112,10 +112,17 @@ export const tools: AgentTool[] = [
         return { text: `REJECTED by safety layer: ${problem}. Rewrite the change within the rules.` };
       }
       session.progress(`Applying: ${change.summary}`);
-      const outcome = await session.callTab("apply_change", { change });
+      // Remember which selected element a change was made for, so later requests can tell changes apart.
+      const target = session.request.target;
+      let id = change.id;
+      // Reusing the id of a change on a different element would silently replace it, so give this one its own id.
+      const clash = target && session.request.active.find((active) => active.id === id && active.targetLabel && active.targetLabel !== target.label);
+      if (clash) id = `${id.slice(0, 36)}-${Math.random().toString(36).slice(2, 5)}`;
+      const annotated: Change & { targetLabel?: string } = target ? { ...change, id, targetLabel: target.label } : change;
+      const outcome = await session.callTab("apply_change", { change: annotated });
       const counts = Object.values(outcome.matched);
       if (!outcome.ok || (counts.length > 0 && counts.every((count) => count === 0))) session.failures++;
-      if (outcome.ok) session.appliedIds.add(change.id);
+      if (outcome.ok) session.appliedIds.add(annotated.id);
       return { text: JSON.stringify(outcome) };
     },
   }),
@@ -125,6 +132,11 @@ export const tools: AgentTool[] = [
     description: "Undo an active change by id.",
     schema: z.object({ id: z.string() }),
     async run({ id }, session) {
+      const target = session.request.target;
+      const other = target && session.request.active.find((active) => active.id === id && active.targetLabel && active.targetLabel !== target.label);
+      if (other) {
+        return { text: `REFUSED: "${id}" was made on a different element (${other.targetLabel}). The user selected ${target.label} for this request; change that element instead and leave earlier changes alone.` };
+      }
       session.progress(`Undoing ${id}`);
       const outcome = await session.callTab("revert_change", { id });
       if (outcome.ok) session.appliedIds.delete(id);
@@ -172,6 +184,7 @@ export const tools: AgentTool[] = [
     },
   }),
 
+
   defineTool({
     name: "remember",
     description:
@@ -192,7 +205,7 @@ export const tools: AgentTool[] = [
   defineTool({
     name: "offer_options",
     description:
-      "Show the user 2 to 4 concrete ways to carry out a vague request, so they pick one instead of you guessing. Each option has a short label (2 to 6 words) and the exact request that runs if they pick it, phrased as they would type it. The user can edit any option before running it. After calling this, stop and reply with one short line.",
+      "Show the user 2 to 4 choices to pick from, instead of guessing. Use it when a request is vague and could mean clearly different adaptations, or when the user rejects something (its look, size, layout, wording) without saying what they want instead and their profile does not settle it. Never use it when the user already named what they want. Each option has a short label (2 to 6 words) and the exact request that runs if picked, phrased as they would type it; every option must differ from the current state. The user can edit any option before running it. After calling this, stop and reply with one short line.",
     schema: z.object({
       question: z.string().describe("One short question shown above the options, e.g. \"Which would help most?\""),
       options: z.array(z.object({ label: z.string(), request: z.string() })),

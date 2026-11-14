@@ -1,4 +1,5 @@
 import { requestAudio } from "../voice/audio-api.js";
+import type { TargetElement } from "../../../shared/protocol.js";
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
 import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, type RequestSession } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
@@ -50,10 +51,10 @@ async function activeTab() {
 
 const CONTENT_SCRIPT = "dist/content.js";
 
-async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string) {
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement) {
   if (!message.trim()) return;
   await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
-  if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread });
+  if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target });
 }
 
 async function injectContent(tabId: number) {
@@ -80,7 +81,12 @@ async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
 // An earlier version made the toolbar icon open the side panel, and Chrome persists that choice.
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => undefined);
 
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "adapt-element" && tab?.id) void sendToTab(tab.id, { kind: "targetContextElement" }).catch(() => undefined);
+});
+
 chrome.runtime.onInstalled.addListener(async () => {
+  chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Adaptive Agent", contexts: ["all"] }, () => void chrome.runtime.lastError);
   for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {
     if (tab.id) void injectContent(tab.id).catch(() => undefined);
   }
@@ -117,7 +123,7 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
   if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
     case "runChat":
-      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt, request.thread).finally(() => sendResponse());
+      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt, request.thread, request.target).finally(() => sendResponse());
       return !!sender.tab;
     case "deleteRequest":
       if (typeof request.message !== "string") return false;

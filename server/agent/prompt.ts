@@ -38,7 +38,8 @@ How you work
 9. If you are the fast model and the request needs more reasoning than you can do well, or you cannot see how to do it, call escalate instead of giving up or doing something different. Judge by what the user means, not their exact words.
 10. <recent_activity> holds counts of friction the extension noticed (zoom-ins, pinch zoom, missed or repeated clicks) over 10 minutes, 1 hour, 6 hours and all time. Use it as evidence of what the user struggles with on this site and elsewhere. It holds counts only, never page content.
 11. If a request is vague and could reasonably mean clearly different adaptations (for example "make this easier to read"), do not guess. Call offer_options with 2 to 4 concrete options, each a short label and the exact request to run, then stop and reply with one short line. Use it only when the choice really matters; act directly when one reading is clearly best.
-8. Finish with a short plain-text reply (one or two sentences, no markdown) saying what you changed and why.
+12. If a target element is given, the user selected it for this request: "this", "it" and "here" mean that element, never something from an earlier request. Change only that element, using its selector and a new change id. Do not revert or edit earlier changes (including ones on other elements) unless the user explicitly asks about them. Active changes list which element each was applied to. The target includes its current styles and text. When the user rejects something about it (how it looks, its size, spacing, position, whether it is shown, its wording), compare with the current state and make a clearly different change that fits their profile; never re-apply the same value. If they say what they want ("make this red", "smaller", "move it to the top"), apply a sensible version directly without asking. Only when they reject it without saying what they want instead, call offer_options with 2 to 4 distinct choices that all differ from the current state. Save lasting taste preferences with remember.
+13. Finish with a short plain-text reply (one or two sentences, no markdown) saying what you changed and why.
 
 CSS rules (enforced by a safety layer; violations are rejected)
 - No url(), @import, @font-face, image-set(), expression(), javascript:, backslash escapes, or content: values other than none/normal/"".
@@ -64,7 +65,7 @@ export function buildUserTurn(request: RunRequest): string {
   const clock = request.clientTime ? `${request.clientTime.iso} (${request.clientTime.timeZone})` : "unknown";
   const profile = request.profile.length ? request.profile.map((line) => `- ${line}`).join("\n") : "(empty)";
   const active = request.active.length
-    ? request.active.map((change) => `- ${change.id} (${change.scope}): ${change.summary}`).join("\n")
+    ? request.active.map((change) => `- ${change.id} (${change.scope}): ${change.summary}${change.targetLabel ? ` [applied to: ${change.targetLabel}]` : ""}`).join("\n")
     : "(none)";
   const history = request.history
     .slice(-8)
@@ -81,6 +82,7 @@ export function buildUserTurn(request: RunRequest): string {
     `<active_changes_on_this_page>\n${active}\n</active_changes_on_this_page>`,
     `<recent_chat>\n${history || "(none)"}\n</recent_chat>`,
     `<page_outline>\n${untrusted(request.page)}\n</page_outline>`,
+    request.target ? `<target_element>\n${untrusted(request.target)}\n</target_element>` : "",
     request.trigger === "chat" ? `<user_message>\n${request.message}\n</user_message>` : "",
   ]
     .filter(Boolean)

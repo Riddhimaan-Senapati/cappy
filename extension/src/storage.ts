@@ -1,6 +1,6 @@
 import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
-import type { FrictionKind, MemoryScope, OptionChoice, Routing, SuggestionFeedback, Tier } from "../../shared/protocol.js";
+import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier } from "../../shared/protocol.js";
 
 export interface Recipe {
   message: string;
@@ -13,7 +13,7 @@ export interface RequestSession {
   reply: string;
   outcome: "done" | "error";
   thread?: string;
-  options?: { question: string; options: OptionChoice[] };
+  options?: { question: string; options: ChoiceOption[] };
 }
 
 export interface PendingSite {
@@ -49,6 +49,15 @@ export interface SavedCommand {
   createdAt: number;
 }
 
+export interface CameraSettings {
+  enabled: boolean;
+  handScroll: boolean;
+  headScroll: boolean;
+  pointer: boolean;
+  swipeNav?: boolean;
+  dwellMs: number;
+}
+
 export interface StoredState {
   profile: string[];
   pendingMemory: string[];
@@ -65,6 +74,7 @@ export interface StoredState {
   siteChanges: Record<string, ActiveChange[]>;
   recipes: Record<string, Recipe>;
   commands: SavedCommand[];
+  camera: CameraSettings;
   paused: boolean;
   proactive: boolean;
   floatingButton: boolean;
@@ -98,6 +108,7 @@ export const DEFAULTS: StoredState = {
   siteChanges: {},
   recipes: {},
   commands: [],
+  camera: { enabled: false, handScroll: true, headScroll: false, pointer: true, swipeNav: true, dwellMs: 0 },
   paused: false,
   proactive: true,
   floatingButton: true,

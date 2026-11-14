@@ -8,8 +8,11 @@ import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo, Ui
 import { forgetLine, hasMemoryLine, rememberLines } from "../memory.js";
 import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
-import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
-import { activeChanges, applyChange, applySiteControl, changeHistory, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
+import { describeElement, uniqueSelector } from "./dom.js";
+import { activeChanges, applyChange, applySiteControl, changeHistory, ensureBaseStyle, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { CameraController } from "./gestures/controller.js";
+import { ElementPicker } from "./picker.js";
 import { inspect, listItems, readPage } from "./outline.js";
 import { findSiteFeatures } from "./site-controls.js";
 import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
@@ -21,6 +24,29 @@ const QUICK_UNDO_MS = 30_000;
 // Tracks the latest accepted suggestion: its run, the memory line to offer, and when it finished.
 let accepted: { suggestion: Suggestion; at: number; runId?: string; memory?: string[]; applied?: string[] } | null = null;
 let stopSensors: (() => void) | null = null;
+let camera: CameraController | null = null;
+let lastContextElement: Element | null = null;
+let targetElement: Element | null = null;
+const picker = new ElementPicker(
+  (element) => selectTarget(element),
+  () => ensureOverlay().spotlight.show(),
+);
+
+function clearTarget() {
+  targetElement?.removeAttribute("data-ba-target");
+  targetElement = null;
+}
+
+function selectTarget(element: Element) {
+  clearTarget();
+  ensureBaseStyle();
+  targetElement = element;
+  element.setAttribute("data-ba-target", "");
+  // Same snapshot the inspect tool returns, so the model sees a selected element the way it sees any inspected one.
+  const selector = uniqueSelector(element);
+  const styles = inspect(selector).samples[0]?.styles;
+  ensureOverlay().spotlight.showWithTarget({ selector, label: describeElement(element), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 160), styles });
+}
 
 let tornDown = false;
 
@@ -38,12 +64,40 @@ function teardown() {
   tornDown = true;
   overlay?.destroy();
   overlay = null;
+  camera?.stop();
+  camera = null;
   stopEngine();
   stopSensors?.();
   for (const type of KEY_EVENTS) window.removeEventListener(type, onKey, true);
 }
 
 const ensureAlive = () => alive() || (teardown(), false);
+
+// Camera control is page-independent; settings turn it on and off in every open tab.
+function syncCamera(settings: StoredState["camera"], paused: boolean) {
+  const wanted = settings.enabled && !paused && window.top === window;
+  if (!wanted) {
+    camera?.stop();
+    camera = null;
+    return;
+  }
+  if (camera) return camera.update(settings);
+  camera = new CameraController(settings, {
+    notify: (text) => ensureOverlay().showToast(text, []),
+    turnOff: () => void load().then((state) => save({ camera: { ...state.camera, enabled: false } })),
+    select: selectTarget,
+    hasSelection: () => Boolean(targetElement) || picker.isActive,
+    cancel: () => {
+      const hadSomething = Boolean(targetElement) || Boolean(overlay?.spotlight.isOpen()) || picker.isActive;
+      picker.stop();
+      clearTarget();
+      overlay?.spotlight.hide();
+      if (hadSomething) ensureOverlay().showToast("Cancelled.", []);
+      return hadSomething;
+    },
+  });
+  camera.start();
+}
 
 function send(request: BackgroundRequest): Promise<unknown> {
   if (!ensureAlive()) return Promise.resolve(undefined);
@@ -177,9 +231,11 @@ async function restore(animate: boolean) {
 
 function ensureOverlay(): OverlayUi {
   overlay ??= new OverlayUi({
-    ask: (message, fresh, interrupt, thread) => void send({ kind: "runChat", message, fresh, interrupt, thread }),
+    ask: (message, fresh, interrupt, thread, target) => void send({ kind: "runChat", message, fresh, interrupt, thread, target }),
     stop: () => void send({ kind: "stopRun" }),
     dequeue: (runId) => void send({ kind: "dequeue", runId }),
+    clearTarget,
+    pick: () => picker.start(),
     listChanges: activeChanges,
     history: changeHistory,
     reapply: async (change) => void (await mutate(() => apply(change))),
@@ -256,6 +312,12 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return readPageAloud();
     case "startVoice":
       return ensureOverlay().spotlight.startVoice();
+    case "pickElement":
+      overlay?.spotlight.hide();
+      return picker.start();
+    case "targetContextElement":
+      if (lastContextElement?.isConnected) selectTarget(lastContextElement);
+      return;
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
     case "ui": {
@@ -283,6 +345,7 @@ function start() {
   });
 
   stopSensors = startSensors((kind) => void onFriction(kind).catch(() => undefined));
+  addEventListener("contextmenu", (event) => (lastContextElement = event.composedPath()[0] instanceof Element ? (event.composedPath()[0] as Element) : null), true);
 
   for (const type of KEY_EVENTS) {
     // Registered at document_start so these run before page scripts and keep page hotkeys from firing while the bar has focus.
@@ -299,6 +362,7 @@ function start() {
       }).catch(() => undefined);
     }
     if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
+    if (changes.camera || changes.paused) void load().then((state) => whenReady(() => syncCamera(state.camera, state.paused)));
   });
 
   function whenReady(callback: () => void) {
@@ -318,6 +382,7 @@ function start() {
           void send({ kind: "pageReady", origin, restored });
         }
       }).catch(reportExtensionError);
+      syncCamera(state.camera, state.paused);
     });
   })().catch(reportExtensionError);
 }

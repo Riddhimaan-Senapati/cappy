@@ -1,7 +1,7 @@
 import { LARGER_TEXT } from "../zoom-preference.js";
 import { hasMemoryLine, profileFor, rememberLines } from "../memory.js";
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
-import type { ApplyOutcome, ClientMessage, FrictionCount, ProviderInfo, RunRequest, ServerMessage, SiteControlOutcome, Suggestion, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
+import type { ApplyOutcome, ClientMessage, FrictionCount, ProviderInfo, RunRequest, ServerMessage, SiteControlOutcome, Suggestion, TargetElement, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
 import { recentFeedback } from "../feedback.js";
 import { emptyActivity, summarizeActivity } from "../friction-log.js";
@@ -19,6 +19,7 @@ interface Run {
   siteControls: Map<string, ActiveChange>;
   commandId?: string;
   thread?: string;
+  target?: TargetElement;
 }
 
 export interface AgentHooks {
@@ -50,6 +51,7 @@ interface StartOptions {
   queuedId?: string;
   commandId?: string;
   thread?: string;
+  target?: TargetElement;
 }
 
 export class AgentClient {
@@ -63,7 +65,7 @@ export class AgentClient {
   private notice: StatusInfo["notice"];
   private modelsRequested = new Set<string>();
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
-  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string }>>();
+  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
 
   constructor(private hooks: AgentHooks) {}
 
@@ -223,24 +225,24 @@ export class AgentClient {
     if (!item) return;
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return void this.queues.delete(tabId);
-    await this.startRun(tab, "chat", item.message, { fresh: item.fresh, queuedId: item.runId, commandId: item.commandId, thread: item.thread });
+    await this.startRun(tab, "chat", item.message, { fresh: item.fresh, queuedId: item.runId, commandId: item.commandId, thread: item.thread, target: item.target });
   }
 
   // A busy tab queues new requests; interrupt cancels the active run instead. The queue drains only after a successful reply.
   async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, options: StartOptions = {}) {
     if (!tab.id || !tab.url?.startsWith("http")) return;
-    const { fresh = false, interrupt = false, queuedId, commandId, thread } = options;
+    const { fresh = false, interrupt = false, queuedId, commandId, thread, target } = options;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const host = new URL(tab.url).host;
     const runId = queuedId ?? crypto.randomUUID();
-    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map(), commandId, thread };
+    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map(), commandId, thread, target };
 
     const active = [...this.runs.values()].filter((existing) => existing.tabId === tabId);
     if (active.length && trigger === "page_load") return;
     if (active.length && interrupt) for (const existing of active) this.cancelRun(existing, "Interrupted by a new request.");
     else if (active.length && !queuedId) {
-      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId, thread }]);
+      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId, thread, target }]);
       return this.emit(run, { type: "queued", runId, message, thread });
     }
     this.emit(run, { type: "start", runId, trigger, message, thread });
@@ -251,7 +253,7 @@ export class AgentClient {
     if (!this.runs.has(runId)) return;
     if (state.paused) return this.fail(run, "Adaptations are paused. Turn them on in settings.");
 
-    if (trigger === "chat" && !thread && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) {
+    if (trigger === "chat" && !thread && !fresh && !target && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) {
       await this.markCommandApplied(run);
       return;
     }
@@ -279,6 +281,7 @@ export class AgentClient {
         trigger,
         message,
         provider: (await this.getStatus()).activeProvider ?? undefined,
+        target,
         routing: state.routing,
         models: state.modelChoices[(await this.getStatus()).activeProvider ?? ""] ?? {},
         history: thread
@@ -293,7 +296,8 @@ export class AgentClient {
         page,
         clientTime: localClock(),
       };
-      if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: message }].slice(-20) });
+      const historyText = target ? `${message} (selected: ${target.label})` : message;
+      if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: historyText }].slice(-20) });
       if (!this.runs.has(runId)) return;
       this.send(request);
       return true;
@@ -374,14 +378,14 @@ export class AgentClient {
         return this.step(run, message.text, "bad");
       case "blocked":
         return this.emit(run, { type: "blocked", runId: run.runId, reason: message.reason });
+      case "options":
+        return this.emit(run, { type: "options", runId: run.runId, question: message.question, options: message.options });
       case "profile": {
         const host = new URL(run.origin).host;
         const proposed = await rememberLines(message.lines, { host, scope: message.scope === "site" ? "site" : "everywhere" });
         if (proposed.length) this.emit(run, { type: "memory", runId: run.runId, status: "proposed", lines: proposed, host, scope: message.scope });
         return;
       }
-      case "options":
-        return this.emit(run, { type: "options", runId: run.runId, question: message.question, options: message.options });
       case "siteSkill":
         if (Array.isArray(message.notes)) await saveSiteNotes(new URL(run.origin).host, message.notes.filter((note) => typeof note === "string").map((note) => note.slice(0, 200)).slice(0, 6));
         return;
@@ -395,7 +399,7 @@ export class AgentClient {
   private async complete(run: Run, reply: string) {
     const state = await load();
     if (reply) await save({ history: [...state.history, { role: "assistant" as const, text: reply }].slice(-20) });
-    if (run.trigger === "chat" && run.applied.size) {
+    if (run.trigger === "chat" && run.applied.size && !run.target) {
       await saveRecipe(recipeKey(run.origin, run.message), { message: run.message, changes: [...run.applied.values()], at: Date.now() });
     }
     const applied = this.summaries(run);
