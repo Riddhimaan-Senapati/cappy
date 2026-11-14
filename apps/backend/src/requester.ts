@@ -108,6 +108,7 @@ export function buildRequestPrompt(body: RequestBody): string {
     `User request: ${JSON.stringify(body.request)}`,
     `Profile summary: ${body.profile.summary}`,
     `Profile needs: ${JSON.stringify(body.profile.needs)}`,
+    `Set reason.needId to the id of the profile need this serves, or to "${needIdFor(body)}" if none fits.`,
     "<page_outline_untrusted>",
     JSON.stringify({ ...body.outline, elements: undefined }).replaceAll("<", "\\u003c"),
     "Page elements (id <tag> text):",

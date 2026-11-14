@@ -1,11 +1,12 @@
 import { AdaptResponse, VerifyResponse, type RequestBody } from "@browser-agent/shared";
 import { z } from "zod";
 import type { Adapter } from "../adapter";
-import { buildAdaptPrompt, parseAdaptText } from "../gemini-adapter";
+import { buildAdaptPrompt, parseAdaptText, responseJsonSchema } from "../gemini-adapter";
 import type { LlmClient } from "../llm";
 import { buildRequestPrompt, type Requester } from "../requester";
 import { buildVerifyPrompt, type Verifier } from "../verifier";
 import { responses, type InputMessage, type InputPart, type StructuredSchema } from "./client";
+import { stripNulls, toStrictSchema } from "./strict-schema";
 
 function jsonSchemaOf(type: z.ZodType): Record<string, unknown> {
   const schema = z.toJSONSchema(type, { io: "output" }) as Record<string, unknown>;
@@ -18,18 +19,22 @@ const ADAPT_SCHEMA: StructuredSchema = {
   name: "page_adaptation",
   schema: {
     type: "object",
-    properties: { result: jsonSchemaOf(AdaptResponse) },
+    properties: { result: responseJsonSchema() },
     required: ["result"],
     additionalProperties: false,
   },
 };
+ADAPT_SCHEMA.schema = toStrictSchema(ADAPT_SCHEMA.schema) as Record<string, unknown>;
 
-const VERIFY_SCHEMA: StructuredSchema = { name: "adaptation_verdict", schema: jsonSchemaOf(VerifyResponse) };
+const VERIFY_SCHEMA: StructuredSchema = {
+  name: "adaptation_verdict",
+  schema: toStrictSchema(jsonSchemaOf(VerifyResponse)) as Record<string, unknown>,
+};
 
 export function unwrapResult(text: string): string | undefined {
   try {
     const parsed = JSON.parse(text) as { result?: unknown };
-    return parsed.result === undefined ? undefined : JSON.stringify(parsed.result);
+    return parsed.result === undefined ? undefined : JSON.stringify(stripNulls(parsed.result));
   } catch {
     return undefined;
   }
