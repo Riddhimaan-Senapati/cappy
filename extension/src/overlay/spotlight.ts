@@ -7,6 +7,7 @@ import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { deleteRequest, findRequestSessions, load, save, suggestRequests, type SavedCommand, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
+import { updateProfile } from "../profiles.js";
 import { paintCountdown, paintMic, liveRegion, micButton } from "../voice/button.js";
 import { VoiceController } from "../voice/controller.js";
 import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
@@ -48,6 +49,7 @@ interface Item {
   kind: "ask" | "command" | "undo" | "try" | "saved" | "previous";
   section: string;
   keywords?: string;
+  profileId?: string;
   run(): void | Promise<void>;
 }
 
@@ -181,7 +183,23 @@ export class Spotlight {
     addEventListener("pointerdown", this.onOutsidePointer, true);
   }
 
-  private onStorage = () => void this.refreshCache().catch(reportExtensionError);
+  private onStorage = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
+    if (area !== "local") return;
+    if (changes.activeProfileId) {
+      this.runs = [];
+      this.smartSuggestion = null;
+      this.pinnedNudge = false;
+      this.target = null;
+      this.input.value = "";
+      this.view = "list";
+      this.disposeSettings?.();
+      this.disposeSettings = null;
+      this.stopTicker();
+    }
+    void this.refreshCache().then(() => {
+      if (changes.activeProfileId && this.opened) this.render();
+    }).catch(reportExtensionError);
+  };
 
   private onOutsidePointer = (event: PointerEvent) => {
     if (this.opened && !event.composedPath().includes(this.shadow.host)) this.hide();
@@ -433,6 +451,7 @@ export class Spotlight {
   }
 
   private onInput() {
+    this.deletingProfileId = null;
     window.clearTimeout(this.closeTimer);
     if (this.view === "run" && !this.working) this.setView("list");
     if (this.view !== "list") return this.renderHints();
@@ -448,6 +467,7 @@ export class Spotlight {
     return [
       { id: "pick", icon: "target", title: "Select an element on the page", hint: "then say what to change", kind: "command", section: "Commands", keywords: "pick choose this element point target inspect", run: () => this.startPicking() },
       { id: "commands", icon: "bookmark", title: "Saved commands", hint: "→", kind: "command", section: "Commands", keywords: "shortcuts presets saved favorites", run: () => this.setView("commands") },
+      { id: "profiles", icon: "circle", title: "Profiles", hint: state?.profiles[state.activeProfileId]?.name ?? "Default", kind: "command", section: "Commands", keywords: "profile switch select new create", run: () => this.showProfileCommands() },
       {
         id: "camera",
         icon: "eye",
@@ -463,7 +483,7 @@ export class Spotlight {
         },
       },
       { id: "history", icon: "history", title: "Change history", hint: "→", kind: "command", section: "Commands", keywords: "changes log toggle before after compare", run: () => this.setView("history") },
-      { id: "settings", icon: "settings", title: "Settings", kind: "command", section: "Commands", keywords: "preferences profile model options", run: () => this.setView("settings") },
+      { id: "settings", icon: "settings", title: "Settings", kind: "command", section: "Commands", keywords: "preferences model options", run: () => this.setView("settings") },
       ...(changes.length ? [{ id: "undo-all", icon: "undo" as IconName, title: "Undo all changes on this page", kind: "command" as const, section: "Commands", keywords: "revert reset", run: async () => (await this.deps.revertAll(), this.hide()) }] : []),
       ...(this.deps.isSpeaking()
         ? [{ id: "stop-reading", icon: "pause" as IconName, title: "Stop reading aloud", hint: "esc", kind: "command" as const, section: "Commands", keywords: "speech tts silence quiet", run: () => (this.deps.stopSpeaking(), this.hide()) }]
@@ -557,8 +577,71 @@ export class Spotlight {
     return items;
   }
 
+  private showProfileCommands(value = "/profile") {
+    this.deletingProfileId = null;
+    this.input.value = value;
+    this.selected = 0;
+    this.setView("list");
+    this.input.focus({ preventScroll: true });
+  }
+
+  private profileItems(query: string): Item[] {
+    const state = this.cache;
+    if (!state) return [];
+    const currentName = state.profiles[state.activeProfileId].name;
+    const rename = query.match(/^rename(?:\s+(.*))?$/i);
+    if (rename) {
+      const name = rename[1]?.trim() ?? "";
+      return [{
+        id: "profile:rename", icon: "text", title: name ? `Rename ${currentName} to ${name}` : "Type a new name for the current profile",
+        hint: name ? "Enter to save" : "/profile rename New name", kind: "command", section: "Profiles",
+        run: () => name ? this.changeProfile({ action: "rename", name }) : this.showProfileCommands("/profile rename "),
+      }];
+    }
+    const create = query.match(/^new(?:\s+(.*))?$/i);
+    if (create) {
+      const name = create[1]?.trim() ?? "";
+      return [{
+        id: "profile:new", icon: "circle", title: name ? `Create profile: ${name}` : "Type a name for your new profile",
+        hint: name ? "empty setup" : "/profile new My profile", kind: "command", section: "Profiles",
+        run: () => name ? this.changeProfile({ action: "create", name }) : this.showProfileCommands("/profile new "),
+      }];
+    }
+    return [
+      ...("new profile".includes(query.toLowerCase()) ? [{ id: "profile:new", icon: "circle", title: "New profile", hint: "start empty", kind: "command", section: "Profiles", run: () => this.showProfileCommands("/profile new ") } as Item] : []),
+      ...("rename current profile".includes(query.toLowerCase()) ? [{
+        id: "profile:rename", icon: "text", title: "Rename current profile", hint: currentName, kind: "command", section: "Profiles",
+        run: () => {
+          const prefix = "/profile rename ";
+          this.showProfileCommands(`${prefix}${currentName}`);
+          this.input.setSelectionRange(prefix.length, this.input.value.length);
+        },
+      } as Item] : []),
+      ...Object.entries(state.profiles).filter(([, profile]) => profile.name.toLowerCase().includes(query.toLowerCase())).map(([id, profile]): Item => ({
+        id: `profile:${id}`, icon: "circle", title: `Select profile: ${profile.name}`,
+        profileId: id,
+        hint: id === state.activeProfileId ? "current" : "all websites", kind: "command", section: "Profiles",
+        run: () => this.changeProfile({ action: "switch", id }),
+      })),
+    ];
+  }
+
+  private async changeProfile(action: Parameters<typeof updateProfile>[0]) {
+    try {
+      await updateProfile(action);
+      await this.refreshCache();
+      this.showProfileCommands();
+    } catch (error) {
+      this.live.textContent = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  private deletingProfileId: string | null = null;
+
   private buildItems(): Item[] {
     const raw = this.input.value.trim();
+    const profileCommand = raw.match(/^\/\s*profiles?(?:\s+(.*))?$/i);
+    if (profileCommand) return this.profileItems(profileCommand[1] ?? "");
     const changes = this.deps.listChanges();
     const undo: Item[] = changes.map((change) => ({
       id: `undo:${change.id}`,
@@ -628,6 +711,40 @@ export class Spotlight {
       row.style.setProperty("--i", String(index));
       row.addEventListener("pointermove", () => this.select(index, false));
       row.addEventListener("click", () => void this.runItem(item));
+      if (item.profileId) {
+        const id = item.profileId;
+        const name = this.cache!.profiles[id].name;
+        const confirming = this.deletingProfileId === id;
+        const remove = h("button", `x delete-profile${confirming ? " confirm" : ""}`, confirming ? "Confirm delete" : "", confirming ? [] : [icon("trash", 12)]);
+        remove.type = "button";
+        remove.disabled = Object.keys(this.cache!.profiles).length === 1;
+        remove.title = remove.disabled ? "Keep at least one profile" : `Delete ${name} and its saved directives, layouts, and history`;
+        remove.setAttribute("aria-label", `${confirming ? "Confirm delete profile" : "Delete profile"}: ${name}`);
+        remove.addEventListener("click", () => {
+          if (confirming) {
+            remove.disabled = true;
+            void this.changeProfile({ action: "delete", id });
+          } else {
+            this.deletingProfileId = id;
+            this.renderList();
+            this.body.querySelector<HTMLButtonElement>(".delete-profile.confirm")?.focus();
+          }
+        });
+        const group = h("div", "request-row", "", [row, remove]);
+        group.setAttribute("role", "presentation");
+        if (confirming) {
+          const cancel = h("button", "link", "Cancel");
+          cancel.type = "button";
+          cancel.addEventListener("click", () => {
+            this.deletingProfileId = null;
+            this.renderList();
+            this.input.focus({ preventScroll: true });
+          });
+          group.append(cancel);
+        }
+        nodes.push(group);
+        return;
+      }
       if (item.kind !== "previous") return void nodes.push(row);
       const remove = h("button", "x delete-request", "", [icon("trash", 12)]);
       remove.type = "button";

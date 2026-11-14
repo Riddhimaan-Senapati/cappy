@@ -60,6 +60,8 @@ export interface CameraSettings {
 }
 
 export interface StoredState {
+  activeProfileId: string;
+  profiles: Record<string, { name: string; state?: ProfileState }>;
   usage: TokenUsage;
   profile: string[];
   pendingMemory: string[];
@@ -94,7 +96,12 @@ export interface StoredState {
   geminiVoiceVerified: boolean;
 }
 
+export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
+export type ProfileState = Pick<StoredState, typeof PROFILE_KEYS[number]>;
+
 export const DEFAULTS: StoredState = {
+  activeProfileId: "default",
+  profiles: { default: { name: "Default" } },
   usage: { calls: 0, inputTokens: 0, outputTokens: 0 },
   profile: [],
   pendingMemory: [],
