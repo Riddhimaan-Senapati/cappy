@@ -21,7 +21,7 @@ export function profilePatch(state: StoredState, action: ProfileAction): Partial
     const id = profiles.default ? "default" : Object.keys(profiles)[0];
     const next = profiles[id].state!;
     profiles[id] = { name: profiles[id].name };
-    return { ...next, activeProfileId: id, profiles };
+    return { ...next, changeRevisions: next.changeRevisions ?? [], activeProfileId: id, profiles };
   }
   if (action.action === "rename") {
     const name = action.name.trim();
@@ -45,7 +45,7 @@ export function profilePatch(state: StoredState, action: ProfileAction): Partial
     next = profiles[id].state!;
     profiles[id] = { name: profiles[id].name };
   }
-  return { ...next, activeProfileId: id, profiles };
+  return { ...next, changeRevisions: next.changeRevisions ?? [], activeProfileId: id, profiles };
 }
 
 export async function updateProfile(action: ProfileAction) {

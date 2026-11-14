@@ -1,7 +1,7 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { ChoiceOption, MemoryScope, Routing, Suggestion, TargetElement, TokenUsage } from "../../../shared/protocol.js";
-import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
+import { IMPROVE_REQUEST, ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { deleteRequest, findRequestSessions, load, save, suggestRequests, type SavedCommand, type StoredState } from "../storage.js";
@@ -14,7 +14,8 @@ import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from
 import { chooseTarget, mentionsTarget, type PointedCandidate } from "../voice/point.js";
 
 export interface SpotlightDeps {
-  ask(message: string, fresh: boolean, interrupt?: boolean, thread?: string, target?: TargetElement): void;
+  ask(message: string, fresh: boolean, interrupt?: boolean, thread?: string, target?: TargetElement, makeItWork?: boolean): void;
+  improve(): void;
   stop(): void;
   dequeue(runId: string): void;
   clearTarget(): void;
@@ -107,6 +108,8 @@ export class Spotlight {
   private input = h("input", "input");
   private home = h("button", "home");
   private pill = h("button", "pill");
+  private makeItWorkButton = h("button", "work-toggle", "Make it work");
+  private makeItWorkOn = false;
   private pickButton = h("button", "pick");
   private chip = h("div", "target-chip");
   private target: TargetElement | null = null;
@@ -166,7 +169,16 @@ export class Spotlight {
     this.pickButton.setAttribute("aria-label", "Choose an element on the page");
     this.pickButton.append(icon("target", 15));
     this.pickButton.addEventListener("click", () => this.startPicking());
-    this.bar.append(h("div", "row", "", [this.orb, this.chip, this.input, this.mic, this.pickButton, this.home, this.pill]), this.body, this.hints, this.live);
+    this.makeItWorkButton.type = "button";
+    this.makeItWorkButton.title = "Make it work: after this request, check a screenshot and rewrite the change if the page does not match it";
+    this.makeItWorkButton.setAttribute("aria-pressed", "false");
+    this.makeItWorkButton.addEventListener("click", () => {
+      const on = !this.makeItWorkOn;
+      this.paintMakeItWork(on);
+      if (this.cache) this.cache.makeItWork = on;
+      void save({ makeItWork: on });
+    });
+    this.bar.append(h("div", "row", "", [this.orb, this.chip, this.input, this.mic, this.pickButton, this.makeItWorkButton, this.home, this.pill]), this.body, this.hints, this.live);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
 
@@ -337,6 +349,8 @@ export class Spotlight {
     this.layer.classList.toggle("running", this.view === "run");
     this.input.readOnly = this.view === "settings" || this.view === "history" || this.view === "commands";
     this.mic.disabled = this.input.readOnly;
+    this.paintMakeItWork(this.cache?.makeItWork ?? this.makeItWorkOn);
+    this.makeItWorkButton.hidden = this.input.readOnly;
     this.input.placeholder =
       this.view === "settings"
         ? "Settings"
@@ -363,6 +377,11 @@ export class Spotlight {
     else this.renderList();
     this.renderHints();
     this.animateBody = false;
+  }
+
+  private paintMakeItWork(on: boolean) {
+    this.makeItWorkOn = on;
+    this.makeItWorkButton.setAttribute("aria-pressed", String(on));
   }
 
   private renderPill() {
@@ -467,6 +486,7 @@ export class Spotlight {
     const next = ROUTING_ORDER[(ROUTING_ORDER.indexOf(routing) + 1) % ROUTING_ORDER.length];
     return [
       { id: "pick", icon: "target", title: "Select an element on the page", hint: "then say what to change", kind: "command", section: "Commands", keywords: "pick choose this element point target inspect", run: () => this.startPicking() },
+      { id: "improve", icon: "sparkle", title: "Improve this page", hint: "/improve", kind: "command", section: "Commands", keywords: "improve screenshot check fix script self-improve", run: () => this.improve() },
       { id: "commands", icon: "bookmark", title: "Saved commands", hint: "→", kind: "command", section: "Commands", keywords: "shortcuts presets saved favorites", run: () => this.setView("commands") },
       { id: "profiles", icon: "circle", title: "Profiles", hint: state?.profiles[state.activeProfileId]?.name ?? "Default", kind: "command", section: "Commands", keywords: "profile switch select new create", run: () => this.showProfileCommands() },
       {
@@ -826,6 +846,28 @@ export class Spotlight {
     );
   }
 
+  private improve() {
+    if (!this.deps.listChanges().length) {
+      this.live.textContent = "No changes on this page to improve.";
+      this.live.classList.remove("sr-only");
+      return;
+    }
+    if (this.working) {
+      this.live.textContent = "Wait for the current request to finish, then run /improve.";
+      this.live.classList.remove("sr-only");
+      return;
+    }
+    window.clearTimeout(this.closeTimer);
+    for (const run of this.runs) if (run.status === "done" && !this.awaitingPick(run)) run.open = false;
+    this.runs.push({
+      runId: null, message: IMPROVE_REQUEST, interrupt: false, status: "pending", steps: [{ text: "Checking how it looks", tone: "info" }], memory: [],
+      startedAt: Date.now(), open: true, expanded: false, shownSteps: 0, shownResult: false, seen: false, saving: false, undone: false,
+    });
+    this.input.value = "";
+    this.setView("run");
+    this.deps.improve();
+  }
+
   ask(message: string, fresh: boolean, interrupt = false, thread = this.sessionRequest) {
     if (!message) return;
     window.clearTimeout(this.closeTimer);
@@ -848,7 +890,7 @@ export class Spotlight {
     }
     this.sessionRequest = thread;
     this.setView("run");
-    this.deps.ask(message, fresh, interrupt, thread || undefined, target);
+    this.deps.ask(message, fresh, interrupt, thread || undefined, target, this.makeItWorkOn);
   }
 
   // Idle: sends right away. Busy: the background queues it and drains the queue after each successful reply.
@@ -1339,7 +1381,7 @@ export class Spotlight {
   handleEvent(event: UiEvent): boolean {
     let run: RunState | undefined;
     if (event.type === "queued" || event.type === "start") {
-      if (event.type === "start" && event.trigger !== "chat") return false;
+      if (event.type === "start" && event.trigger !== "chat" && !this.runs.some((candidate) => candidate.runId === null && candidate.message === event.message)) return false;
       run = this.runs.find((candidate) => candidate.runId === event.runId) ?? this.runs.find((candidate) => candidate.runId === null && candidate.status === "pending" && candidate.message === event.message);
       if (!run) return false;
       run.runId = event.runId;

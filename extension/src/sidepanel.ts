@@ -281,7 +281,7 @@ function onEvent(event: UiEvent) {
   const run = ensureRun(event, event.type === "start" ? (event.message || "Page-load check") : "");
   switch (event.type) {
     case "start":
-      run.tag.textContent = event.trigger === "chat" ? "chat" : "page load";
+      run.tag.textContent = event.trigger === "chat" ? "chat" : event.trigger === "review" ? "self-improve" : "page load";
       break;
     case "tier":
       run.tag.className = `tag ${event.tier}`;
@@ -335,7 +335,7 @@ function onEvent(event: UiEvent) {
 const port = chrome.runtime.connect({ name: "debug" });
 port.onMessage.addListener((message: DebugPortMessage) => {
   if (message.type === "inspection") {
-    if (message.snapshot) renderInspection(inspector, message.snapshot);
+    if (message.snapshot) renderInspection(inspector, message.snapshot, (change) => port.postMessage({ type: "rollback", change }));
     else inspector.replaceChildren(h("p", "", message.error ?? "Could not inspect this page. Reload the tab and try again."));
   }
   else if (message.type === "status") setStatus(message.status);

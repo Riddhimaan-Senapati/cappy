@@ -5,7 +5,7 @@ import type { ApplyOutcome, ClientMessage, FrictionCount, ProviderInfo, RunReque
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
 import { recentFeedback } from "../feedback.js";
 import { emptyActivity, summarizeActivity } from "../friction-log.js";
-import { findRequestSessions, load, recipeKey, save, saveRecipe, saveSiteNotes } from "../storage.js";
+import { findRequestSessions, load, previousRevision, recipeKey, save, saveRecipe, saveSiteNotes } from "../storage.js";
 import { speakIfEnabled } from "./tts.js";
 
 interface Run {
@@ -20,6 +20,9 @@ interface Run {
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  makeItWork?: boolean;
+  existingIds: Set<string>;
+  improved: boolean;
 }
 
 export interface AgentHooks {
@@ -52,6 +55,7 @@ interface StartOptions {
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  makeItWork?: boolean;
 }
 
 export class AgentClient {
@@ -67,7 +71,7 @@ export class AgentClient {
   private modelsRequested = new Set<string>();
   private suggestionTabs = new Map<string, number>();
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
-  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
+  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement; makeItWork?: boolean }>>();
 
   constructor(private hooks: AgentHooks) {}
 
@@ -201,7 +205,7 @@ export class AgentClient {
 
   private finish(run: Run, succeeded = false) {
     if (!this.runs.delete(run.runId)) return;
-    if (run.trigger === "page_load") void sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
+    if (run.trigger === "page_load" || run.trigger === "review") void sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
     this.setStatus({});
     if (succeeded) void this.next(run.tabId);
   }
@@ -237,24 +241,28 @@ export class AgentClient {
     if (!item) return;
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return void this.queues.delete(tabId);
-    await this.startRun(tab, "chat", item.message, { fresh: item.fresh, queuedId: item.runId, commandId: item.commandId, thread: item.thread, target: item.target });
+    await this.startRun(tab, "chat", item.message, { fresh: item.fresh, queuedId: item.runId, commandId: item.commandId, thread: item.thread, target: item.target, makeItWork: item.makeItWork });
   }
 
   // A busy tab queues new requests; interrupt cancels the active run instead. The queue drains only after a successful reply.
+  isBusy(tabId: number) {
+    return [...this.runs.values()].some((run) => run.tabId === tabId);
+  }
+
   async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, options: StartOptions = {}) {
     if (!tab.id || !tab.url?.startsWith("http")) return;
-    const { fresh = false, interrupt = false, queuedId, commandId, thread, target } = options;
+    const { fresh = false, interrupt = false, queuedId, commandId, thread, target, makeItWork = false } = options;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const host = new URL(tab.url).host;
     const runId = queuedId ?? crypto.randomUUID();
-    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map(), commandId, thread, target };
+    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map(), commandId, thread, target, makeItWork: trigger === "chat" && makeItWork, existingIds: new Set(), improved: false };
 
     const active = [...this.runs.values()].filter((existing) => existing.tabId === tabId);
-    if (active.length && trigger === "page_load") return;
+    if (active.length && (trigger === "page_load" || trigger === "review")) return;
     if (active.length && interrupt) for (const existing of active) this.cancelRun(existing, "Interrupted by a new request.");
     else if (active.length && !queuedId) {
-      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId, thread, target }]);
+      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId, thread, target, makeItWork }]);
       return this.emit(run, { type: "queued", runId, message, thread });
     }
     this.emit(run, { type: "start", runId, trigger, message, thread });
@@ -280,7 +288,7 @@ export class AgentClient {
 
     if (!this.runs.has(runId)) return;
     this.setStatus({ connected: true, error: undefined });
-    if (trigger === "page_load") await sendToTab(tabId, { kind: "busy", on: true }).catch(() => undefined);
+    if (trigger === "page_load" || trigger === "review") await sendToTab(tabId, { kind: "busy", on: true }).catch(() => undefined);
 
     try {
       const [page, active] = await Promise.all([
@@ -307,7 +315,9 @@ export class AgentClient {
         active,
         page,
         clientTime: localClock(),
+        makeItWork: run.makeItWork || undefined,
       };
+      run.existingIds = new Set(active.map((change) => change.id));
       const historyText = target ? `${message} (selected: ${target.label})` : message;
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: historyText }].slice(-20) });
       if (!this.runs.has(runId)) return;
@@ -363,7 +373,7 @@ export class AgentClient {
       const run = message.runId ? this.runs.get(message.runId) : undefined;
       if (run) this.emit(run, { type: "usage", runId: run.runId, usage: message.usage });
       const tabId = run?.tabId ?? (message.requestId ? this.suggestionTabs.get(message.requestId) : undefined);
-      if (tabId) void sendToTab(tabId, { kind: "usage", usage: message.usage, model: message.model, purpose: run ? (run.trigger === "page_load" ? "Automatic page adaptation" : "Chat adaptation") : "Page suggestion" }).catch(() => undefined);
+      if (tabId) void sendToTab(tabId, { kind: "usage", usage: message.usage, model: message.model, purpose: run ? (run.trigger === "page_load" ? "Automatic page adaptation" : run.trigger === "review" ? "Self-improve check" : "Chat adaptation") : "Page suggestion" }).catch(() => undefined);
       this.usageUpdates = this.usageUpdates.then(async () => {
         const { usage } = await load();
         await save({ usage: {
@@ -426,7 +436,7 @@ export class AgentClient {
 
   private async complete(run: Run, reply: string) {
     const state = await load();
-    if (reply) await save({ history: [...state.history, { role: "assistant" as const, text: reply }].slice(-20) });
+    if (reply && run.trigger !== "review") await save({ history: [...state.history, { role: "assistant" as const, text: reply }].slice(-20) });
     if (run.trigger === "chat" && run.applied.size && !run.target) {
       await saveRecipe(recipeKey(run.origin, run.message), { message: run.message, changes: [...run.applied.values()], at: Date.now() });
     }
@@ -438,8 +448,21 @@ export class AgentClient {
       void speakIfEnabled(announcement, run.tabId);
       await sendToTab(run.tabId, { kind: "toast", text: announcement, undoIds: applied.map((change) => change.id) }).catch(() => undefined);
     }
+    if (run.trigger === "review" && run.improved && applied.length) {
+      const names = applied.map((change) => change.summary).join(", ");
+      const restore = [...run.applied.values()].flatMap((change) => {
+        const earlier = previousRevision(state.changeRevisions ?? [], run.origin, change);
+        return earlier ? [earlier.change] : [];
+      });
+      await sendToTab(run.tabId, {
+        kind: "toast",
+        text: `Identified an improvement. Improved the script: ${names}.`,
+        undoIds: restore.length ? [] : applied.map((change) => change.id),
+        restore,
+      }).catch(() => undefined);
+    }
     this.finish(run, true);
-    this.emit(run, { type: "done", runId: run.runId, trigger: run.trigger, reply, applied, fromCache: false });
+    this.emit(run, { type: "done", runId: run.runId, trigger: run.trigger, reply, applied, fromCache: false, improved: run.improved || undefined });
   }
 
   private async runTool(message: ToolCallMessage) {
@@ -447,18 +470,21 @@ export class AgentClient {
     if (!run) return;
     const started = Date.now();
     let result: unknown;
+    let improving = false;
     try {
       if (message.name === "screenshot") {
-        if (run.trigger === "page_load") await sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
+        if (run.trigger === "page_load" || run.trigger === "review") await sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
         result = { dataUrl: await captureScaled(run.windowId) };
       } else if (message.name === "use_site_control") {
         if (run.trigger !== "chat") throw new Error("Site controls require a chat request.");
         result = await sendToTab(run.tabId, { kind: "useSiteControl", input: message.input, userMessage: run.message });
       } else {
-        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input, source: "llm" });
+        const change = message.name === "apply_change" ? (message.input as { change?: Change }).change : undefined;
+        improving = Boolean(change && ((run.trigger === "review" && run.existingIds.has(change.id)) || (run.makeItWork && run.applied.has(change.id))));
+        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input, source: improving ? "improve" : "llm" });
       }
       if (!this.runs.has(run.runId)) return;
-      if (message.name === "apply_change") this.afterApply(run, (message.input as { change: Change }).change, result as ApplyOutcome);
+      if (message.name === "apply_change") this.afterApply(run, (message.input as { change: Change }).change, result as ApplyOutcome, improving);
       if (message.name === "use_site_control") {
         const outcome = result as SiteControlOutcome;
         if (outcome.status === "applied") {
@@ -480,9 +506,14 @@ export class AgentClient {
     }
   }
 
-  private afterApply(run: Run, change: Change, outcome: ApplyOutcome) {
-    if (run.trigger === "page_load") void sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
+  private afterApply(run: Run, change: Change, outcome: ApplyOutcome, improving = false) {
+    if (run.trigger === "page_load" || run.trigger === "review") void sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
     if (!outcome.ok) return this.step(run, `Couldn't apply "${change.summary}": ${outcome.error}`, "bad");
+    if (improving) {
+      run.improved = true;
+      this.step(run, "Identified an improvement", "warn");
+      this.step(run, `Improved the script: ${change.summary}`, "good");
+    }
     run.applied.set(change.id, { ...change, appliedAt: Date.now() });
     const deltas = (Object.keys(STAT_LABELS) as Array<keyof PageStats>)
       .filter((key) => outcome.before[key] !== outcome.after[key])

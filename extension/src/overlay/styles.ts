@@ -38,7 +38,11 @@ export const OVERLAY_CSS = `
 .pill.pro { color: #e4d6ff; background: rgba(167, 139, 250, 0.16); border-color: rgba(167, 139, 250, 0.28); }
 .pill .k { font: 600 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; opacity: 0.55; margin-left: 2px; }
 .pill.flip { animation: flip 0.32s var(--spring); }
-.pill:focus-visible, .item:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pill:focus-visible, .item:focus-visible, .link:focus-visible, .work-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.work-toggle { all: unset; flex: none; cursor: pointer; height: 24px; padding: 0 8px; border-radius: 7px; font-size: 11.5px; font-weight: 550; color: rgba(255, 255, 255, 0.5); border: 1px solid rgba(255, 255, 255, 0.08); }
+.work-toggle:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); }
+.work-toggle[aria-pressed="true"] { color: #d9fff4; background: rgba(103, 216, 195, 0.16); border-color: rgba(103, 216, 195, 0.35); }
+.work-toggle[hidden] { display: none; }
 
 .body { border-top: 1px solid rgba(255, 255, 255, 0.05); max-height: min(50vh, 360px); overflow: auto; overscroll-behavior: contain; padding: 5px; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.15) transparent; }
 .body:empty { display: none; }

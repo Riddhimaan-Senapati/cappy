@@ -1,6 +1,6 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { TargetElement } from "../../../shared/protocol.js";
-import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
+import { IMPROVE_REQUEST, type BackgroundRequest, type DebugPortMessage, type DebugPortRequest, type PageInspection, type StatusInfo, type UiEvent } from "../messages.js";
 import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, type RequestSession } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
@@ -70,11 +70,11 @@ async function changeProfile(action: ProfileAction) {
   }
 }
 
-async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement) {
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement, makeItWork = false) {
   if (switchingProfile) return;
   if (!message.trim()) return;
   await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
-  if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target });
+  if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target, makeItWork });
 }
 
 async function injectContent(tabId: number) {
@@ -150,6 +150,27 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
   }
 }
 
+// Saved changes are already on the page. A screenshot check rewrites a script that missed, once the tab is idle.
+async function maybeSelfImprove(tab: chrome.tabs.Tab, origin: string, restored: number) {
+  const state = await load();
+  if (!state.selfImprove || state.paused || restored < 1 || !tab.id) return;
+  const tabId = tab.id;
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  const current = await chrome.tabs.get(tabId).catch(() => null);
+  if (!current?.id || !current.url?.startsWith("http") || new URL(current.url).origin !== origin) return;
+  if (agent.isBusy(tabId)) return;
+  const again = await load();
+  if (!again.selfImprove || again.paused) return;
+  try {
+    await agent.ensureConnected();
+  } catch {
+    return;
+  }
+  if (await agent.startRun(current, "review", "Check the saved changes on this page. If one is not working, improve its script.")) {
+    await sendToTab(tabId, { kind: "activity", text: "Self-improve check started for the saved changes on this page." }).catch(() => undefined);
+  }
+}
+
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
   if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
@@ -157,8 +178,11 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       void changeProfile(request).then(() => sendResponse({ ok: true }), (error: Error) => sendResponse({ ok: false, error: error.message }));
       return true;
     case "runChat":
-      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt, request.thread, request.target).finally(() => sendResponse());
+      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt, request.thread, request.target, request.makeItWork).finally(() => sendResponse());
       return !!sender.tab;
+    case "improve":
+      if (sender.tab?.id && !agent.isBusy(sender.tab.id)) void agent.startRun(sender.tab, "review", IMPROVE_REQUEST);
+      break;
     case "deleteRequest":
       if (typeof request.message !== "string") return false;
       void removeSubmittedRequest(request.message).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
@@ -166,8 +190,12 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "pageReady":
       if (switchingProfile && !request.profileChanged) break;
       if (sender.tab) {
-        void agent.runEverywhereCommands(sender.tab, request.origin);
-        void maybeRunProactively(sender.tab, request.origin, request.restored, request.profileChanged);
+        const tab = sender.tab;
+        void (async () => {
+          await agent.runEverywhereCommands(tab, request.origin);
+          await maybeRunProactively(tab, request.origin, request.restored, request.profileChanged);
+          await maybeSelfImprove(tab, request.origin, request.restored);
+        })();
       }
       break;
     case "openDebug":
@@ -219,6 +247,18 @@ chrome.runtime.onConnect.addListener((port) => {
       try {
         const tab = await activeTab();
         if (!tab?.id || !tab.url?.startsWith("http")) throw new Error("Select a web page to inspect.");
+        const snapshot = await sendToTab<PageInspection>(tab.id, { kind: "inspectPage" });
+        port.postMessage({ type: "inspection", snapshot } satisfies DebugPortMessage);
+      } catch (error) {
+        port.postMessage({ type: "inspection", error: error instanceof Error ? error.message : String(error) } satisfies DebugPortMessage);
+      }
+      return;
+    }
+    if (request.type === "rollback") {
+      try {
+        const tab = await activeTab();
+        if (!tab?.id || !tab.url?.startsWith("http")) throw new Error("Select a web page to roll back.");
+        await sendToTab(tab.id, { kind: "rollback", change: request.change });
         const snapshot = await sendToTab<PageInspection>(tab.id, { kind: "inspectPage" });
         port.postMessage({ type: "inspection", snapshot } satisfies DebugPortMessage);
       } catch (error) {

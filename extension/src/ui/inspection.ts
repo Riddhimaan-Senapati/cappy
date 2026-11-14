@@ -1,7 +1,15 @@
+import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { PageInspection } from "../messages.js";
+import { changeScript, revisionKey, type ChangeRevision } from "../storage.js";
 import { h } from "./dom.js";
 
-export function renderInspection(root: HTMLElement, snapshot: PageInspection) {
+const REVISION_LABEL: Record<ChangeRevision["source"], string> = {
+  applied: "Saved",
+  improved: "Improved script",
+  rollback: "Rolled back",
+};
+
+export function renderInspection(root: HTMLElement, snapshot: PageInspection, onRollback?: (change: ActiveChange) => void) {
   const section = (title: string, ...children: Node[]) => h("section", "inspect-section", "", [h("h3", "", title), ...children]);
   const detail = (title: string, content: string) => h("details", "inspect-detail", "", [h("summary", "", title), h("pre", "", content)]);
   const { engine, usage } = snapshot;
@@ -15,6 +23,31 @@ export function renderInspection(root: HTMLElement, snapshot: PageInspection) {
     ...(change.block ? [detail("Built-in capability", JSON.stringify(change.block, null, 2))] : []),
     detail("Full change data", JSON.stringify(change, null, 2)),
   ]));
+  const origin = (() => {
+    try {
+      return new URL(snapshot.url).origin;
+    } catch {
+      return "";
+    }
+  })();
+  const live = new Set(snapshot.changes.map(({ change }) => `${revisionKey(origin, change)}:${changeScript(change)}`));
+  const history = [...(snapshot.revisions ?? [])].reverse();
+  const historyCards = history.map((revision) => {
+    const current = live.has(`${revisionKey(revision.origin, revision.change)}:${changeScript(revision.change)}`);
+    const rollback = h("button", "", current ? "Current" : "Roll back");
+    rollback.type = "button";
+    rollback.disabled = current || !onRollback;
+    if (!current && onRollback) rollback.addEventListener("click", () => onRollback(revision.change));
+    return h("article", "inspect-change", "", [
+      h("h4", "", revision.change.summary),
+      h("p", "inspect-source", REVISION_LABEL[revision.source]),
+      h("p", "", revision.change.reason),
+      h("p", "inspect-muted", `${new Date(revision.at).toLocaleString()} · ${revision.change.id} · ${revision.note}`),
+      ...(revision.change.css ? [detail("Exact CSS", revision.change.css)] : []),
+      ...(revision.change.block ? [detail("Built-in capability", JSON.stringify(revision.change.block, null, 2))] : []),
+      h("div", "inspect-actions", "", [rollback]),
+    ]);
+  });
   root.replaceChildren(
     h("div", "inspect-heading", "", [h("h2", "", "Page inspector"), h("span", "inspect-muted", `Snapshot at ${new Date().toLocaleTimeString()}`)]),
     h("p", "inspect-url", snapshot.url),
@@ -28,6 +61,7 @@ export function renderInspection(root: HTMLElement, snapshot: PageInspection) {
       h("p", "inspect-muted", `Tracked since the content script loaded at ${new Date(snapshot.loadedAt).toLocaleTimeString()}. In-flight or interrupted responses are not counted. Inspect reads local state and does not call the LLM.`),
     ),
     section(`Active changes (${snapshot.changes.length})`, ...(changeCards.length ? changeCards : [h("p", "inspect-muted", "No active adaptations on this page.")])),
+    section(`Script history (${history.length})`, ...(historyCards.length ? historyCards : [h("p", "inspect-muted", "No earlier scripts for this page yet. Each saved or improved change is kept here.")])),
     section("Page activity · latest 100 events", ...snapshot.activity.slice().reverse().map(({ at, text }) => h("div", "inspect-event", "", [h("time", "", new Date(at).toLocaleTimeString()), h("span", "", text)]))),
   );
 }
@@ -44,6 +78,9 @@ export const INSPECTION_CSS = `
 .inspect-muted { color: var(--muted); font-size: 11px; }
 .inspect-count { font-variant-numeric: tabular-nums; }
 .inspect-change { margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--solid); }
+.inspect-actions { display: flex; gap: 8px; margin-top: 8px; }
+.inspect button { padding: 6px 10px; font: inherit; font-size: 12px; border: 0; border-radius: 8px; background: var(--raise); color: var(--text); cursor: pointer; }
+.inspect button:disabled { opacity: 0.55; cursor: default; }
 .inspect h4 { margin: 0; font-size: 13px; }
 .inspect-source { color: #67d8c3; font-size: 11px; }
 .inspect-detail { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }

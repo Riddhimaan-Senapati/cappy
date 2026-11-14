@@ -6,6 +6,7 @@ const NEEDS_FRONTIER =
 export function pickTier(request: RunRequest): Tier {
   if (request.routing !== "auto") return request.routing;
   if (request.trigger === "page_load") return "fast";
+  if (request.trigger === "review" || request.makeItWork) return "frontier";
   const words = request.message.trim().split(/\s+/).length;
   if (words > 24 || NEEDS_FRONTIER.test(request.message)) return "frontier";
   return "fast";

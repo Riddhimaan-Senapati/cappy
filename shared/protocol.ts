@@ -8,7 +8,7 @@ export interface TokenUsage {
 
 export type UsageReporter = (usage: TokenUsage) => void;
 
-export type Trigger = "chat" | "page_load";
+export type Trigger = "chat" | "page_load" | "review";
 export type Tier = "fast" | "frontier";
 export type Routing = "auto" | Tier;
 
@@ -41,6 +41,8 @@ export interface RunRequest {
   active: ActiveChange[];
   page: PageOutline;
   clientTime?: { iso: string; timeZone: string };
+  // Set when the user asked this request to be checked against a screenshot and rewritten if it missed.
+  makeItWork?: boolean;
 }
 
 export type MemoryScope = "site" | "everywhere";

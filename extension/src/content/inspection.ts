@@ -1,5 +1,6 @@
 import type { TokenUsage } from "../../../shared/protocol.js";
 import type { PageInspection, UiEvent } from "../messages.js";
+import { load, revisionsFor } from "../storage.js";
 import { activeChanges, engineStatus } from "./engine.js";
 
 const loadedAt = Date.now();
@@ -27,7 +28,10 @@ export function recordUsage(delta: TokenUsage, model: string, purpose: string) {
 }
 
 export function recordRun(event: UiEvent) {
-  if (event.type === "start") recordActivity(`Request started (${event.trigger === "page_load" ? "automatic page adaptation" : "chat"}): ${event.message || "Check page against profile"}.`);
+  if (event.type === "start") {
+    const kind = event.trigger === "page_load" ? "automatic page adaptation" : event.trigger === "review" ? "self-improve check" : "chat";
+    recordActivity(`Request started (${kind}): ${event.message || "Check page against profile"}.`);
+  }
   if (event.type === "tier") recordActivity(`Selected ${event.tier} model: ${event.model}.`);
   if (event.type === "done") {
     if (event.fromCache) for (const change of event.applied) sources.set(change.id, "Saved recipe replayed locally (no LLM call)");
@@ -37,10 +41,12 @@ export function recordRun(event: UiEvent) {
   if (event.type === "cancelled") recordActivity("Request cancelled.");
 }
 
-export function inspectPage(): PageInspection {
+export async function inspectPage(): Promise<PageInspection> {
+  const { changeRevisions } = await load();
   return {
     url: location.href, loadedAt, engine: engineStatus(), usage: { ...usage },
     changes: activeChanges().map((change) => ({ change, source: sources.get(change.id) ?? "Source unavailable" })),
+    revisions: revisionsFor(changeRevisions ?? [], location.origin).slice(-40),
     activity: [...activity],
   };
 }

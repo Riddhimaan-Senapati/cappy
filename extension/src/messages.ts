@@ -1,4 +1,5 @@
 import type { ActiveChange, PageOutline } from "../../shared/adaptation.js";
+import type { ChangeRevision } from "./storage.js";
 import type { ChoiceOption, FrictionCount, FrictionKind, MemoryScope, ProviderInfo, Routing, TabToolName, TargetElement, Tier, TokenUsage, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
 import type { ProfileAction } from "./profiles.js";
@@ -20,7 +21,7 @@ export type UiEvent =
   | { type: "blocked"; runId: string; reason: string }
   | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
   | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[]; host?: string; scope?: MemoryScope }
-  | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
+  | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean; improved?: boolean }
   | { type: "error"; runId: string; message: string };
 
 export interface PageInspection {
@@ -29,19 +30,21 @@ export interface PageInspection {
   engine: { observing: boolean; liveChanges: number };
   usage: TokenUsage;
   changes: Array<{ change: ActiveChange; source: string }>;
+  revisions: ChangeRevision[];
   activity: Array<{ at: number; text: string }>;
 }
 
 export type ContentRequest =
   | { kind: "prepareProfileSwitch" }
-  | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown; source?: "llm" | "recipe" }
+  | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown; source?: "llm" | "recipe" | "improve" }
   | { kind: "useSiteControl"; input: unknown; userMessage: string }
   | { kind: "list" }
   | { kind: "inspectPage" }
   | { kind: "activity"; text: string }
   | { kind: "usage"; usage: TokenUsage; model: string; purpose: string }
   | { kind: "busy"; on: boolean }
-  | { kind: "toast"; text: string; undoIds: string[] }
+  | { kind: "toast"; text: string; undoIds: string[]; restore?: ActiveChange[] }
+  | { kind: "rollback"; change: ActiveChange }
   | { kind: "toggleSpotlight" }
   | { kind: "startVoice" }
   | { kind: "targetContextElement" }
@@ -75,7 +78,8 @@ export interface StatusInfo {
 }
 
 export type BackgroundRequest =
-  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement }
+  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement; makeItWork?: boolean }
+  | { kind: "improve" }
   | { kind: "deleteRequest"; message: string }
   | ({ kind: "profileAction" } & ProfileAction)
   | { kind: "pageReady"; origin: string; restored: number; profileChanged?: boolean }
@@ -101,6 +105,8 @@ export type DebugPortMessage =
   | { type: "event"; tabId: number; at: number; event: UiEvent }
   | { type: "tool"; tabId: number; at: number; name: string; ms: number; ok: boolean; detail: string };
 
-export type DebugPortRequest = { type: "chat"; message: string; thread?: string } | { type: "inspect" };
+export type DebugPortRequest = { type: "chat"; message: string; thread?: string } | { type: "inspect" } | { type: "rollback"; change: ActiveChange };
 
 export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Pro" };
+
+export const IMPROVE_REQUEST = "Improve this page";

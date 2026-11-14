@@ -23,6 +23,7 @@ export interface StubInput {
   profile: string[];
   page: PageOutline;
   active?: ActiveChange[];
+  makeItWork?: boolean;
 }
 
 const BIGGER_TEXT = /\b(bigger|larger)\b[^.!?]*\btext\b|\btext\b[^.!?]*\b(bigger|larger)\b/i;
@@ -95,7 +96,34 @@ export function planStubRun(input: StubInput): StubPlan {
     return { calls, reply };
   }
 
+  if (input.trigger === "review") {
+    const broken = input.active?.find((change) => change.id === "needs-fix");
+    if (!broken) return { calls: [], reply: "" };
+    const { appliedAt: _appliedAt, targetLabel: _targetLabel, ...change } = broken;
+    return {
+      calls: [{ name: "apply_change", input: { change: { ...change, summary: "Obscuring videos about gaming", css: "video { filter: blur(16px) !important; }", dom: null, block: null } } }],
+      reply: "Identified an improvement. Improved the script.",
+    };
+  }
+
   const message = input.message.trim();
+  if (input.makeItWork && /hide videos about gaming/i.test(message)) {
+    const reason = `Request: "${message}"`;
+    const literal = { ...filterChange("gaming", input.page, reason, false), id: "hide-gaming-videos", summary: "Hiding videos about gaming" };
+    const improved = {
+      ...literal,
+      summary: "Obscuring videos about gaming",
+      reason: `${reason} Hiding did not work, so the videos are dimmed instead.`,
+      block: literal.block?.name === "contentFilter" ? { ...literal.block, action: "dim" as const } : literal.block,
+    };
+    return {
+      calls: [
+        { name: "apply_change", input: { change: literal } },
+        { name: "apply_change", input: { change: improved } },
+      ],
+      reply: "Identified an improvement. Improved the script to obscure videos about gaming.",
+    };
+  }
   if (input.target && TARGETED.test(message)) {
     const { selector, label } = input.target;
     const red = /\bred\b/i.test(message);
@@ -211,10 +239,13 @@ export function createStubProvider(): AgentProvider {
           if (/"status":"(?:applied|already-set)"/.test(result.text)) return "Turned on the site's dark mode.";
         }
       }
-      const plan = planStubRun({ trigger, message, profile, page, active, target: session.request.target });
+      const plan = planStubRun({ trigger, message, profile, page, active, target: session.request.target, makeItWork: session.request.makeItWork });
       const rejected: string[] = [];
+      let applied = false;
       for (const call of plan.calls) {
+        if (session.request.makeItWork && applied && call.name === "apply_change") await toolNamed("screenshot").run({}, session);
         const tool = toolNamed(call.name);
+        if (call.name === "apply_change") applied = true;
         const result = await tool.run(tool.schema.parse(call.input), session);
         if (result.text.startsWith("REJECTED")) rejected.push(result.text);
         if (session.blockedReason) return "This page contains text that tries to instruct me, so I didn't change anything.";

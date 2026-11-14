@@ -167,7 +167,8 @@ export class OverlayUi {
     this.triggers.delete(event.runId);
 
     if (event.type === "done" && event.applied.length) {
-      this.showToast(`Done: ${event.applied.map((change) => change.summary).join(", ")}.`, event.applied.map((change) => change.id));
+      const names = event.applied.map((change) => change.summary).join(", ");
+      this.showToast(event.improved ? `Identified an improvement. Improved the script: ${names}.` : `Done: ${names}.`, event.applied.map((change) => change.id));
     } else if (event.type === "done") {
       if (event.reply) this.showToast(event.reply, []);
     } else if (event.type === "error") {

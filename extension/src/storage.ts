@@ -49,6 +49,16 @@ export interface SavedCommand {
   createdAt: number;
 }
 
+export type RevisionSource = "applied" | "improved" | "rollback";
+
+export interface ChangeRevision {
+  at: number;
+  origin: string;
+  change: ActiveChange;
+  source: RevisionSource;
+  note: string;
+}
+
 export interface CameraSettings {
   enabled: boolean;
   handScroll: boolean;
@@ -76,11 +86,14 @@ export interface StoredState {
   requestSessions: RequestSession[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
+  changeRevisions: ChangeRevision[];
   recipes: Record<string, Recipe>;
   commands: SavedCommand[];
   camera: CameraSettings;
   paused: boolean;
   proactive: boolean;
+  selfImprove: boolean;
+  makeItWork: boolean;
   floatingButton: boolean;
   routing: Routing;
   provider: string | null;
@@ -96,7 +109,7 @@ export interface StoredState {
   geminiVoiceVerified: boolean;
 }
 
-export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
+export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "globalChanges", "siteChanges", "changeRevisions", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
 export type ProfileState = Pick<StoredState, typeof PROFILE_KEYS[number]>;
 
 export const DEFAULTS: StoredState = {
@@ -116,11 +129,14 @@ export const DEFAULTS: StoredState = {
   requestSessions: [],
   globalChanges: [],
   siteChanges: {},
+  changeRevisions: [],
   recipes: {},
   commands: [],
   camera: { enabled: false, handScroll: true, headScroll: false, pointer: true, swipeNav: true, dwellMs: 0 },
   paused: false,
   proactive: true,
+  selfImprove: false,
+  makeItWork: false,
   floatingButton: true,
   routing: "auto",
   provider: null,
@@ -137,6 +153,40 @@ export const DEFAULTS: StoredState = {
 };
 
 const MAX_RECIPES = 60;
+const MAX_REVISIONS = 80;
+
+export function revisionKey(origin: string, change: { id: string; scope: ActiveChange["scope"] }) {
+  return `${change.scope === "everywhere" ? "*" : origin}::${change.id}`;
+}
+
+export function changeScript(change: ActiveChange): string {
+  return JSON.stringify({
+    summary: change.summary,
+    reason: change.reason,
+    css: change.css,
+    dom: change.dom,
+    block: change.block,
+    scope: change.scope,
+    schedule: change.schedule ?? null,
+  });
+}
+
+export function appendRevision(revisions: ChangeRevision[], origin: string, change: ActiveChange, meta: { source: RevisionSource; note: string }, now = Date.now()): ChangeRevision[] {
+  const key = revisionKey(origin, change);
+  const last = [...revisions].reverse().find((item) => revisionKey(item.origin, item.change) === key);
+  if (last && changeScript(last.change) === changeScript(change)) return revisions;
+  return [...revisions, { at: now, origin, change, source: meta.source, note: meta.note }].slice(-MAX_REVISIONS);
+}
+
+export function previousRevision(revisions: ChangeRevision[], origin: string, change: { id: string; scope: ActiveChange["scope"] }): ChangeRevision | undefined {
+  const key = revisionKey(origin, change);
+  const matches = revisions.filter((item) => revisionKey(item.origin, item.change) === key);
+  return matches.length >= 2 ? matches[matches.length - 2] : undefined;
+}
+
+export function revisionsFor(revisions: ChangeRevision[], origin: string): ChangeRevision[] {
+  return revisions.filter((item) => item.origin === origin || item.change.scope === "everywhere");
+}
 const MAX_SITE_NOTES = 20;
 const MAX_SKILL_SITES = 100;
 
@@ -251,13 +301,14 @@ export async function savedChangesFor(origin: string): Promise<ActiveChange[]> {
 
 const without = (changes: ActiveChange[], id: string) => changes.filter((change) => change.id !== id);
 
-export async function recordApplied(origin: string, change: ActiveChange) {
+export async function recordApplied(origin: string, change: ActiveChange, revision?: { source: RevisionSource; note: string }) {
   const state = await load();
   const site = without(state.siteChanges[origin] ?? [], change.id);
   const globalChanges = without(state.globalChanges, change.id);
   if (change.scope === "everywhere") globalChanges.push(change);
   else site.push(change);
-  await save({ globalChanges, siteChanges: { ...state.siteChanges, [origin]: site } });
+  const changeRevisions = appendRevision(state.changeRevisions ?? [], origin, change, revision ?? { source: "applied", note: "Saved" });
+  await save({ globalChanges, siteChanges: { ...state.siteChanges, [origin]: site }, changeRevisions });
 }
 
 export async function recordReverted(origin: string, id: string) {
