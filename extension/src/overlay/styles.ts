@@ -9,7 +9,11 @@ export const OVERLAY_CSS = `
 .bar { position: absolute; left: 50%; top: 20vh; width: min(560px, calc(100vw - 32px)); transform: translate(-50%, -6px) scale(0.985); opacity: 0; pointer-events: none;
   border-radius: 14px; background: rgba(20, 20, 24, 0.92); backdrop-filter: blur(28px) saturate(1.8); border: 1px solid rgba(255, 255, 255, 0.07); overflow: hidden;
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 20px 50px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: opacity 0.14s var(--ease), transform 0.26s var(--spring), top 0.35s var(--ease); }
+  transition: opacity 0.14s var(--ease), transform 0.26s var(--spring), top 0.35s var(--ease), border-color 0.2s var(--ease), box-shadow 0.2s var(--ease); }
+.bar.focus { border: 2px solid #e11d48; box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.28), 0 20px 50px rgba(0, 0, 0, 0.45); }
+.focus-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; border: 2px solid #e11d48; color: #fecdd3; background: rgba(225, 29, 72, 0.16);
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; flex: none; }
+.focus-tag[hidden] { display: none; }
 .sp.open .bar { opacity: 1; transform: translate(-50%, 0) scale(1); pointer-events: auto; }
 .sp.running .bar { top: 4vh; }
 
@@ -199,6 +203,8 @@ export const OVERLAY_CSS = `
 .fab .orb.work::after { inset: 3px; }
 .fab.show { transform: scale(1); opacity: 0.85; pointer-events: auto; }
 .fab.show:hover { transform: scale(1.08); opacity: 1; }
+.fab.focus { border: 2px solid #e11d48; box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35); }
+.fab.focus.show { opacity: 1; }
 .fab.hide { transform: scale(0.6); opacity: 0; pointer-events: none; }
 .fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .fab .orb.notice:not(.work) { animation: nudge-glow 2.4s ease-in-out infinite; }

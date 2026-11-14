@@ -137,8 +137,9 @@ export interface PingMessage {
 export interface ProviderInfo {
   id: string;
   label: string;
-  setup: "key" | "signin";
+  setup: "key" | "signin" | "endpoint";
   ready: boolean;
+  detail?: string;
   models?: Record<Tier, string>;
   available?: string[];
 }
@@ -147,6 +148,7 @@ export interface SetKeyMessage {
   type: "setKey";
   provider: string;
   key: string | null;
+  baseURL?: string | null;
 }
 
 export interface ListModelsMessage {

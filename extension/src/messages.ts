@@ -85,7 +85,7 @@ export type BackgroundRequest =
   | { kind: "openShortcuts" }
   | { kind: "verifyVoice"; key: string; provider?: "openai" | "gemini" }
   | { kind: "status" }
-  | { kind: "setKey"; provider: string; key: string | null }
+  | { kind: "setKey"; provider: string; key: string | null; baseURL?: string | null }
   | { kind: "chatgptLogin" }
   | { kind: "chatgptLogout" }
   | { kind: "stopRun" }

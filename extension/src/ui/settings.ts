@@ -2,7 +2,7 @@ import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
 import { forgetStoredChange, load, save, type StoredState } from "../storage.js";
-import { scheduleStatus } from "../../../shared/validate.js";
+import { isScheduleActive, scheduleStatus } from "../../../shared/validate.js";
 import { usageCard, USAGE_CSS } from "./usage.js";
 import { adoptStyles, h, icon } from "./dom.js";
 import { createMemoryView } from "./memory.js";
@@ -28,7 +28,7 @@ export interface SettingsContext {
   openDebug(): void;
   openShortcuts(): void;
   getStatus(): Promise<StatusInfo>;
-  setKey(provider: string, key: string | null): void;
+  setKey(provider: string, key: string | null, baseURL?: string | null): void;
   signIn(): void;
   signOut(): void;
 }
@@ -149,6 +149,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let confirming: string | null = null;
   let confirmTimer: ReturnType<typeof setTimeout> | undefined;
   let keyDraft = "";
+  let urlDraft = "";
   let disposed = false;
 
   const providerSection = (status: StatusInfo, state: StoredState): Node[] => {
@@ -157,11 +158,13 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       const active = provider.id === status.activeProvider;
       const sub = provider.ready
         ? provider.models
-          ? `${provider.models.fast} · ${provider.models.frontier}`
+          ? `${provider.detail ? `${provider.detail} · ` : ""}${provider.models.fast} · ${provider.models.frontier}`
           : "Ready"
         : provider.setup === "signin"
           ? "Use your ChatGPT Plus or Pro plan"
-          : "Paste an API key to use it";
+          : provider.setup === "endpoint"
+            ? "Paste a base URL and an API key"
+            : "Paste an API key to use it";
       let action: Node;
       if (provider.ready) {
         const isSignin = provider.setup === "signin";
@@ -194,12 +197,13 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         }
         action = h("div", "s-acts", "", [disconnect, primary]);
       } else {
-        const setup = h("button", "s-btn s-small", provider.setup === "signin" ? "Sign in" : editingKey === provider.id ? "Cancel" : "Add key");
+        const setup = h("button", "s-btn s-small", provider.setup === "signin" ? "Sign in" : editingKey === provider.id ? "Cancel" : provider.setup === "endpoint" ? "Add endpoint" : "Add key");
         setup.type = "button";
         setup.addEventListener("click", () => {
           if (provider.setup === "signin") return ctx.signIn();
           editingKey = editingKey === provider.id ? null : provider.id;
           keyDraft = "";
+          urlDraft = "";
           queue();
         });
         action = setup;
@@ -214,11 +218,21 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       input.autocomplete = "off";
       input.setAttribute("aria-label", `${provider.label} API key`);
       input.addEventListener("input", () => (keyDraft = input.value));
-      const form = h("form", "s-add", "", [input, h("button", "s-btn", "Save")]);
+      const url = provider.setup === "endpoint" ? h("input") : null;
+      if (url) {
+        url.type = "url";
+        url.placeholder = "https://api.example.com/v1";
+        url.value = urlDraft;
+        url.autocomplete = "off";
+        url.setAttribute("aria-label", `${provider.label} base URL`);
+        url.addEventListener("input", () => (urlDraft = url.value));
+      }
+      const form = h("form", url ? "s-add stack" : "s-add", "", [url, input, h("button", "s-btn", "Save")]);
       form.addEventListener("submit", (event) => {
         event.preventDefault();
         if (!input.value.trim()) return;
-        ctx.setKey(provider.id, input.value.trim());
+        if (url && !url.value.trim()) return;
+        ctx.setKey(provider.id, input.value.trim(), url?.value.trim() || null);
         // Voice falls back to these keys, so a new key needs a fresh audio check.
         if (provider.id === "openai-key" && state.voiceProvider === "openai") void save({ voiceProvider: "chrome", openAIVoiceVerified: false });
         if (provider.id === "gemini" && state.voiceProvider === "gemini") void save({ voiceProvider: "chrome", geminiVoiceVerified: false });
@@ -226,7 +240,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         keyDraft = "";
         if (!state.provider) void save({ provider: provider.id });
       });
-      queueMicrotask(() => input.focus());
+      queueMicrotask(() => (url ?? input).focus());
       return h("div", "s-sec", "", [row, form]);
     });
     const notice = status.notice ? [h("div", `s-note${status.notice.level === "error" ? " s-error" : ""}`, status.notice.text)] : [];
@@ -298,7 +312,8 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
               where = host;
             }
           }
-          return h("div", "s-change", "", [
+          const on = change.schedule != null && isScheduleActive(change.schedule, new Date());
+          return h("div", `s-change${on ? " on" : ""}`, "", [
             h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", where), remove]),
             h("div", "why", scheduleStatus(change.schedule) ?? ""),
           ]);

@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import type { ClientMessage, RunRequest, ServerMessage, Tier } from "../shared/protocol.js";
 import { login, signOut } from "./auth/chatgpt.js";
-import { defaultProviderId, describeProviders, forget, getProvider, keyFor, resolveProvider, wantModels } from "./agent/providers/index.js";
+import { baseKeyFor, defaultProviderId, describeProviders, forget, getProvider, keyFor, resolveProvider, wantModels } from "./agent/providers/index.js";
 import type { AgentProvider } from "./agent/providers/types.js";
 import { recallForRun } from "./agent/memory.js";
 import { pickTier } from "./agent/router.js";
 import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, RunCancelledError } from "./agent/session.js";
-import { setKey } from "./keys.js";
+import { normalizeBaseURL, setKey } from "./keys.js";
 import { audio } from "./audio.js";
 import { detectInjection } from "./safety.js";
 
@@ -143,11 +143,15 @@ wss.on("connection", (socket, request) => {
         return sendTo(socket, { type: "notice", level: "info", text: "Signed out of ChatGPT on this computer. To fully revoke access, remove the app in your ChatGPT account settings." });
       case "setKey": {
         const name = keyFor(message.provider);
+        const baseName = baseKeyFor(message.provider);
         const key = message.key?.trim() || null;
         if (!name) return sendTo(socket, { type: "notice", level: "error", text: "That provider does not use an API key." });
         if (key && (key.length > 4096 || /\s/.test(key))) return sendTo(socket, { type: "notice", level: "error", text: "Enter a valid API key." });
         if (key && key.length < 20) return sendTo(socket, { type: "notice", level: "error", text: "That doesn't look like a full API key." });
+        const baseURL = baseName && key ? normalizeBaseURL(message.baseURL ?? "") : null;
+        if (baseName && key && !baseURL) return sendTo(socket, { type: "notice", level: "error", text: "Enter a base URL that starts with http:// or https://." });
         setKey(name, key);
+        if (baseName) setKey(baseName, key ? baseURL : null);
         forget(message.provider);
         console.log(`[keys] ${key ? "saved" : "removed"} key for ${message.provider}`);
         await broadcastProviders();

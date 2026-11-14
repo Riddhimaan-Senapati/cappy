@@ -2,7 +2,31 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type KeyName = "GEMINI_API_KEY" | "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "OPENAI_AUDIO_API_KEY" | "GEMINI_AUDIO_API_KEY";
+export type KeyName =
+  | "GEMINI_API_KEY"
+  | "ANTHROPIC_API_KEY"
+  | "OPENAI_API_KEY"
+  | "OPENAI_AUDIO_API_KEY"
+  | "GEMINI_AUDIO_API_KEY"
+  | "XAI_API_KEY"
+  | "OPENAI_COMPAT_API_KEY"
+  | "OPENAI_COMPAT_BASE_URL"
+  | "ANTHROPIC_COMPAT_API_KEY"
+  | "ANTHROPIC_COMPAT_BASE_URL";
+
+export function normalizeBaseURL(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  if (url.username || url.password) return null;
+  return url.toString().replace(/\/$/, "");
+}
 
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const KEYS_PATH = path.join(rootDir, ".agent-keys.json");

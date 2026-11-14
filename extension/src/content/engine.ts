@@ -1,5 +1,5 @@
 import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js";
-import { isScheduleActive, validateChange } from "../../../shared/validate.js";
+import { isOneShot, isScheduleActive, validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
@@ -255,6 +255,39 @@ function nextScheduleDelay(now = Date.now()): number {
   return delay;
 }
 
+let focusOn = false;
+const focusListeners = new Set<(on: boolean) => void>();
+
+export function focusLive(): boolean {
+  return [...applied.values()].some((entry) => entry.change.schedule != null && entry.live !== null);
+}
+
+export function onFocusLive(listener: (on: boolean) => void): () => void {
+  focusListeners.add(listener);
+  listener(focusLive());
+  return () => focusListeners.delete(listener);
+}
+
+function publishFocus() {
+  const on = focusLive();
+  if (on === focusOn) return;
+  focusOn = on;
+  for (const listener of focusListeners) listener(on);
+}
+
+const dropListeners = new Set<(id: string) => void>();
+
+export function onChangeDropped(listener: (id: string) => void): () => void {
+  dropListeners.add(listener);
+  return () => dropListeners.delete(listener);
+}
+
+function dropChange(id: string) {
+  applied.delete(id);
+  changeLog.delete(id);
+  for (const listener of dropListeners) listener(id);
+}
+
 function manageScheduleTimer() {
   if (scheduleTimer !== undefined) {
     clearTimeout(scheduleTimer);
@@ -274,7 +307,8 @@ function syncSchedules() {
         if (applied.get(entry.change.id) !== entry) continue;
         if (entry.live) {
           unwind(entry.live);
-          entry.live = null;
+          if (isOneShot(entry.change.schedule)) dropChange(entry.change.id);
+          else entry.live = null;
           continue;
         }
         try {
@@ -285,6 +319,7 @@ function syncSchedules() {
       }
       if ([...applied.values()].some((entry) => entry.live?.reapply.length)) startObserving();
       stopObservingIfIdle();
+      publishFocus();
     }, true);
   }
   manageScheduleTimer();
@@ -370,13 +405,18 @@ async function installChange(entry: Applied, matched: Record<string, number>, an
   await transition(() => {
     revertNow(entry.change.id);
     const waiting = entry.change.schedule != null && !isScheduleActive(entry.change.schedule, new Date());
+    if (isOneShot(entry.change.schedule) && waiting) {
+      changeLog.delete(entry.change.id);
+      return;
+    }
     entry.live = waiting ? null : materialize(entry.change, matched);
     applied.set(entry.change.id, entry);
     changeLog.delete(entry.change.id);
-    changeLog.set(entry.change.id, entry.change);
+    if (!isOneShot(entry.change.schedule)) changeLog.set(entry.change.id, entry.change);
     if (entry.live?.reapply.length) startObserving();
     manageScheduleTimer();
   }, animate);
+  publishFocus();
   return entry.live?.note;
 }
 
@@ -468,12 +508,14 @@ export async function revertChange(id: string, animate = true): Promise<boolean>
   await transition(() => {
     reverted = revertNow(id);
   }, animate);
+  publishFocus();
   return reverted;
 }
 
 export async function revertAll(animate = true) {
   for (const id of [...siteControls.keys()].reverse()) await revertChange(id, false);
   await transition(() => [...applied.keys()].forEach(revertNow), animate);
+  publishFocus();
 }
 
 export function stopEngine() {

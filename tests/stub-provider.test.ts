@@ -150,7 +150,7 @@ describe("provider registry", () => {
     delete process.env.LLM_PROVIDER;
     try {
       const ids = (await describeProviders()).map(({ id }) => id);
-      assert.deepEqual(ids, ["chatgpt-signin", "anthropic-key", "openai-key", "gemini"]);
+      assert.deepEqual(ids, ["chatgpt-signin", "anthropic-key", "openai-key", "gemini", "xai", "openai-compat", "anthropic-compat"]);
     } finally {
       if (previous !== undefined) process.env.LLM_PROVIDER = previous;
     }

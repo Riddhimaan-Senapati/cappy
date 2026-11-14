@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { addHours, addSeconds } from "date-fns";
-import { describeSchedule, isScheduleActive } from "../shared/validate.js";
+import { describeSchedule, isOneShot, isScheduleActive, lastingRequest } from "../shared/validate.js";
 import type { Change } from "../shared/adaptation.js";
 import { parseSpokenSchedule } from "../server/agent/schedule.js";
 
@@ -167,5 +167,27 @@ describe("parseSpokenSchedule", () => {
     assert.equal(parseSpokenSchedule("for a minute", now), null);
     assert.equal(parseSpokenSchedule("don't show videos for a minute", now), null);
     assert.equal(parseSpokenSchedule("for an hour", now), null);
+  });
+});
+
+describe("lastingRequest", () => {
+  it("drops a counted span and keeps the request", () => {
+    assert.equal(lastingRequest("hide podcasts for 30 seconds"), "hide podcasts");
+    assert.equal(lastingRequest("don't show videos for the next 30 seconds"), "don't show videos");
+    assert.equal(lastingRequest("for the next 30 seconds, don't show videos"), "don't show videos");
+    assert.equal(lastingRequest("for the next 2 hours between 09:00 and 17:00, don't show videos"), "don't show videos");
+  });
+
+  it("leaves repeating rules unchanged", () => {
+    assert.equal(lastingRequest("ignore podcasts on weekends"), null);
+    assert.equal(lastingRequest("hide shorts between 17:00 and 19:00"), null);
+    assert.equal(lastingRequest("for a minute"), null);
+  });
+
+  it("treats only an untilAt span as one time", () => {
+    assert.equal(isOneShot({ untilAt: "2026-11-14T21:33:30.000Z" }), true);
+    assert.equal(isOneShot({ days: ["sat", "sun"], untilAt: "2026-11-14T21:33:30.000Z" }), false);
+    assert.equal(isOneShot({ days: ["sat", "sun"] }), false);
+    assert.equal(isOneShot(null), false);
   });
 });

@@ -153,6 +153,12 @@ export class OverlayUi {
     requestAnimationFrame(() => this.fab.classList.toggle("show", this.fabWanted));
   }
 
+  setFocus(on: boolean) {
+    this.fab.classList.toggle("focus", on);
+    this.fab.setAttribute("aria-label", on ? "Focus is on. Open adaptive agent" : "Open adaptive agent");
+    this.spotlight.setFocus(on);
+  }
+
   captureKey(event: KeyboardEvent) {
     if (!this.spotlight.isOpen() || !event.composedPath().includes(this.host)) return;
     event.stopImmediatePropagation();

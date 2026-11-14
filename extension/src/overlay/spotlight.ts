@@ -1,7 +1,7 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { ChoiceOption, MemoryScope, Routing, Suggestion, TargetElement, TokenUsage } from "../../../shared/protocol.js";
-import { scheduleStatus } from "../../../shared/validate.js";
+import { isOneShot, lastingRequest, scheduleStatus } from "../../../shared/validate.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
@@ -110,6 +110,7 @@ export class Spotlight {
   private pill = h("button", "pill");
   private pickButton = h("button", "pick");
   private chip = h("div", "target-chip");
+  private focusTag = h("span", "focus-tag", "Focus");
   private target: TargetElement | null = null;
   private body = h("div", "body");
   private hints = h("div", "hints");
@@ -162,12 +163,13 @@ export class Spotlight {
       else void this.startVoice().catch(reportExtensionError);
     });
     this.chip.hidden = true;
+    this.focusTag.hidden = true;
     this.pickButton.type = "button";
     this.pickButton.title = "Choose an element on the page";
     this.pickButton.setAttribute("aria-label", "Choose an element on the page");
     this.pickButton.append(icon("target", 15));
     this.pickButton.addEventListener("click", () => this.startPicking());
-    this.bar.append(h("div", "row", "", [this.orb, this.chip, this.input, this.mic, this.pickButton, this.home, this.pill]), this.body, this.hints, this.live);
+    this.bar.append(h("div", "row", "", [this.orb, this.focusTag, this.chip, this.input, this.mic, this.pickButton, this.home, this.pill]), this.body, this.hints, this.live);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
 
@@ -183,6 +185,12 @@ export class Spotlight {
     });
     chrome.storage.onChanged.addListener(this.onStorage);
     addEventListener("pointerdown", this.onOutsidePointer, true);
+  }
+
+  setFocus(on: boolean) {
+    this.bar.classList.toggle("focus", on);
+    this.focusTag.hidden = !on;
+    this.bar.setAttribute("aria-label", on ? "Adaptive agent, focus is on" : "Adaptive agent");
   }
 
   private onStorage = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
@@ -433,6 +441,30 @@ export class Spotlight {
     }
   }
 
+  private keepLasting(message: string) {
+    const text = lastingRequest(message);
+    if (!text) return;
+    if (this.cache) this.cache = { ...this.cache, lastingSuggestion: text };
+  }
+
+  private lastingItem(): Item | null {
+    const text = this.cache?.lastingSuggestion;
+    if (!text || text.toLowerCase() === this.smartSuggestion?.text.toLowerCase()) return null;
+    return {
+      id: `lasting:${text}`,
+      icon: "sparkle",
+      title: text,
+      hint: "Without the time limit",
+      kind: "try",
+      section: "",
+      run: () => {
+        if (this.cache) this.cache = { ...this.cache, lastingSuggestion: null };
+        void save({ lastingSuggestion: null });
+        this.ask(text, false);
+      },
+    };
+  }
+
   private suggestion(): Item | null {
     const suggestion = this.smartSuggestion;
     if (!suggestion) return null;
@@ -658,10 +690,12 @@ export class Spotlight {
 
     if (!raw && this.target) return [];
     if (!raw) {
-      const last = [...changes].sort((a, b) => b.appliedAt - a.appliedAt)[0];
+      const last = [...changes].filter((change) => !isOneShot(change.schedule)).sort((a, b) => b.appliedAt - a.appliedAt)[0];
       const items: Item[] = [];
       const suggestion = this.suggestion();
       if (suggestion) items.push(suggestion);
+      const lasting = this.lastingItem();
+      if (lasting) items.push(lasting);
       if (last) items.push({ id: "undo-last", icon: "undo", title: `Undo ${last.summary.charAt(0).toLowerCase()}${last.summary.slice(1)}`, hint: "→ history", kind: "undo", section: "", run: () => this.deps.revert(last.id) });
       return items;
     }
@@ -1374,6 +1408,7 @@ export class Spotlight {
           break;
         case "done":
           if (!run.result) run.result = { kind: "done", text: event.reply || "Done.", applied: event.applied };
+          this.keepLasting(run.message);
           break;
         case "error":
           run.result = { kind: "error", text: event.message, applied: [] };

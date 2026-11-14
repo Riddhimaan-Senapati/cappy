@@ -129,9 +129,9 @@ export class AgentClient {
     });
   }
 
-  async setKey(provider: string, key: string | null) {
+  async setKey(provider: string, key: string | null, baseURL?: string | null) {
     await this.ensureConnected();
-    this.send({ type: "setKey", provider, key });
+    this.send({ type: "setKey", provider, key, ...(baseURL != null ? { baseURL } : {}) });
   }
 
   async signOut() {

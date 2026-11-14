@@ -18,9 +18,13 @@
     "setup:vendor": "node scripts/setup-vendor.mjs"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.105",
+    "@ai-sdk/openai-compatible": "^3.0.92",
+    "@ai-sdk/xai": "^5.0.46",
     "@anthropic-ai/sdk": "^1.8.0",
     "@google/genai": "^3.3.0",
     "@mediapipe/tasks-vision": "^1.2.3",
+    "ai": "^7.0.173",
     "axe-core": "^4.14.0",
     "chrono-node": "^2.10.3",
     "date-fns": "^4.4.0",

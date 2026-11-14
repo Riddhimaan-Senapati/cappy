@@ -73,6 +73,7 @@ export interface StoredState {
   suggestionFeedback: SuggestionFeedback[];
   history: ChatTurn[];
   submittedRequests: string[];
+  lastingSuggestion: string | null;
   requestSessions: RequestSession[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
@@ -97,7 +98,7 @@ export interface StoredState {
   geminiVoiceVerified: boolean;
 }
 
-export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
+export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "lastingSuggestion", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
 export type ProfileState = Pick<StoredState, typeof PROFILE_KEYS[number]>;
 
 export const DEFAULTS: StoredState = {
@@ -114,6 +115,7 @@ export const DEFAULTS: StoredState = {
   suggestionFeedback: [],
   history: [],
   submittedRequests: [],
+  lastingSuggestion: null,
   requestSessions: [],
   globalChanges: [],
   siteChanges: {},

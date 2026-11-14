@@ -152,6 +152,29 @@ export function scheduleStatus(schedule: Change["schedule"], now = new Date()): 
   return text ? `${text} · ${isScheduleActive(schedule, now) ? "on now" : "off right now"}` : null;
 }
 
+// A short span such as "for the next 30 seconds" ends once. Repeating days and clocks are not one-time.
+export function isOneShot(schedule: Change["schedule"]): boolean {
+  return Boolean(schedule?.untilAt) && !schedule?.days?.length && schedule?.start == null && schedule?.end == null && schedule?.from == null && schedule?.until == null;
+}
+
+const SPOKEN_SPAN = String.raw`\b(?:(?:for|in)\s+)?(?:the\s+)?(?:next\s+)?\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b`;
+const SPOKEN_WINDOW = String.raw`\b(?:between|from)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+(?:and|to)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b`;
+
+// "hide podcasts for 30 seconds" becomes "hide podcasts". Null when the message has no counted span.
+export function lastingRequest(message: string): string | null {
+  const span = new RegExp(SPOKEN_SPAN, "gi");
+  if (!span.test(message)) return null;
+  const text = message
+    .replace(new RegExp(SPOKEN_SPAN, "gi"), " ")
+    .replace(new RegExp(SPOKEN_WINDOW, "gi"), " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;])/g, "$1")
+    .replace(/^[,\s.;:-]+|[,\s.;:-]+$/g, "")
+    .trim();
+  if (!text || text.toLowerCase() === message.trim().toLowerCase()) return null;
+  return text;
+}
+
 export function describeSchedule(schedule: Change["schedule"]): string | null {
   if (!schedule) return null;
   const days = schedule.days ? [...schedule.days].sort((a, b) => WEEK.indexOf(a) - WEEK.indexOf(b)) : null;
