@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Contact form</title>
+  <style>
+    form { display: grid; gap: 8px; width: 250px; }
+    form input { width: 100px; font: 12px sans-serif; }
+  </style>
+</head>
+<body>
+  <h1>Contact form</h1>
+  <form action="#">
+    <input id="email" name="email" placeholder="Email address" type="email" required tabindex="2">
+    <input id="name" name="fullName" type="text" aria-labelledby="missing-label">
+    <button type="submit">Send</button>
+  </form>
+</body>
+</html>

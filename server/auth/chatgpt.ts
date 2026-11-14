@@ -139,7 +139,7 @@ function openBrowser(url: string) {
   spawn(command, args, { stdio: "ignore", detached: true }).unref();
 }
 
-export async function login(): Promise<ChatGptCredentials> {
+export async function login({ log = true } = {}): Promise<ChatGptCredentials> {
   const existing = readCredentials();
   const hostId = existing?.ext_agent_host_id ?? `urn:uuid:${randomUUID()}`;
   const clientId = existing?.client_id;
@@ -178,7 +178,7 @@ export async function login(): Promise<ChatGptCredentials> {
     server.on("error", reject);
     server.listen(CALLBACK_PORT, "127.0.0.1", () => {
       const url = `${AUTHORIZE_URL}?${params}`;
-      console.log(`Opening your browser to sign in with ChatGPT.\nIf it does not open, visit:\n${url}\n`);
+      if (log) console.log(`Opening your browser to sign in with ChatGPT.\nIf it does not open, visit:\n${url}\n`);
       openBrowser(url);
     });
   });

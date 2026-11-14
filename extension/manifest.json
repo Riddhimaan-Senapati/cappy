@@ -4,28 +4,11 @@
   "version": "0.2.0",
   "description": "Adapts every website to your needs. Press the shortcut on any page and say what you need.",
   "minimum_chrome_version": "116",
-  "permissions": [
-    "sidePanel",
-    "storage",
-    "tabs",
-    "activeTab",
-    "scripting",
-    "contextMenus"
-  ],
-  "host_permissions": [
-    "<all_urls>"
-  ],
-  "background": {
-    "service_worker": "dist/background.js",
-    "type": "module"
-  },
-  "action": {
-    "default_title": "Adaptive Agent settings",
-    "default_popup": "popup.html"
-  },
-  "side_panel": {
-    "default_path": "sidepanel.html"
-  },
+  "permissions": ["sidePanel", "storage", "tabs", "activeTab", "scripting", "tts", "offscreen", "contextMenus"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "dist/background.js", "type": "module" },
+  "action": { "default_title": "Adaptive Agent settings", "default_popup": "popup.html" },
+  "side_panel": { "default_path": "sidepanel.html" },
   "commands": {
     "toggle-spotlight": {
       "suggested_key": {
@@ -33,6 +16,10 @@
         "mac": "Command+Shift+Space"
       },
       "description": "Open the adaptive agent bar"
+    },
+    "start-voice": {
+      "suggested_key": { "default": "Alt+Shift+M" },
+      "description": "Open the adaptive agent bar and start voice input"
     },
     "open-debug": {
       "suggested_key": {

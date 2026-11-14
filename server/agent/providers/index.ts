@@ -3,6 +3,7 @@ import { isSignedIn } from "../../auth/chatgpt.js";
 import { getKey, type KeyName } from "../../keys.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createGeminiProvider } from "./gemini.js";
+import { createStubProvider } from "./stub.js";
 import { createChatGptProvider, createOpenAIKeyProvider } from "./openai.js";
 import type { AgentProvider } from "./types.js";
 
@@ -24,6 +25,10 @@ const REGISTRY: Record<string, Entry> = {
   gemini: keyed("Gemini", "GEMINI_API_KEY", createGeminiProvider),
 };
 
+// The deterministic stub is for offline runs and e2e tests, so it only exists when explicitly requested.
+const STUB: Entry = { label: "Offline stub", setup: "key", ready: () => true, create: createStubProvider };
+const registry = (): Record<string, Entry> => (process.env.LLM_PROVIDER === "stub" ? { ...REGISTRY, stub: STUB } : REGISTRY);
+
 const instances = new Map<string, { provider: AgentProvider; fingerprint: string }>();
 const modelCache = new Map<string, { at: number; list: string[] }>();
 const MODEL_TTL_MS = 5 * 60_000;
@@ -37,7 +42,7 @@ export function wantModels(id: string) {
 const fingerprint = (entry: Entry) => (entry.key ? (getKey(entry.key) ?? "") : String(entry.ready()));
 
 export function keyFor(id: string): KeyName | undefined {
-  return REGISTRY[id]?.key;
+  return registry()[id]?.key;
 }
 
 export function forget(id: string) {
@@ -46,7 +51,7 @@ export function forget(id: string) {
 }
 
 export function getProvider(id: string): AgentProvider | null {
-  const entry = REGISTRY[id];
+  const entry = registry()[id];
   if (!entry?.ready()) return null;
   const print = fingerprint(entry);
   const cached = instances.get(id);
@@ -59,8 +64,8 @@ export function getProvider(id: string): AgentProvider | null {
 
 export function defaultProviderId(): string | null {
   const preferred = process.env.LLM_PROVIDER;
-  if (preferred && REGISTRY[preferred]?.ready()) return preferred;
-  return Object.keys(REGISTRY).find((id) => REGISTRY[id].ready()) ?? null;
+  if (preferred && registry()[preferred]?.ready()) return preferred;
+  return Object.keys(registry()).find((id) => registry()[id].ready()) ?? null;
 }
 
 export function resolveProvider(requested?: string | null): AgentProvider | null {
@@ -83,7 +88,7 @@ async function availableModels(id: string, provider: AgentProvider): Promise<str
 
 export async function describeProviders(): Promise<ProviderInfo[]> {
   return Promise.all(
-    Object.entries(REGISTRY).map(async ([id, entry]) => {
+    Object.entries(registry()).map(async ([id, entry]) => {
       const provider = getProvider(id);
       if (!provider) return { id, label: entry.label, setup: entry.setup, ready: false };
       const available = wanted.has(id) ? await availableModels(id, provider) : undefined;

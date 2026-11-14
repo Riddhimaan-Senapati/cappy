@@ -27,9 +27,15 @@ export interface RunRequest {
   models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];
   profile: string[];
+  // Notes earlier sessions saved about navigating this hostname. Derived from page content, so untrusted.
+  siteSkill?: string[];
+  activity?: FrictionCount[];
   active: ActiveChange[];
   page: PageOutline;
+  clientTime?: { iso: string; timeZone: string };
 }
+
+export type MemoryScope = "site" | "everywhere";
 
 export interface InspectedElement {
   tag: string;
@@ -51,13 +57,34 @@ export interface ApplyOutcome {
   ok: boolean;
   error?: string;
   matched: Record<string, number>;
+  waitingForSchedule?: boolean;
   lowContrast?: ContrastIssue[];
   replaced?: string[];
   before: PageStats;
   after: PageStats;
+  note?: string;
 }
 
+export type SiteControl = { id: string; name: string } & (
+  | { kind: "toggle"; on: boolean }
+  | { kind: "select"; selected: number; options: { index: number; label: string }[] }
+);
+
+export interface SiteControlInput {
+  controlId: string;
+  value: number | boolean;
+  summary: string;
+  reason: string;
+}
+
+export type SiteControlOutcome =
+  | { status: "applied"; change: ActiveChange }
+  | { status: "already-set" }
+  | { status: "unavailable"; error: string };
+
 export interface TabTools {
+  find_site_features: { input: Record<string, never>; output: SiteControl[] };
+  use_site_control: { input: SiteControlInput; output: SiteControlOutcome };
   read_page: { input: Record<string, never>; output: PageOutline };
   inspect: { input: { selector: string }; output: { count: number; samples: InspectedElement[] } };
   list_items: { input: { selector: string; keySelector: string | null }; output: { count: number; items: Array<{ key: string; text: string }> } };
@@ -87,7 +114,8 @@ export interface ToolResultMessage {
 export type AgentEvent =
   | { type: "progress"; runId: string; text: string }
   | { type: "tier"; runId: string; tier: Tier; model: string }
-  | { type: "profile"; runId: string; lines: string[] }
+  | { type: "profile"; runId: string; lines: string[]; scope: MemoryScope }
+  | { type: "siteSkill"; runId: string; notes: string[] }
   | { type: "warning"; runId: string; text: string }
   | { type: "blocked"; runId: string; reason: string }
   | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
@@ -126,6 +154,40 @@ export interface SignOutMessage {
   type: "chatgptLogout";
 }
 
+// Friction the extension noticed: counts from the last few minutes, never page text.
+export type FrictionKind = "zoom-in" | "pinch-zoom" | "missed-click" | "rage-click";
+
+// Aggregated counts only. here/elsewhere/sites cover about the last 10 minutes; the rest are longer windows.
+export interface FrictionCount {
+  kind: FrictionKind;
+  here: number;
+  elsewhere: number;
+  sites: number;
+  hourHere: number;
+  sessionHere: number;
+  sessionElsewhere: number;
+  sessionSites: number;
+  totalHere: number;
+}
+
+
+export type FeedbackOutcome = "accepted-site" | "accepted-everywhere" | "accepted" | "dismissed" | "undone";
+
+export interface SuggestionFeedback {
+  text: string;
+  host: string;
+  outcome: FeedbackOutcome;
+  at: number;
+}
+
+// text is the request to run, phrased as the user would type it; memory is the lasting preference line to propose, or null for a one-off.
+export interface Suggestion {
+  text: string;
+  reason: string;
+  scope: MemoryScope;
+  memory: string | null;
+}
+
 export interface SuggestMessage {
   type: "suggest";
   requestId: string;
@@ -134,6 +196,9 @@ export interface SuggestMessage {
   profile: string[];
   applied: string[];
   page: PageOutline;
+  host?: string;
+  friction?: FrictionCount[];
+  feedback?: SuggestionFeedback[];
 }
 
 export interface CancelMessage {
@@ -147,4 +212,4 @@ export type ServerMessage =
   | AgentEvent
   | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
   | { type: "notice"; level: "info" | "error"; text: string }
-  | { type: "suggestion"; requestId: string; text: string | null };
+  | { type: "suggestion"; requestId: string; suggestion: Suggestion | null };

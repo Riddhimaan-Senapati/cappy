@@ -1,20 +1,30 @@
 import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js";
-import { validateChange } from "../../../shared/validate.js";
-import type { ApplyOutcome } from "../../../shared/protocol.js";
+import { isScheduleActive, validateChange } from "../../../shared/validate.js";
+import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
 import { computeStats, lowContrastSamples } from "./outline.js";
+import { isSiteControlInput, siteControlId, useSiteControl } from "./site-controls.js";
 
 type Undo = () => void;
 type Reapply = (roots: Element[]) => void;
 
-interface Applied {
-  change: ActiveChange;
+interface Live {
   undo: Undo[];
   reapply: Reapply[];
+  note?: Promise<string>;
+}
+
+// live is null while the change's schedule is off; the change stays registered so it can switch on without a reload.
+interface Applied {
+  change: ActiveChange;
+  live: Live | null;
 }
 
 const applied = new Map<string, Applied>();
+const siteControls = new Map<string, { change: ActiveChange; restore: () => Promise<boolean> }>();
+const SCHEDULE_TICK_MS = 30_000;
+let scheduleTimer: ReturnType<typeof setInterval> | undefined;
 // Every change applied on this page, including ones turned off, so history can turn them back on.
 const changeLog = new Map<string, ActiveChange>();
 let generatedIds = 0;
@@ -135,6 +145,40 @@ function liveOp(op: DomOp): LiveOp {
   return { run, undo: () => [...undoSteps].reverse().forEach((step) => step()) };
 }
 
+function unwind(live: Live) {
+  [...live.undo].reverse().forEach((undo) => undo());
+  live.undo = [];
+  live.reapply = [];
+}
+
+// Builds every live step of a change. A failure unwinds the partial build and rethrows.
+function materialize(change: Change, matched: Record<string, number>): Live {
+  const live: Live = { undo: [], reapply: [] };
+  try {
+    if (change.css) live.undo.push(applyCss(change, matched));
+    for (const op of change.dom ?? []) {
+      const dom = liveOp(op);
+      matched[`${op.op} ${op.selector}`] = dom.run([document]);
+      live.undo.push(dom.undo);
+      live.reapply.push((roots) => void dom.run(roots));
+    }
+    if (change.block) {
+      const block = applyBlock(change.block);
+      live.undo.push(block.undo);
+      if (block.reapply) live.reapply.push(block.reapply);
+      if (block.note) live.note = block.note;
+      if (block.matched && change.block.name === "contentFilter") {
+        matched[`contentFilter ${change.block.itemSelector ?? "all item groups"}`] = block.matched();
+      }
+      if (block.matched && change.block.name === "formFixer") matched.formFixer = block.matched();
+    }
+  } catch (caught) {
+    unwind(live);
+    throw caught;
+  }
+  return live;
+}
+
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 export function keyText(item: Element, keySelector: string | null) {
@@ -190,11 +234,49 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
 function revertNow(id: string): boolean {
   const entry = applied.get(id);
   if (!entry) return false;
-  [...entry.undo].reverse().forEach((undo) => undo());
+  if (entry.live) unwind(entry.live);
   applied.delete(id);
   stopObservingIfIdle();
+  manageScheduleTimer();
   return true;
 }
+
+function manageScheduleTimer() {
+  const scheduled = [...applied.values()].some((entry) => entry.change.schedule);
+  if (scheduled && scheduleTimer === undefined) scheduleTimer = setInterval(() => syncSchedules(), SCHEDULE_TICK_MS);
+  if (!scheduled && scheduleTimer !== undefined) {
+    clearInterval(scheduleTimer);
+    scheduleTimer = undefined;
+  }
+}
+
+// Switches scheduled changes on or off to match the clock. Runs on a timer, on visibilitychange and after each apply.
+function syncSchedules() {
+  const now = new Date();
+  const due = [...applied.values()].filter((entry) => entry.change.schedule && isScheduleActive(entry.change.schedule, now) !== (entry.live !== null));
+  if (due.length) {
+    void transition(() => {
+      for (const entry of due) {
+        if (applied.get(entry.change.id) !== entry) continue;
+        if (entry.live) {
+          unwind(entry.live);
+          entry.live = null;
+          continue;
+        }
+        try {
+          entry.live = materialize(entry.change, {});
+        } catch {
+          // stays off; the next tick retries
+        }
+      }
+      if ([...applied.values()].some((entry) => entry.live?.reapply.length)) startObserving();
+      stopObservingIfIdle();
+    }, true);
+  }
+  manageScheduleTimer();
+}
+
+document.addEventListener("visibilitychange", () => syncSchedules());
 
 function reorderTargets(change: Change): Set<Element> {
   const targets = new Set<Element>();
@@ -235,7 +317,7 @@ function flush() {
   if (!roots.length) return;
   const effective = roots.length > 300 ? [document.documentElement] : roots;
   for (const entry of applied.values()) {
-    for (const reapply of entry.reapply) {
+    for (const reapply of entry.live?.reapply ?? []) {
       try {
         reapply(effective);
       } catch {
@@ -263,55 +345,111 @@ function startObserving() {
 }
 
 function stopObservingIfIdle() {
-  if (observer && ![...applied.values()].some((entry) => entry.reapply.length)) {
+  if (observer && ![...applied.values()].some((entry) => entry.live?.reapply.length)) {
     observer.disconnect();
     observer = null;
     pendingRoots = new Set();
   }
 }
 
+async function installChange(entry: Applied, matched: Record<string, number>, animate: boolean): Promise<string | undefined> {
+  await transition(() => {
+    revertNow(entry.change.id);
+    const waiting = entry.change.schedule != null && !isScheduleActive(entry.change.schedule, new Date());
+    entry.live = waiting ? null : materialize(entry.change, matched);
+    applied.set(entry.change.id, entry);
+    changeLog.delete(entry.change.id);
+    changeLog.set(entry.change.id, entry.change);
+    if (entry.live?.reapply.length) startObserving();
+    manageScheduleTimer();
+  }, animate);
+  return entry.live?.note;
+}
+
+// View transitions and pulses can introduce temporary animations during verification.
+function observedProblems(
+  { runningAnimations: _runningAnimations, lowContrastText, ...stats }: ReturnType<typeof computeStats>,
+  change: Change,
+): number {
+  // Dark mode checks the rendered theme separately. The generic contrast count cannot see CSS filters.
+  const contrastProblems = change.block?.name === "darkMode" ? 0 : lowContrastText;
+  return Object.values(stats).reduce((sum, count) => sum + count, contrastProblems);
+}
+
 export async function applyChange(change: Change, animate = true): Promise<ApplyOutcome> {
   ensureBaseStyle();
   const problem = validateChange(change);
-  const before = computeStats();
-  if (problem) return { ok: false, error: problem, matched: {}, before, after: before };
+  if (problem) {
+    const before = computeStats();
+    return { ok: false, error: problem, matched: {}, before, after: before };
+  }
 
-  const matched: Record<string, number> = {};
-  let error: string | undefined;
   const replaced = competingSorts(change);
-
-  await transition(() => {
-    for (const id of replaced) revertNow(id);
-    revertNow(change.id);
-    const entry: Applied = { change: { ...change, appliedAt: Date.now() }, undo: [], reapply: [] };
+  if (replaced.length) await transition(() => replaced.forEach(revertNow), false);
+  const previous = applied.get(change.id);
+  const before = computeStats();
+  const visual = Boolean(change.css || (change.block && change.block.name !== "stopMotion"));
+  const attempts = animate ? 2 : 1;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const entry: Applied = { change: { ...change, appliedAt: Date.now() }, live: null };
+    const matched: Record<string, number> = {};
+    let after = before;
+    let error: string;
     try {
-      if (change.css) entry.undo.push(applyCss(change, matched));
-      for (const op of change.dom ?? []) {
-        const live = liveOp(op);
-        matched[`${op.op} ${op.selector}`] = live.run([document]);
-        entry.undo.push(live.undo);
-        entry.reapply.push((roots) => void live.run(roots));
+      const note = await installChange(entry, matched, animate);
+      after = entry.live ? computeStats() : before;
+      const counts = Object.values(matched);
+      const missed = !change.block && counts.length > 0 && counts.every((count) => count === 0);
+      const worsened = observedProblems(after, change) > observedProblems(before, change);
+      if (!animate || !entry.live || (!missed && !worsened)) {
+        return {
+          ok: true, matched, before, after, note,
+          ...(!entry.live ? { waitingForSchedule: true } : {}),
+          ...(visual && entry.live ? { lowContrast: lowContrastSamples() } : {}),
+          ...(replaced.length ? { replaced } : {}),
+        };
       }
-      if (change.block) {
-        const block = applyBlock(change.block);
-        entry.undo.push(block.undo);
-        if (block.reapply) entry.reapply.push(block.reapply);
-      }
-      applied.set(change.id, entry);
-      changeLog.delete(change.id);
-      changeLog.set(change.id, entry.change);
-      if (entry.reapply.length) startObserving();
+      error = missed ? "No elements matched the change." : "The change increased measured accessibility problems.";
     } catch (caught) {
-      [...entry.undo].reverse().forEach((step) => step());
       error = caught instanceof Error ? caught.message : String(caught);
     }
-  }, animate);
+    revertNow(change.id);
+    if (attempt === attempts) {
+      if (previous) await installChange(previous, {}, false);
+      return { ok: false, error: `${error} The page was restored.`, matched, before, after };
+    }
+  }
+  throw new Error("No verification attempt ran");
+}
 
-  const visual = Boolean(change.css || (change.block && change.block.name !== "stopMotion"));
-  return { ok: !error, error, matched, before, after: computeStats(), ...(visual && !error ? { lowContrast: lowContrastSamples() } : {}), ...(replaced.length ? { replaced } : {}) };
+export async function applySiteControl(input: unknown, message: string): Promise<SiteControlOutcome> {
+  if (!isSiteControlInput(input)) return { status: "unavailable", error: "Invalid site control request." };
+  try {
+    const undo = await useSiteControl(input, message);
+    if (!undo) return { status: "already-set" };
+    const change: ActiveChange = {
+      id: `site-control-${siteControlId()}`,
+      summary: input.summary,
+      reason: input.reason,
+      scope: "site",
+      css: null,
+      dom: null,
+      block: null,
+      appliedAt: Date.now(),
+    };
+    siteControls.set(change.id, { change, restore: undo });
+    return { status: "applied", change };
+  } catch (error) {
+    return { status: "unavailable", error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export async function revertChange(id: string, animate = true): Promise<boolean> {
+  const siteControl = siteControls.get(id);
+  if (siteControl) {
+    siteControls.delete(id);
+    return siteControl.restore();
+  }
   let reverted = false;
   await transition(() => {
     reverted = revertNow(id);
@@ -320,10 +458,13 @@ export async function revertChange(id: string, animate = true): Promise<boolean>
 }
 
 export async function revertAll(animate = true) {
+  for (const id of [...siteControls.keys()].reverse()) await revertChange(id, false);
   await transition(() => [...applied.keys()].forEach(revertNow), animate);
 }
 
 export function stopEngine() {
+  clearInterval(scheduleTimer);
+  scheduleTimer = undefined;
   observer?.disconnect();
   observer = null;
   pendingRoots = new Set();
@@ -334,7 +475,7 @@ export function changeHistory(): Array<{ change: ActiveChange; active: boolean }
 }
 
 export function activeChanges(): ActiveChange[] {
-  return [...applied.values()].map((entry) => entry.change);
+  return [...applied.values(), ...siteControls.values()].map((entry) => entry.change);
 }
 
 let busyTimer: ReturnType<typeof setTimeout> | undefined;

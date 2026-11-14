@@ -1,10 +1,18 @@
 import type { UiEvent } from "../messages.js";
+import type { MemoryScope, Suggestion } from "../../../shared/protocol.js";
+import { forgetLine } from "../memory.js";
+import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
+import { countdownRing, paintCountdown } from "../voice/button.js";
 import { adoptStyles, h, icon } from "../ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "../ui/theme.js";
+import { VOICE_CSS } from "../voice/styles.js";
 import { Spotlight, type SpotlightDeps } from "./spotlight.js";
 import { OVERLAY_CSS } from "./styles.js";
 
 const TOAST_MS = 9000;
+const NUDGE_MS = 25000;
+
+type ToastAction = { label: string; run: () => Promise<void> };
 
 export class OverlayUi {
   readonly host = document.createElement("div");
@@ -16,18 +24,24 @@ export class OverlayUi {
   private toastTimer: number | undefined;
   private triggers = new Map<string, string>();
   private fabWanted = false;
+  private speakPill: HTMLElement | null = null;
+  private chip: HTMLElement | null = null;
+  private chipTimer: number | undefined;
 
   constructor(private deps: SpotlightDeps) {
     this.host.setAttribute("data-ba", "ui");
     this.host.setAttribute("popover", "manual");
     this.host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;display:block!important";
     this.shadow = this.host.attachShadow({ mode: "closed" });
-    adoptStyles(this.shadow, TOKENS + SETTINGS_CSS + OVERLAY_CSS);
+    adoptStyles(this.shadow, TOKENS + SETTINGS_CSS + OVERLAY_CSS + VOICE_CSS);
 
     this.spotlight = new Spotlight(this.shadow, deps, (open) => {
       this.fab.classList.toggle("hide", open);
-      if (open) this.bringToFront();
-    });
+      if (open) {
+        this.hideNudge();
+        this.bringToFront();
+      }
+    }, (status) => this.showPointStatus(status));
     this.fab.type = "button";
     this.fab.setAttribute("aria-label", "Open adaptive agent");
     this.fab.append(this.fabOrb);
@@ -37,6 +51,29 @@ export class OverlayUi {
     this.shadow.append(this.fab);
     document.documentElement.append(this.host);
     this.bringToFront();
+  }
+
+  private pointPill: HTMLElement | null = null;
+
+  // Listening without the bar: a small pill shows what was heard and what the user is pointing at.
+  private showPointStatus(status: { text: string; label?: string; countdown?: number | null } | null) {
+    if (!status) {
+      this.pointPill?.remove();
+      this.pointPill = null;
+      return;
+    }
+    if (!this.pointPill) {
+      this.pointPill = h("div", "point-pill");
+      this.pointPill.setAttribute("role", "status");
+      this.pointPill.setAttribute("aria-live", "polite");
+      this.shadow.append(this.pointPill);
+      this.bringToFront();
+    }
+    const heard = status.text ? h("span", "heard", status.text) : h("span", "hint", "Listening. Point at something and say what to change.");
+    const dot = h("span", "dot", "", [countdownRing()]);
+    paintCountdown(dot, status.countdown ?? null);
+    const sending = status.countdown != null ? [h("span", "hint", "Sending")] : [];
+    this.pointPill.replaceChildren(dot, heard, ...(status.label ? [h("span", "aim", "", [icon("target", 12), document.createTextNode(status.label)])] : []), ...sending);
   }
 
   bringToFront() {
@@ -51,7 +88,54 @@ export class OverlayUi {
   destroy() {
     this.spotlight.destroy();
     window.clearTimeout(this.toastTimer);
+    window.clearTimeout(this.chipTimer);
     this.host.remove();
+  }
+
+  // The chip never takes focus; the suggestion also waits pre-selected in the bar.
+  nudge(suggestion: Suggestion) {
+    this.spotlight.setNudge(suggestion);
+    if (this.spotlight.isOpen()) return;
+    this.hideNudge();
+
+    const accept = h("button", "link", "Do it");
+    accept.type = "button";
+    const dismiss = h("button", "x", "", [icon("x", 12)]);
+    dismiss.type = "button";
+    dismiss.setAttribute("aria-label", "Dismiss suggestion");
+    const chip = h("div", "nudge", "", [icon("sparkle", 14), h("div", "text", "", [h("b", "", suggestion.text), h("span", "why", suggestion.reason)]), accept, dismiss]);
+    chip.setAttribute("role", "group");
+    chip.setAttribute("aria-label", "Suggestion");
+
+    accept.addEventListener("click", () => {
+      this.hideNudge();
+      this.deps.acceptSuggestion(suggestion);
+      this.spotlight.setNudge(null);
+      this.spotlight.ask(suggestion.text, false);
+    });
+    dismiss.addEventListener("click", () => {
+      this.hideNudge();
+      this.deps.dismissSuggestion(suggestion);
+      this.spotlight.setNudge(null);
+    });
+
+    this.chip = chip;
+    this.shadow.append(chip);
+    this.fabOrb.classList.add("notice");
+    this.chipTimer = window.setTimeout(() => this.hideNudge(), NUDGE_MS);
+  }
+
+  // Shown when an accepted suggestion finishes, so one toast offers both Undo and where to keep the preference.
+  proposeMemory(lines: string[], host: string, scope: MemoryScope, undoIds: string[] = []) {
+    this.announceMemory("proposed", lines, host, scope, undoIds);
+  }
+
+  private hideNudge() {
+    window.clearTimeout(this.chipTimer);
+    this.chipTimer = undefined;
+    this.chip?.remove();
+    this.chip = null;
+    this.fabOrb.classList.remove("notice");
   }
 
   setFab(visible: boolean) {
@@ -68,6 +152,12 @@ export class OverlayUi {
   handleEvent(event: UiEvent) {
     if (event.type === "start") this.triggers.set(event.runId, event.trigger);
     const handled = this.spotlight.handleEvent(event);
+    // Options need a choice, so a run started from the chip or a toast opens the bar to show them.
+    if (event.type === "options" && handled && !this.spotlight.isOpen()) void this.spotlight.show("run");
+    if (event.type === "memory") {
+      if (!(handled && this.spotlight.isOpen())) this.announceMemory(event.status, event.lines, event.host, event.scope);
+      return;
+    }
     const working = event.type === "start" || event.type === "step" || event.type === "tier";
     this.fabOrb.classList.toggle("work", working);
 
@@ -86,7 +176,25 @@ export class OverlayUi {
     }
   }
 
-  showToast(text: string, undoIds: string[], isError = false) {
+  // Proposals stay on screen until answered; ignoring one leaves it waiting in settings.
+  private announceMemory(status: "saved" | "proposed", lines: string[], host?: string, scope?: MemoryScope, undoIds: string[] = []) {
+    const text = lines.join("; ");
+    if (status === "saved") {
+      return this.showToast(`Remembered: ${text}`, [], false, async () => {
+        for (const line of lines) await forgetLine(line);
+      });
+    }
+    const actions = scopeChoices(lines, host, scope).map((choice) => ({
+      label: choice.label,
+      run: async () => {
+        const outcome = await choice.run();
+        this.showToast(`${outcomeText(outcome, host)}: ${text}`, []);
+      },
+    }));
+    this.showToast(`Save this preference? ${text}`, undoIds, false, undefined, actions, true);
+  }
+
+  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>, action?: ToastAction | ToastAction[], sticky = false) {
     window.clearTimeout(this.toastTimer);
     const previous = this.toast;
     if (previous) {
@@ -98,16 +206,26 @@ export class OverlayUi {
     close.type = "button";
     close.setAttribute("aria-label", "Dismiss");
     const nodes: Node[] = [icon(isError ? "x" : "sparkle", 14), h("span", "msg", text)];
-    if (undoIds.length) {
+    if (undoIds.length || onUndo) {
       const undo = h("button", "link", "Undo");
       undo.type = "button";
       undo.addEventListener("click", async () => {
-        for (const id of undoIds) await this.deps.revert(id);
-        this.dismissToast();
+        await onUndo?.();
+        for (const id of [...undoIds].reverse()) await this.deps.revert(id);
+        if (this.toast === toast) this.dismissToast();
       });
       nodes.push(undo);
     }
-    nodes.push(close, h("div", "life"));
+    for (const each of action ? [action].flat() : []) {
+      const button = h("button", "link", each.label);
+      button.type = "button";
+      button.addEventListener("click", () => {
+        this.dismissToast();
+        void each.run();
+      });
+      nodes.push(button);
+    }
+    nodes.push(close, ...(sticky ? [] : [h("div", "life")]));
 
     const toast = h("div", `toast${isError ? " error" : ""}`, "", nodes);
     toast.setAttribute("role", "status");
@@ -116,7 +234,25 @@ export class OverlayUi {
     this.shadow.append(toast);
     this.bringToFront();
     requestAnimationFrame(() => toast.classList.add("show"));
-    this.toastTimer = window.setTimeout(() => this.dismissToast(), TOAST_MS);
+    if (!sticky) this.toastTimer = window.setTimeout(() => this.dismissToast(), TOAST_MS);
+  }
+
+  setSpeaking(on: boolean) {
+    if (!on) {
+      this.speakPill?.remove();
+      this.speakPill = null;
+      return;
+    }
+    if (this.speakPill) return;
+    const stop = h("button", "link", "Stop");
+    stop.type = "button";
+    stop.addEventListener("click", () => this.deps.stopSpeaking());
+    const pill = h("div", "toast speak", "", [icon("volume", 14), h("span", "msg", "Reading aloud"), stop]);
+    pill.setAttribute("role", "status");
+    this.speakPill = pill;
+    this.shadow.append(pill);
+    this.bringToFront();
+    requestAnimationFrame(() => pill.classList.add("show"));
   }
 
   dismissToast() {

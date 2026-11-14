@@ -83,7 +83,7 @@ export class AgentSession {
 
   close() {
     this.closed = true;
-    this.controller.abort();
+    this.controller.abort(new RunCancelledError("Request interrupted"));
     for (const waiter of this.pending.values()) waiter.reject(new RunCancelledError("Extension disconnected"));
     this.pending.clear();
   }

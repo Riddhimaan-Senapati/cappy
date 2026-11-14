@@ -7,6 +7,8 @@ export interface CameraHooks {
   notify(text: string): void;
   turnOff(): void;
   select(element: Element): void;
+  // Letting go of a pinch hold that selected something; push-to-talk ends here.
+  release(): void;
   cancel(): boolean;
   hasSelection(): boolean;
 }
@@ -373,7 +375,7 @@ export class CameraController {
     else if (!this.holdFired && t - this.pinchStart < TAP_MS && this.pinchTarget && !this.paused) {
       this.hovered = this.pinchTarget;
       this.activate();
-    }
+    } else if (this.holdFired) this.hooks.release();
     this.pinchTarget = null;
     this.setRing(0);
   }
@@ -398,6 +400,11 @@ export class CameraController {
 
   private setRing(progress: number) {
     this.ringCircle.style.strokeDashoffset = String(101 * (1 - Math.min(1, Math.max(0, progress))));
+  }
+
+  // Where the air pointer is right now, for point-and-speak; null when the hand is not pointing.
+  pointerPosition(): { x: number; y: number } | null {
+    return this.pointerLatched && !this.paused && !this.overButton ? { ...this.stable } : null;
   }
 
   private hover(target: Element | null) {

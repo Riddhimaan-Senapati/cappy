@@ -14,16 +14,24 @@ Scope: the agent changes how pages look, read and respond. It never clicks, type
 Chrome extension                                        Local Node server (holds keys)
   content script  bar UI, floating button, toasts,          agent loop per provider
                   reads page, applies and undoes   <--WS-->  tools: read_page, inspect, apply_change,
-                  changes, re-applies on new DOM               revert_change, screenshot, remember
+                  changes, re-applies on new DOM               revert_change, screenshot, remember,
+                                                               list_items, find_site_features,
+                                                               use_site_control, load_skill,
+                                                               save_site_skill, escalate
   service worker  owns the WebSocket, runs tool              safety: CSS scan, op allowlist,
-                  calls against the tab, routing              prompt-injection check
+                  calls against the tab, request queue,       prompt-injection check
+                  voice (offscreen) and read-aloud
   popup           settings                                    routing: fast / pro tier
   side panel      debug chat and tool log
-  chrome.storage  profile, history, saved changes, settings
+  chrome.storage  profile, pending memory, site skills, request sessions,
+                  saved changes, saved commands, settings
 ```
 
 - The server is required for new requests: it keeps API keys and credentials out of the extension and runs the provider SDKs. Saved changes, undo and settings work without it.
-- One run = one tool-use loop. The page outline is sent with the request, so the model can act on its first turn. A new request on the same tab cancels the running one (server aborts the model call).
+- One run = one tool-use loop. The page outline is sent with the request, so the model can act on its first turn.
+- A request sent while a tab is busy is queued in the service worker. The queue drains in order only after a successful reply. Send now (Ctrl/Cmd+Enter) cancels the running request instead (the server aborts the model call); Stop cancels it and keeps the queue and any applied changes.
+- Point and speak: with the bar closed, the dictation shortcut listens without covering the page. The element under the camera air pointer (deliberate) or the mouse (only when the request says "this", "that", "here") becomes the request's target, so "make this red" changes that element (`extension/src/voice/point.ts`). With camera control, pinch-and-hold selects and starts listening.
+- Reopening a saved request continues its session: follow-ups carry up to four earlier successful prompt-and-reply pairs from it.
 - Saved changes replay on page load with no model call. Repeating the same request on a site is served from storage; Shift+Enter asks the model again.
 - DOM ops and text scaling re-apply to content added later (a MutationObserver in `extension/src/content/engine.ts`). CSS keeps applying on its own.
 - The overlay lives in a closed shadow root rendered in the top layer (`popover`), so page-wide filters and site modals do not affect it.
@@ -38,8 +46,10 @@ Change = { id, summary, reason, css, dom, block, scope: "site" | "everywhere" }
 
 The model decides how to implement a need, in this order of preference:
 1. `css` it writes itself (invert, dim, spacing, fonts, hiding, focus rings, target size).
-2. `dom` ops for what CSS cannot do: `addLabel`, `setAttribute` (allowlisted attributes), `removeAttribute`, `pauseMedia`.
-3. `block`, pre-written code we own: `colorblind`, `textScale`, `stopMotion`.
+2. `dom` ops for what CSS cannot do: `addLabel`, `setAttribute` (allowlisted attributes), `removeAttribute`, `pauseMedia`, `reorder`.
+3. `block`, pre-written code we own: `colorblind`, `textScale`, `stopMotion`, `darkMode`, `contentFilter`, `formFixer`.
+
+Before any of these, the agent looks for the site's own controls (`find_site_features`, `use_site_control`) for display and content settings.
 
 To add a capability: schema in `shared/adaptation.ts`, allowlist in `shared/validate.ts`, implementation in `extension/src/content/engine.ts` or `blocks.ts`, one line in the system prompt in `server/agent/prompt.ts`.
 
@@ -56,9 +66,9 @@ To add a capability: schema in `shared/adaptation.ts`, allowlist in `shared/vali
 Nothing is required in `.env`. The server starts with no provider; the settings view (popup or `/settings` in the bar) lists ChatGPT, Claude, OpenAI API and Gemini, with Sign in or Add key for each, and lets you switch between the ready ones.
 
 - Keys added from settings are saved by the server to `.agent-keys.json` (gitignored, 0600). Keys in `.env` also count. The extension never stores keys.
-- `chatgpt-signin` uses OpenAI's documented sign-in for local open-source apps; the Sign in button runs the same flow as `npm run chatgpt:login`. Claude subscription logins are not allowed in third-party tools, so Claude means an API key.
+- `chatgpt-signin` uses OpenAI's documented sign-in for local open-source apps; the Sign in button runs the same flow as `bun run chatgpt:login`. Claude subscription logins are not allowed in third-party tools, so Claude means an API key.
 - With no provider picked, the first ready one wins (ChatGPT, Claude, OpenAI, Gemini), or `LLM_PROVIDER` if set and ready.
-- Each provider has a Fast and a Pro model; picks are stored per provider. Routing defaults to Fast; Tab in the bar switches to Pro. In `auto`, keywords give a first guess, and the fast model can call `escalate` when a request is beyond it; the server then undoes its changes and reruns on Pro (it also does this when Fast's changes fail). Model lists are fetched only for the selected provider, since listing costs an API call.
+- Each provider has a Fast and a Pro model; picks are stored per provider. Routing defaults to Auto; Tab in the bar cycles Auto, Fast and Pro. In `auto`, keywords give a first guess, and the fast model can call `escalate` when a request is beyond it; the server then undoes its changes and reruns on Pro (it also does this when Fast's changes fail). Model lists are fetched only for the selected provider, since listing costs an API call.
 - Adding a provider: implement `AgentProvider` in `server/agent/providers/` over the shared `tools` list, honour `session.signal` for cancellation, register it in `providers/index.ts`.
 
 ## Memory (integration point)
@@ -70,7 +80,11 @@ Long-term memory (learned preferences, friction signals, Sentient notes) plugs i
 
 Keep what reaches the model short (a few lines), never raw notes or messages. Profile editing in settings keeps working either way.
 
+Nothing is saved to memory without the user. Every `remember` line is proposed with the agent's suggested scope and the user picks **Only on <host>**, **All sites** or **Don't save** (bar, toast, side panel or settings). Site-only lines are stored as `On <host>: <line>` and `profileFor` in `extension/src/memory.ts` sends them only on that host. Zoom friction asks its own "every site" question.
+
 ## Skills
+
+Site skills are different: facts about how one website is built (stable card selectors, where its controls live, quirks), saved by the agent with `save_site_skill` and stored per host in `chrome.storage` (`siteSkills`), never on the server. Later runs on that host get them as `<site_skill>` wrapped as untrusted data. Notes come from page content, so the tool refuses them on blocked pages or when they read like instructions, and caps their length and count. They never hold anything about the user; settings lists them with Forget.
 
 Playbooks for kinds of requests live in `server/skills/*.md` (front matter: `name`, `description`). The prompt lists names and descriptions; the model loads one with `load_skill` when a request matches, by meaning rather than keywords. Edit or add a file to change behavior; no restart needed.
 
@@ -91,11 +105,11 @@ demo-sites/    campus.html (messy test page), trap.html (injection test)
 ## Running
 
 ```bash
-npm install
-npm run dev               # server on :8787 + extension build in watch mode
+bun install
+bun run dev               # server on :8787 + extension build in watch mode
 ```
 
-Load `extension/` unpacked at `chrome://extensions`, then set up a provider from the extension settings. Shortcuts: Ctrl+Shift+Space (bar), Ctrl+Shift+Y (debug panel); rebind at `chrome://extensions/shortcuts`. `npm run typecheck` before pushing.
+Load `extension/` unpacked at `chrome://extensions`, then set up a provider from the extension settings. Shortcuts: Ctrl+Shift+Space (bar), Alt+Shift+M (dictation), Ctrl+Shift+Y (debug panel); rebind at `chrome://extensions/shortcuts`. `bun run typecheck`, `bun run test` and `bun run e2e` before pushing (e2e needs port 8787 free).
 
 ## Conventions
 

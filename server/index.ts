@@ -3,7 +3,7 @@ import express from "express";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocketServer, WebSocket } from "ws";
 import type { ClientMessage, RunRequest, ServerMessage, Tier } from "../shared/protocol.js";
 import { login, signOut } from "./auth/chatgpt.js";
 import { defaultProviderId, describeProviders, forget, getProvider, keyFor, resolveProvider, wantModels } from "./agent/providers/index.js";
@@ -13,6 +13,7 @@ import { pickTier } from "./agent/router.js";
 import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { setKey } from "./keys.js";
+import { audio } from "./audio.js";
 import { detectInjection } from "./safety.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -21,6 +22,7 @@ const sockets = new Set<WebSocket>();
 let signingIn = false;
 
 const app = express();
+app.use("/api/audio", audio);
 app.use("/demo", express.static(path.join(rootDir, "demo-sites")));
 app.get("/api/health", async (_req, res) => {
   res.json({ ok: true, defaultProvider: defaultProviderId(), providers: (await describeProviders()).map(({ id, ready }) => ({ id, ready })) });
@@ -29,7 +31,9 @@ app.get("/api/health", async (_req, res) => {
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/agent" });
 
-const sendTo = (socket: WebSocket, message: ServerMessage) => socket.send(JSON.stringify(message));
+const sendTo = (socket: WebSocket, message: ServerMessage) => {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+};
 
 async function broadcastProviders() {
   const message: ServerMessage = { type: "providers", providers: await describeProviders(), defaultProvider: defaultProviderId() };
@@ -86,6 +90,13 @@ async function signIn(socket: WebSocket) {
   }
 }
 
+function safeProviderError(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Agent failed";
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 401 || status === 403) return "The provider rejected the credentials or model access. Check provider setup.";
+  return message;
+}
+
 wss.on("connection", (socket, request) => {
   if (!(request.headers.origin ?? "").startsWith("chrome-extension://")) {
     socket.close(1008, "Only the extension may connect");
@@ -104,6 +115,7 @@ wss.on("connection", (socket, request) => {
       return;
     }
 
+    if (!message || typeof message !== "object") return;
     switch (message.type) {
       case "toolResult":
         for (const session of sessions.values()) session.handleToolResult(message);
@@ -120,8 +132,8 @@ wss.on("connection", (socket, request) => {
         return void signIn(socket);
       case "suggest": {
         const provider = resolveProvider(message.provider);
-        const text = provider ? await suggestFor(provider, message).catch(() => null) : null;
-        return sendTo(socket, { type: "suggestion", requestId: message.requestId, text });
+        const suggestion = provider ? await suggestFor(provider, message).catch(() => null) : null;
+        return sendTo(socket, { type: "suggestion", requestId: message.requestId, suggestion });
       }
       case "chatgptLogout":
         signOut();
@@ -133,6 +145,7 @@ wss.on("connection", (socket, request) => {
         const name = keyFor(message.provider);
         const key = message.key?.trim() || null;
         if (!name) return sendTo(socket, { type: "notice", level: "error", text: "That provider does not use an API key." });
+        if (key && (key.length > 4096 || /\s/.test(key))) return sendTo(socket, { type: "notice", level: "error", text: "Enter a valid API key." });
         if (key && key.length < 20) return sendTo(socket, { type: "notice", level: "error", text: "That doesn't look like a full API key." });
         setKey(name, key);
         forget(message.provider);
@@ -160,8 +173,8 @@ wss.on("connection", (socket, request) => {
       console.log(`[run] ${message.trigger} via ${provider.name} done in ${Date.now() - started}ms`);
     } catch (error) {
       if (session.cancelled) return;
-      if (!(error instanceof RunCancelledError)) console.error("[run] failed", error);
-      session.send({ type: "error", runId: message.runId, message: error instanceof Error ? error.message : "Agent failed" });
+      if (!(error instanceof RunCancelledError)) console.error("[run] failed", error instanceof Error ? error.name : "Unknown error");
+      session.send({ type: "error", runId: message.runId, message: safeProviderError(error) });
     } finally {
       sessions.delete(message.runId);
     }
@@ -174,7 +187,7 @@ wss.on("connection", (socket, request) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, "localhost", () => {
   const active = defaultProviderId();
   console.log(`browser-agent server on http://localhost:${PORT}`);
   console.log(active ? `default provider: ${active}` : "no AI provider set up yet: open the extension settings to sign in with ChatGPT or add an API key");

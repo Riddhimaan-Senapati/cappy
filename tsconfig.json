@@ -11,5 +11,5 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": false
   },
-  "include": ["shared", "server", "extension/src"]
+  "include": ["shared", "server", "extension/src", "tests", "scripts"]
 }

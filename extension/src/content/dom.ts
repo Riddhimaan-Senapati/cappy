@@ -95,9 +95,14 @@ export function describeElement(element: Element): string {
 }
 
 export function accessibleName(element: Element): string {
+  const references = (element.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean);
+  const referencedText = references.map((id) => {
+    const label = element.ownerDocument.getElementById(id);
+    return label?.getAttribute("aria-label")?.trim() || label?.textContent?.trim() || "";
+  }).join(" ").trim();
   const control = element as HTMLInputElement;
-  const fromLabels = control.labels ? [...control.labels].map((label) => label.textContent?.trim()).join(" ") : "";
-  return (fromLabels || element.getAttribute("aria-label") || element.getAttribute("aria-labelledby") || element.getAttribute("title") || "").trim();
+  const fromLabels = Array.from(control.labels ?? [], (label) => label.textContent?.trim()).join(" ").trim();
+  return referencedText || element.getAttribute("aria-label")?.trim() || fromLabels || element.getAttribute("title")?.trim() || "";
 }
 
 export const LABELLABLE = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]), select, textarea';
@@ -122,13 +127,24 @@ function luminance([r, g, b]: Rgba): number {
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
 
-function effectiveBackground(element: Element | null): Rgba {
-  while (element) {
-    const color = parseColor(getComputedStyle(element).backgroundColor);
-    if (color && color[3] > 0.5) return color;
-    element = element.parentElement;
+function composite([red, green, blue, alpha]: Rgba, bottom: Rgba): Rgba {
+  return [
+    red * alpha + bottom[0] * (1 - alpha),
+    green * alpha + bottom[1] * (1 - alpha),
+    blue * alpha + bottom[2] * (1 - alpha),
+    1,
+  ];
+}
+
+function effectiveBackground(element: Element): Rgba {
+  const layers: Rgba[] = [];
+  for (let current: Element | null = element; current; current = current.parentElement) {
+    const color = parseColor(getComputedStyle(current).backgroundColor);
+    if (!color || color[3] === 0) continue;
+    layers.push(color);
+    if (color[3] === 1) break;
   }
-  return [255, 255, 255, 1];
+  return layers.reduceRight((bottom, top) => composite(top, bottom), [255, 255, 255, 1] as Rgba);
 }
 
 export function contrastInfo(element: Element): { ratio: number; color: string; background: string } {

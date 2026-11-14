@@ -1,8 +1,23 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
-import { ROUTING_LABELS, type StatusInfo } from "../messages.js";
+import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
 import { load, save, type StoredState } from "../storage.js";
 import { h, icon } from "./dom.js";
+import { createMemoryView } from "./memory.js";
+
+let voicesRequest: Promise<string[]> | null = null;
+
+function loadVoices(): Promise<string[]> {
+  voicesRequest ??= chrome.runtime
+    .sendMessage({ type: "tts-voices" } satisfies TtsRequest)
+    .then((response: { voices?: Array<{ voiceName: string }> } | undefined) => {
+      const names = (response?.voices ?? []).map((voice) => voice.voiceName);
+      if (!names.length) voicesRequest = null;
+      return names;
+    })
+    .catch(() => []);
+  return voicesRequest;
+}
 
 export interface SettingsContext {
   listChanges(): Promise<ActiveChange[]>;
@@ -54,6 +69,43 @@ function modelPickers(state: StoredState, status: StatusInfo): Node[] {
   return [field("fast", "Fast model"), field("frontier", "Pro model")];
 }
 
+const VOICE_LANGUAGES = ["en-US", "en-GB", "es-ES", "fr-FR", "de-DE", "it-IT", "pt-BR", "nl-NL", "hi-IN", "ja-JP", "ko-KR", "zh-CN"];
+
+function voiceLanguage(state: StoredState): Node {
+  const select = h("select", "s-select");
+  select.setAttribute("aria-label", "Speech language");
+  const browser = h("option", "", `Browser (${navigator.language})`);
+  browser.value = "";
+  select.append(browser);
+  const options = [...new Set([state.voiceLang, ...VOICE_LANGUAGES].filter(Boolean))];
+  for (const lang of options) {
+    const option = h("option", "", lang);
+    option.value = lang;
+    select.append(option);
+  }
+  select.value = state.voiceLang;
+  select.addEventListener("change", () => void save({ voiceLang: select.value }));
+  return h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Language"), h("small", "", "The language you speak in")]), select]);
+}
+
+function voiceSection(state: StoredState): Node {
+  const enable = h("button", "s-btn", "Enable microphone");
+  enable.type = "button";
+  enable.addEventListener("click", () => void chrome.runtime.sendMessage({ kind: "voiceOpenMic" } satisfies BackgroundRequest).catch(() => undefined));
+  return h(
+    "section",
+    "s-sec",
+    "",
+    [
+      h("h3", "", "Voice"),
+      toggle("Send after speaking", "Off leaves your words in the box to edit first.", state.voiceAutoSend, (on) => save({ voiceAutoSend: on })),
+      voiceLanguage(state),
+      h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Chrome asks once. Allow it in the tab that opens.")]), enable]),
+      h("div", "s-note", "Press Alt+Shift+M (Option+Shift+M on Mac) on a page to speak. With the bar closed, point at something with the mouse or the camera pointer and say what to change, like \"make this red\". It sends after a short pause (a ring shows it is about to), when you say \"done\", or after 15 seconds. Keep talking to cancel the pause. Change the shortcut under Shortcuts."),
+    ],
+  );
+}
+
 function cameraSection(state: StoredState): Node {
   const camera = state.camera;
   const set = (patch: Partial<StoredState["camera"]>) => save({ camera: { ...camera, ...patch } });
@@ -64,6 +116,7 @@ function cameraSection(state: StoredState): Node {
       toggle("Hand scrolling", "Open palm high to scroll up, low to scroll down.", camera.handScroll, (on) => set({ handScroll: on })),
       toggle("Head scrolling", "Tilt your head down or up to scroll.", camera.headScroll, (on) => set({ headScroll: on })),
       toggle("Swipe to go back", "Swipe an open palm sideways for back or forward.", camera.swipeNav !== false, (on) => set({ swipeNav: on })),
+      toggle("Speak after selecting", "Pinch and hold on something and keep holding while you say what to change, like \"make this red\". Let go to send.", camera.speakAfterSelect !== false, (on) => set({ speakAfterSelect: on })),
     );
     const options: Array<[number, string]> = [[0, "Off"], [800, "0.8s"], [1200, "1.2s"], [2000, "2s"]];
     const segments = options.map(([value, label]) => {
@@ -80,8 +133,8 @@ function cameraSection(state: StoredState): Node {
 
 function statusCard(status: StatusInfo) {
   const dot = h("span", `s-dot ${status.connected ? "on" : "off"}`);
-  const title = status.connected ? `Connected to ${status.provider ?? "agent"}` : "Agent server offline";
-  const sub = status.connected && status.models ? `${status.models.fast} (Fast) · ${status.models.frontier} (Pro)` : (status.error ?? "Start it with npm run dev");
+  const title = status.connected ? `Connected to ${status.provider ?? "agent"}` : "Offline mode";
+  const sub = status.connected && status.models ? `${status.models.fast} (Fast) · ${status.models.frontier} (Pro)` : status.connected ? "Sign in with ChatGPT or add an API key below." : "Saved adaptations, request suggestions, and widget controls are available. New AI requests need the local server.";
   return h("div", "s-status", "", [dot, h("div", "", "", [h("b", "", title), h("small", "", sub)])]);
 }
 
@@ -162,6 +215,9 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         event.preventDefault();
         if (!input.value.trim()) return;
         ctx.setKey(provider.id, input.value.trim());
+        // Voice falls back to these keys, so a new key needs a fresh audio check.
+        if (provider.id === "openai-key" && state.voiceProvider === "openai") void save({ voiceProvider: "chrome", openAIVoiceVerified: false });
+        if (provider.id === "gemini" && state.voiceProvider === "gemini") void save({ voiceProvider: "chrome", geminiVoiceVerified: false });
         editingKey = null;
         keyDraft = "";
         if (!state.provider) void save({ provider: provider.id });
@@ -174,36 +230,16 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     return [h("section", "s-sec", "", [h("h3", "", "AI provider"), ...rows, ...notice, ...hint])];
   };
   let queued = false;
+  let speechError = "";
+  let voiceCheck = "";
+  let checkingVoice = false;
+  let pendingVoice: "openai" | "gemini" | undefined;
 
   const paint = async () => {
-    const [state, changes, status] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false }))]);
+    const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false })), loadVoices()]);
     if (disposed) return;
     const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
     const hadFocus = focused instanceof HTMLInputElement && root.contains(focused);
-
-    const chips = state.profile.length
-      ? state.profile.map((line, index) => {
-          const remove = h("button", "s-x", "", [icon("x", 12)]);
-          remove.type = "button";
-          remove.setAttribute("aria-label", `Remove ${line}`);
-          remove.addEventListener("click", () => save({ profile: state.profile.filter((_, i) => i !== index) }));
-          return h("span", "s-chip", line, [remove]);
-        })
-      : [h("div", "s-empty", "Nothing yet. Tell the agent about your needs, or add a line.")];
-
-    const input = h("input");
-    input.placeholder = "Add a need, e.g. light sensitive";
-    input.value = draft;
-    input.setAttribute("aria-label", "Add a profile line");
-    input.addEventListener("input", () => (draft = input.value));
-    const form = h("form", "s-add", "", [input, h("button", "s-btn", "Add")]);
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const line = input.value.trim();
-      if (!line) return;
-      draft = "";
-      await save({ profile: [...state.profile, line] });
-    });
 
     const segments = (["auto", "fast", "frontier"] as Routing[]).map((value) => {
       const button = h("button", "", ROUTING_LABELS[value]);
@@ -244,6 +280,100 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     const section = (title: string, ...children: Node[]) => h("section", "s-sec", "", [h("h3", "", title), ...children]);
     const set = <K extends keyof StoredState>(key: K) => (value: StoredState[K]) => save({ [key]: value } as Partial<StoredState>);
 
+    const voiceSelect = h("select", "s-select");
+    voiceSelect.setAttribute("aria-label", "Voice");
+    const defaultVoice = h("option", "", "Default voice");
+    defaultVoice.value = "";
+    voiceSelect.append(defaultVoice);
+    for (const name of new Set([state.ttsVoice, ...voices].filter(Boolean))) {
+      const option = h("option", "", name);
+      option.value = name;
+      voiceSelect.append(option);
+    }
+    voiceSelect.value = state.ttsVoice;
+    voiceSelect.addEventListener("change", () => void save({ ttsVoice: voiceSelect.value }));
+    const voiceRow = h("label", "s-row", "", [
+      h("div", "grow", "", [h("div", "", "Voice"), h("small", "", voices.length ? "Voices installed on this device" : "No voices found yet")]),
+      voiceSelect,
+    ]);
+
+    const rate = h("input");
+    rate.type = "range";
+    rate.min = "0.5";
+    rate.max = "2";
+    rate.step = "0.1";
+    rate.value = String(state.ttsRate);
+    rate.setAttribute("aria-label", "Speaking rate");
+    const rateValue = h("small", "", `${state.ttsRate.toFixed(1)}×`);
+    rate.addEventListener("input", () => (rateValue.textContent = `${Number(rate.value).toFixed(1)}×`));
+    rate.addEventListener("change", () => void save({ ttsRate: Number(rate.value) }));
+    const rateRow = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Speed"), rateValue]), rate]);
+
+    const testVoice = h("button", "s-btn", "Test voice");
+    testVoice.type = "button";
+    testVoice.addEventListener("click", () => void chrome.runtime.sendMessage({ type: "tts-speak", text: "This is how I sound.", source: "test" } satisfies TtsRequest).catch(() => undefined));
+
+    const voiceProvider = h("select", "s-select");
+    voiceProvider.setAttribute("aria-label", "Voice provider");
+    for (const [id, label] of [["chrome", "Chrome"], ["openai", "OpenAI"], ["gemini", "Gemini"]]) {
+      const option = h("option", "", label);
+      option.value = id;
+      voiceProvider.append(option);
+    }
+    const activeVoice = state.voiceProvider;
+    voiceProvider.value = activeVoice;
+    const provider = pendingVoice ?? (activeVoice === "gemini" ? "gemini" : "openai");
+    const label = provider === "gemini" ? "Gemini" : "OpenAI";
+    voiceProvider.disabled = checkingVoice;
+    voiceProvider.addEventListener("change", () => {
+      if (voiceProvider.value === "chrome") {
+        pendingVoice = undefined;
+        voiceCheck = "";
+        void save({ voiceProvider: "chrome" });
+      } else if (voiceProvider.value === "gemini" || voiceProvider.value === "openai") {
+        pendingVoice = voiceProvider.value;
+        voiceCheck = "";
+        queue();
+      }
+    });
+    const voiceKey = h("input");
+    voiceKey.type = "password";
+    voiceKey.autocomplete = "off";
+    voiceKey.placeholder = `${label} API key`;
+    voiceKey.setAttribute("aria-label", `${label} voice API key`);
+    voiceKey.disabled = checkingVoice;
+    const keyHelp = h("small", "", `Add a ${label} API key to enable its audio models. Leave blank to use a saved key.`);
+    const voiceKeyField = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", `Add a ${label} API key`), keyHelp]), voiceKey]);
+    const verify = h("button", "s-btn", `Verify and enable ${label}`);
+    verify.type = "button";
+    verify.disabled = checkingVoice;
+    verify.addEventListener("click", async () => {
+      if (checkingVoice) return;
+      const key = voiceKey.value.trim();
+      voiceKey.value = "";
+      checkingVoice = true;
+      voiceCheck = "Checking speech and transcription with a short sample…";
+      queue();
+      try {
+        const result = await chrome.runtime.sendMessage({ kind: "verifyVoice", key, provider } satisfies BackgroundRequest);
+        if (!result?.ok) throw new Error(result?.error ?? "Could not verify OpenAI audio.");
+        await save(provider === "openai" ? { voiceProvider: provider, openAIVoiceVerified: true } : { voiceProvider: provider, geminiVoiceVerified: true });
+        pendingVoice = undefined;
+        voiceCheck = `${label} audio verified.`;
+      } catch (error) {
+        voiceCheck = error instanceof Error ? error.message : "Could not verify OpenAI audio.";
+      } finally {
+        checkingVoice = false;
+        queue();
+      }
+    });
+    const voiceProviderRow = h("label", "s-row", "", [
+      h("div", "grow", "", [h("div", "", "Voice provider"), h("small", "", "OpenAI and Gemini process recorded audio and spoken text through their APIs. Verification uses a short sample and may incur API usage.")]),
+      voiceProvider,
+    ]);
+    const verificationStatus = h("div", "s-note", voiceCheck);
+    verificationStatus.setAttribute("role", "status");
+
     root.replaceChildren(
       ...providerSection(status, state),
       section(
@@ -252,9 +382,18 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
         toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
       ),
-      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status)),
+      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, voiceKeyField, verify, verificationStatus),
+      memory.render(state, toggle),
+      section(
+        "Speech",
+        toggle("Read replies aloud", "Speaks chat replies and page-load announcements.", state.speakReplies, set("speakReplies")),
+        voiceRow,
+        rateRow,
+        h("div", "s-foot", "", [testVoice]),
+        h("div", "s-note", speechError),
+      ),
+      voiceSection(state),
       cameraSection(state),
-      section("Your profile", h("div", "s-chips", "", chips), form),
       section("On this page", ...changeRows),
       h("div", "s-foot", "", [shortcuts, debug]),
     );
@@ -270,11 +409,19 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     });
   };
 
+  const memory = createMemoryView(queue);
   const onStorage = () => queue();
   chrome.storage.onChanged.addListener(onStorage);
+  const onSpeechError = (message: { type?: string; message?: string }) => {
+    if (message.type !== "tts-error") return;
+    speechError = message.message ?? "";
+    queue();
+  };
+  chrome.runtime.onMessage.addListener(onSpeechError);
   void paint();
   return () => {
     disposed = true;
+    chrome.runtime.onMessage.removeListener(onSpeechError);
     chrome.storage.onChanged.removeListener(onStorage);
   };
 }
