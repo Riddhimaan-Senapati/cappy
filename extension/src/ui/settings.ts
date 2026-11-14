@@ -6,6 +6,7 @@ import { usageCard, USAGE_CSS } from "./usage.js";
 import { adoptStyles, h, icon } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 import { createProfilesView } from "./profiles.js";
+import { createConfigView } from "./config.js";
 
 let voicesRequest: Promise<string[]> | null = null;
 
@@ -401,6 +402,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       ),
       voiceSection(state),
       cameraSection(state),
+      config(),
       section("On this page", ...changeRows),
       h("div", "s-foot", "", [shortcuts, debug]),
     );
@@ -424,6 +426,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
 
   const memory = createMemoryView(queue);
   const profiles = createProfilesView(queue);
+  const config = createConfigView(queue);
   const onStorage = () => queue();
   chrome.storage.onChanged.addListener(onStorage);
   const onSpeechError = (message: { type?: string; message?: string }) => {
