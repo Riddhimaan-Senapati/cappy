@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Adaptation, filtersTargetKnownGroups, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
+import { Adaptation, Rule, ruleAppliesTo, filtersTargetKnownGroups, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
 
 const valid = {
   id: "a1",
@@ -54,4 +54,15 @@ test("content filters target repeated item groups by keyword", () => {
   expect(filtersTargetKnownGroups(a, new Set(["div.card"]))).toBe(false);
   expect(Adaptation.safeParse({ ...base, filters: [{ ...filter, itemSelector: "a{} body{display:none" }] }).success).toBe(false);
   expect(Adaptation.safeParse({ ...base, filters: [{ ...filter, keywords: [] }] }).success).toBe(false);
+});
+
+test("filters may omit the selector and carry a schedule; rules scope by host", () => {
+  const f = { keywords: ["reel"], action: "hide", schedule: { days: ["mon"], start: "09:00", end: "17:00" } };
+  const a = Adaptation.parse({ id: "a5", sites: ["www.instagram.com"], reason: { text: "No reels at work", needId: "request" }, blocks: [], filters: [f] });
+  expect(filtersTargetKnownGroups(a, new Set())).toBe(true);
+  const rule = Rule.parse({ id: "r1", text: "No reels at work", sites: ["*.instagram.com"], everywhere: false, filter: f, enabled: true, createdAt: 1 });
+  expect(ruleAppliesTo(rule, "www.instagram.com")).toBe(true);
+  expect(ruleAppliesTo(rule, "www.youtube.com")).toBe(false);
+  expect(ruleAppliesTo({ ...rule, everywhere: true }, "www.youtube.com")).toBe(true);
+  expect(ruleAppliesTo({ ...rule, enabled: false }, "www.instagram.com")).toBe(false);
 });

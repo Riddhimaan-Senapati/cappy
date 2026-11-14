@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { scanCss } from "./css-scan";
 import { NeedId } from "./profile";
+import { Schedule } from "./schedule";
 
 export const HostPattern = z
   .string()
@@ -101,9 +102,11 @@ export const ItemSelector = z
 
 export const ContentFilter = z
   .object({
-    itemSelector: ItemSelector,
+    itemSelector: ItemSelector.optional(),
     keywords: z.array(z.string().trim().min(2).max(40)).min(1).max(12),
     action: z.enum(["hide", "dim"]),
+    schedule: Schedule.optional(),
+    everywhere: z.boolean().optional(),
   })
   .strict();
 export type ContentFilter = z.infer<typeof ContentFilter>;
@@ -160,5 +163,26 @@ export function opsTargetKnownIds(adaptation: Adaptation, known: ReadonlySet<str
 }
 
 export function filtersTargetKnownGroups(adaptation: Adaptation, known: ReadonlySet<string>): boolean {
-  return (adaptation.filters ?? []).every((f) => known.has(f.itemSelector));
+  return (adaptation.filters ?? []).every((f) => f.itemSelector === undefined || known.has(f.itemSelector));
+}
+
+export const RuleId = z.string().min(1).max(64).brand<"RuleId">();
+export type RuleId = z.infer<typeof RuleId>;
+
+// A standing content rule: replayed on every matching page with no model call, gated by its schedule.
+export const Rule = z
+  .object({
+    id: RuleId,
+    text: z.string().min(1).max(200),
+    sites: z.array(HostPattern).max(20),
+    everywhere: z.boolean(),
+    filter: ContentFilter,
+    enabled: z.boolean(),
+    createdAt: z.number().int().nonnegative(),
+  })
+  .strict();
+export type Rule = z.infer<typeof Rule>;
+
+export function ruleAppliesTo(rule: Rule, host: string): boolean {
+  return rule.enabled && (rule.everywhere || rule.sites.some((p) => matchesHost(p, host)));
 }

@@ -6,6 +6,8 @@ export const ItemGroup = z
     selector: ItemSelector,
     count: z.number().int().positive(),
     samples: z.array(z.string().max(100)).max(3),
+    label: z.string().max(60).optional(),
+    source: z.enum(["adapter", "generic"]).optional(),
   })
   .strict();
 export type ItemGroup = z.infer<typeof ItemGroup>;
@@ -50,8 +52,18 @@ export const PageOutline = z
   .strict();
 export type PageOutline = z.infer<typeof PageOutline>;
 
+export const ClientTime = z
+  .object({ iso: z.string().max(40), timeZone: z.string().max(64) })
+  .strict();
+export type ClientTime = z.infer<typeof ClientTime>;
+
 export const AdaptRequest = z
-  .object({ url: z.url({ protocol: /^https?$/ }), outline: PageOutline, profile: Profile })
+  .object({
+    url: z.url({ protocol: /^https?$/ }),
+    outline: PageOutline,
+    profile: Profile,
+    clientTime: ClientTime.optional(),
+  })
   .strict();
 export type AdaptRequest = z.infer<typeof AdaptRequest>;
 
@@ -79,6 +91,8 @@ export const RequestBody = z
     outline: PageOutline,
     profile: Profile,
     request: z.string().min(1).max(500),
+    clientTime: ClientTime.optional(),
+    retryNote: z.string().max(400).optional(),
   })
   .strict();
 export type RequestBody = z.infer<typeof RequestBody>;

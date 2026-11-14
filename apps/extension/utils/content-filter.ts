@@ -24,6 +24,7 @@ export function applyContentFilters(filters: readonly ContentFilter[], doc: Docu
     if (undone) return;
     const desired = new Map<HTMLElement, ContentFilter["action"]>();
     for (const { filter, pattern } of matchers) {
+      if (!filter.itemSelector) continue;
       for (const el of queryItems(doc, filter.itemSelector)) {
         if (desired.has(el)) continue;
         if (pattern.test(searchableText(el))) desired.set(el, filter.action);
