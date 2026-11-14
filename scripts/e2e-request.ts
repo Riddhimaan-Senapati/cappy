@@ -6,9 +6,9 @@ import {
   BACKEND_PORT,
   assert,
   extensionIdFrom,
-  fontSizeOf,
   getWorker,
   launchWithExtension,
+  paragraphPxOf,
   seedProfile,
   serveFixtures,
   startBackend,
@@ -33,8 +33,8 @@ try {
 
   const plain = await context.newPage();
   await plain.goto(`http://localhost:${PAGE_PORT}/plain.html`);
-  const before = await fontSizeOf(plain);
-  assert(before === "16px", `precondition: plain.html starts at 16px (got ${before})`);
+  const before = await paragraphPxOf(plain);
+  assert(before === 16, `precondition: plain.html paragraph starts at 16px (got ${before})`);
 
   const panel = await context.newPage();
   await panel.goto(`chrome-extension://${extensionIdFrom(worker)}/sidepanel.html`);
@@ -51,11 +51,11 @@ try {
   const deadline = Date.now() + 15_000;
   let after = before;
   while (Date.now() < deadline) {
-    after = await fontSizeOf(plain);
+    after = await paragraphPxOf(plain);
     if (after !== before) break;
     await Bun.sleep(200);
   }
-  assert(parseFloat(after) > parseFloat(before), `"${REQUEST}" grew the active tab's font-size (${before} -> ${after})`);
+  assert(after > before, `"${REQUEST}" grew the active tab's paragraph font-size (${before}px -> ${after}px)`);
 
   console.log("REQUEST PASSED");
 } finally {

@@ -72,3 +72,8 @@ export async function seedProfile(context: BrowserContext, profile: Profile): Pr
 export function fontSizeOf(page: Page): Promise<string> {
   return page.evaluate(() => getComputedStyle(document.documentElement).fontSize);
 }
+
+// text_scale scales px-sized text, so root font-size stays put; the paragraph shows the change.
+export function paragraphPxOf(page: Page): Promise<number> {
+  return page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("p")!).fontSize));
+}

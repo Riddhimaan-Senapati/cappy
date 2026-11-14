@@ -15,17 +15,21 @@ describe("colorModeFor", () => {
 });
 
 describe("blocksFor", () => {
-  test("text_size and focus merge into one text_focus block", () => {
-    const blocks = blocksFor([need("text_size"), need("focus")]);
-    expect(blocks).toEqual([
+  test("text_size becomes text_scale and focus keeps a text_focus block", () => {
+    expect(blocksFor([need("text_size"), need("focus")])).toEqual([
+      { block: "text_scale", scale: 1.3 },
       {
         block: "text_focus",
-        fontScale: 1.25,
-        lineHeight: 1.6,
-        font: "atkinson",
+        fontScale: 1,
+        lineHeight: 1.5,
+        font: "system",
         hide: ["aside", "[role=complementary]"],
       },
     ]);
+  });
+
+  test("text_size alone scales text without a text_focus block", () => {
+    expect(blocksFor([need("text_size")])).toEqual([{ block: "text_scale", scale: 1.3 }]);
   });
 
   test("motor produces a form_fixer block", () => {
@@ -34,8 +38,8 @@ describe("blocksFor", () => {
     ]);
   });
 
-  test("light sensitivity alone produces no block", () => {
-    expect(blocksFor([need("light_sensitivity")])).toEqual([]);
+  test("light sensitivity produces a stop_motion block that pauses media", () => {
+    expect(blocksFor([need("light_sensitivity")])).toEqual([{ block: "stop_motion", pauseMedia: true }]);
   });
 });
 

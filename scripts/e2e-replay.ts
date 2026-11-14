@@ -5,9 +5,9 @@ import type { BrowserContext, Page } from "playwright";
 import {
   BACKEND_PORT,
   assert,
-  fontSizeOf,
   getWorker,
   launchWithExtension,
+  paragraphPxOf,
   seedProfile,
   serveFixtures,
   startBackend,
@@ -38,13 +38,17 @@ async function waitForSaved(ctx: BrowserContext, timeoutMs: number): Promise<boo
   return false;
 }
 
-async function waitForFontSize(tab: Page, size: string, timeoutMs: number): Promise<void> {
-  await tab.waitForFunction(
-    (expected) => getComputedStyle(document.documentElement).fontSize === expected,
-    size,
-    { timeout: timeoutMs },
-  );
+async function waitForParagraphPx(tab: Page, predicate: (px: number) => boolean, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate(await paragraphPxOf(tab))) return;
+    await Bun.sleep(100);
+  }
+  throw new Error(`FAIL: paragraph font-size did not reach the expected value within ${timeoutMs}ms`);
 }
+
+const grew = (px: number) => px >= 16 * 1.25;
+const original = (px: number) => px === 16;
 
 try {
   backend = await startBackend({ port: BACKEND_PORT, env: { GEMINI_API_KEY: "" } });
@@ -59,8 +63,8 @@ try {
 
   const tab = await context.newPage();
   await tab.goto(`http://localhost:${PAGE_PORT}/plain.html`);
-  await tab.waitForFunction(() => getComputedStyle(document.documentElement).fontSize !== "16px", null, { timeout: 10_000 });
-  assert((await fontSizeOf(tab)) === "20px", "first visit: backend adaptation applied html font-size 16px -> 20px");
+  await waitForParagraphPx(tab, grew, 10_000);
+  assert(grew(await paragraphPxOf(tab)), "first visit: backend adaptation scaled the paragraph 16px -> 20.8px");
 
   await Bun.sleep(2_000);
   assert(await waitForSaved(context, 8_000), "verified change was saved for localhost");
@@ -70,16 +74,16 @@ try {
   backend = undefined;
 
   await tab.reload();
-  await waitForFontSize(tab, "20px", 3_000);
-  assert((await fontSizeOf(tab)) === "20px", "revisit with the backend stopped: replayed 20px within 3s");
+  await waitForParagraphPx(tab, grew, 3_000);
+  assert(grew(await paragraphPxOf(tab)), "revisit with the backend stopped: replayed the paragraph scale within 3s");
 
   await tab.getByRole("button", { name: "Undo" }).click();
-  await waitForFontSize(tab, "16px", 5_000);
+  await waitForParagraphPx(tab, original, 5_000);
   assert(!(await savedHosts(context)).includes(HOST), "undo forgot the saved change for localhost");
 
   await tab.reload();
   await Bun.sleep(3_000);
-  assert((await fontSizeOf(tab)) === "16px", "after undo and reload the font-size stays 16px");
+  assert(original(await paragraphPxOf(tab)), "after undo and reload the paragraph stays 16px");
 
   console.log("REPLAY PASSED");
 } finally {

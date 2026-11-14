@@ -10,7 +10,7 @@ import {
   type BlockOf,
   type RequestBody,
 } from "@browser-agent/shared";
-import { CHANGE_RULES, elementLines, parseAdaptText, responseJsonSchema } from "./gemini-adapter";
+import { BLOCK_RULES, CHANGE_RULES, elementLines, parseAdaptText, responseJsonSchema } from "./gemini-adapter";
 
 export type Requester = (body: RequestBody) => Promise<AdaptResponse>;
 
@@ -20,6 +20,7 @@ const HIDE_ASIDES = ["aside", "[role=complementary]", "[class*=ad-]"];
 const ALL_COLOR_TARGETS = ["images", "video", "canvas", "svg"] as const;
 
 const TEXT_SIZE = /bigger|larger|text size/i;
+const STOP_MOTION = /stop|pause|animation|motion|flash|autoplay/i;
 const COLOR_VISION = /colou?r ?blind|red-green/i;
 const GESTURE = /hand|gesture|wave|raise/i;
 const FORM = /form|label|click target/i;
@@ -33,23 +34,26 @@ const INVERT_CSS =
 
 const TEXT_FOCUS: BlockOf<"text_focus"> = {
   block: "text_focus",
-  fontScale: 1.4,
-  lineHeight: 1.7,
+  fontScale: 1,
+  lineHeight: 1.6,
   font: "atkinson",
   hide: [],
 };
 
 // Keyword routing for the stub. Order matters: the first matching rule wins.
-export function blockForRequest(request: string): BlockConfig | undefined {
-  if (TEXT_SIZE.test(request)) return TEXT_FOCUS;
+export function blockForRequest(request: string): BlockConfig[] | undefined {
+  if (TEXT_SIZE.test(request)) {
+    return [{ block: "text_scale", scale: 1.4 }, TEXT_FOCUS];
+  }
+  if (STOP_MOTION.test(request)) return [{ block: "stop_motion", pauseMedia: true }];
   if (COLOR_VISION.test(request)) {
-    return { block: "color_fix", mode: "deuteranopia", targets: [...ALL_COLOR_TARGETS] };
+    return [{ block: "color_fix", mode: "deuteranopia", targets: [...ALL_COLOR_TARGETS] }];
   }
-  if (GESTURE.test(request)) return { block: "gesture_scroll", scrollStepPx: 400, backGesture: true };
+  if (GESTURE.test(request)) return [{ block: "gesture_scroll", scrollStepPx: 400, backGesture: true }];
   if (FORM.test(request)) {
-    return { block: "form_fixer", addLabels: true, clearErrors: true, minTargetPx: 48, oneQuestionMode: false };
+    return [{ block: "form_fixer", addLabels: true, clearErrors: true, minTargetPx: 48, oneQuestionMode: false }];
   }
-  if (DISTRACTION.test(request)) return { ...TEXT_FOCUS, hide: [...HIDE_ASIDES] };
+  if (DISTRACTION.test(request)) return [{ ...TEXT_FOCUS, hide: [...HIDE_ASIDES] }];
   return undefined;
 }
 
@@ -85,15 +89,16 @@ export const stubRequester: Requester = async (body) => {
     if (!ops) return { kind: "none", reason: "No sidebar, ad or recommendation element on this page" };
     return { kind: "adaptation", adaptation: adaptationFor(body, [], { ops }) };
   }
-  const block = blockForRequest(body.request);
-  if (!block) return { kind: "none", reason: NONE_CLOSEST };
-  return { kind: "adaptation", adaptation: adaptationFor(body, [block]) };
+  const blocks = blockForRequest(body.request);
+  if (!blocks) return { kind: "none", reason: NONE_CLOSEST };
+  return { kind: "adaptation", adaptation: adaptationFor(body, blocks) };
 };
 
 const REQUEST_RULES = [
   "You pick accessibility adaptations for one web page, for one user, from the user's plain-English request.",
   "Answer only with JSON matching the response schema.",
   "Pick blocks from the schema when they fit. Never write JavaScript.",
+  ...BLOCK_RULES,
   ...CHANGE_RULES,
   "If nothing fits the request, answer kind none and name the closest block in the reason.",
   "Scope sites to the page host given below.",

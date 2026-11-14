@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserContext } from "playwright";
-import { BACKEND_PORT, assert, fontSizeOf, launchWithExtension, seedProfile, serveFixtures, startBackend } from "./lib-e2e";
+import { BACKEND_PORT, assert, launchWithExtension, paragraphPxOf, seedProfile, serveFixtures, startBackend } from "./lib-e2e";
 
 const PAGE_PORT = 5185;
 const userDataDir = mkdtempSync(join(tmpdir(), "ba-e2e-"));
@@ -21,9 +21,11 @@ try {
   });
   const tab = await context.newPage();
   await tab.goto(`http://localhost:${PAGE_PORT}/plain.html`);
-  await tab.waitForFunction(() => getComputedStyle(document.documentElement).fontSize !== "16px", null, { timeout: 10_000 });
+  await tab.waitForFunction(() => parseFloat(getComputedStyle(document.querySelector("p")!).fontSize) > 16, null, {
+    timeout: 10_000,
+  });
   await Bun.sleep(8_000);
-  assert((await fontSizeOf(tab)) === "20px", "a helpful adaptation is still applied 8s later, after verification finished");
+  assert((await paragraphPxOf(tab)) >= 16 * 1.25, "a helpful adaptation is still applied 8s later, after verification finished");
   console.log("PERSIST PASSED");
 } finally {
   await context?.close();
