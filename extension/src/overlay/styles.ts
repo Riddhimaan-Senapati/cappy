@@ -76,6 +76,7 @@ export const OVERLAY_CSS = `
 .result > .ico { margin-top: 1px; color: var(--good); }
 .result .undo-all { all: unset; flex: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 3px 9px; border-radius: 7px;
   font-size: 12px; font-weight: 600; color: var(--text); background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.1); }
+.result .undo-all.redo .ico svg { transform: scaleX(-1); }
 .result .undo-all:hover { background: rgba(255, 255, 255, 0.14); }
 .result .undo-all:focus-visible { outline: 2px solid var(--accent); }
 .result.undone { color: rgba(255, 255, 255, 0.6); }

@@ -350,8 +350,40 @@ export class Spotlight {
         run: async () => (await save({ floatingButton: state?.floatingButton === false }), this.hide()),
       },
       { id: "model", icon: "bolt", title: "Switch model", hint: (state?.routing ?? "fast") === "frontier" ? "Pro → Fast" : "Fast → Pro", kind: "command", section: "Commands", keywords: "fast pro smart frontier routing", run: () => this.toggleModel() },
+      ...this.featureToggles(),
       { id: "debug", icon: "bug", title: "Open debug panel", kind: "command", section: "Commands", keywords: "developer console logs chat", run: () => (this.deps.openDebug(), this.hide()) },
     ];
+  }
+
+  // Quick on/off switches so common settings never require opening the settings view.
+  private featureToggles(): Item[] {
+    const state = this.cache;
+    if (!state) return [];
+    const flip = (title: string, on: boolean, keywords: string, apply: (current: StoredState) => Partial<StoredState>): Item => ({
+      id: `toggle:${title}`,
+      icon: on ? "pause" : "play",
+      title: `${on ? "Turn off" : "Turn on"} ${title}`,
+      hint: on ? "on" : "off",
+      kind: "command",
+      section: "Commands",
+      keywords: `toggle switch enable disable ${keywords}`,
+      run: async () => {
+        await save(apply(await load()));
+      },
+    });
+    const items = [flip("act on page load", state.proactive, "proactive automatic", (current) => ({ proactive: !current.proactive }))];
+    const camera = state.camera;
+    if (camera.enabled) {
+      const set = (patch: Partial<StoredState["camera"]>) => (current: StoredState) => ({ camera: { ...current.camera, ...patch } });
+      items.push(
+        flip("head scrolling", camera.headScroll, "camera head tilt nod", set({ headScroll: !camera.headScroll })),
+        flip("hand scrolling", camera.handScroll, "camera palm scroll", set({ handScroll: !camera.handScroll })),
+        flip("air pointer", camera.pointer, "camera point finger cursor click pinch", set({ pointer: !camera.pointer })),
+        flip("swipe back", camera.swipeNav !== false, "camera swipe back forward navigation", set({ swipeNav: camera.swipeNav === false })),
+        flip("dwell click", camera.dwellMs > 0, "camera hold still click", set({ dwellMs: camera.dwellMs > 0 ? 0 : 1200 })),
+      );
+    }
+    return items;
   }
 
   private buildItems(): Item[] {
@@ -397,7 +429,8 @@ export class Spotlight {
 
     const matched = pool.filter(matches);
     const ask: Item = { id: "ask", icon: "sparkle", title: raw, hint: "Ask", kind: "ask", section: "", run: () => this.ask(raw, false) };
-    const strong = query.length >= 2 ? matched.find((item) => item.title.toLowerCase().startsWith(query)) : undefined;
+    const core = (title: string) => title.toLowerCase().replace(/^(turn (on|off)|undo|model:|open|show|hide)\s+/, "");
+    const strong = query.length >= 2 ? matched.find((item) => item.title.toLowerCase().startsWith(query) || core(item.title).startsWith(query)) : undefined;
     return (strong ? [strong, ask, ...matched.filter((item) => item !== strong)] : [ask, ...matched]).slice(0, 5);
   }
 
@@ -537,12 +570,14 @@ export class Spotlight {
     head.append(hide);
     const { kind, text, applied } = run.result!;
     const resultRow = h("div", `result ${kind === "done" ? "" : kind}${run.shownResult ? "" : " new"}${run.undone ? " undone" : ""}`, "", [icon(run.undone ? "undo" : kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 15), h("span", "", run.undone ? "Undone. The page is back to how it was before this request." : text)]);
-    if (kind === "done" && applied.length && !run.undone) {
-      const undoAll = h("button", "undo-all", "", [icon("undo", 13), document.createTextNode(applied.length > 1 ? " Undo all" : " Undo")]);
-      undoAll.type = "button";
-      undoAll.title = "Undo everything this request changed (Ctrl+Z)";
-      undoAll.addEventListener("click", () => void this.undoRun(run));
-      resultRow.append(undoAll);
+    if (kind === "done" && applied.length) {
+      const redo = run.undone;
+      const button = h("button", "undo-all", "", [icon("undo", 13), document.createTextNode(redo ? " Redo" : applied.length > 1 ? " Undo all" : " Undo")]);
+      if (redo) button.classList.add("redo");
+      button.type = "button";
+      button.title = redo ? "Put these changes back (Ctrl+Shift+Z)" : "Undo everything this request changed (Ctrl+Z)";
+      button.addEventListener("click", () => void (redo ? this.redoRun(run) : this.undoRun(run)));
+      resultRow.append(button);
     }
     const children: Node[] = [head, resultRow];
     run.shownResult = true;
@@ -579,6 +614,7 @@ export class Spotlight {
     });
     const footer = h("div", "card-foot", "", [fold]);
     if (kind === "done" && applied.length && !run.undone && run === this.latestUndoable()) footer.append(h("span", "fold hint-z", "Ctrl+Z to undo"));
+    if (kind === "done" && applied.length && run.undone && run === this.latestRedoable()) footer.append(h("span", "fold hint-z", "Ctrl+Shift+Z to redo"));
     const alreadySaved = (this.cache?.commands ?? []).some((command) => command.prompt.toLowerCase() === run.message.toLowerCase());
     if (kind === "done" && applied.length && !alreadySaved && !run.saving && !run.undone) {
       const saveButton = h("button", "fold", "", [icon("bookmark", 11), document.createTextNode(" Save as command")]);
@@ -696,6 +732,23 @@ export class Spotlight {
 
   private latestUndoable(): RunState | undefined {
     return [...this.runs].reverse().find((run) => run.status === "done" && !run.undone && run.result?.kind === "done" && run.result.applied.length > 0);
+  }
+
+  private latestRedoable(): RunState | undefined {
+    return [...this.runs].reverse().find((run) => run.status === "done" && run.undone && run.result?.applied.length);
+  }
+
+  // Redo re-applies the exact changes from history, so it is instant and needs no model call.
+  private async redoRun(run: RunState) {
+    if (!run.result || !run.undone) return;
+    const history = this.deps.history();
+    for (const { id } of run.result.applied) {
+      const entry = history.find((candidate) => candidate.change.id === id);
+      if (entry && !entry.active) await this.deps.reapply(entry.change);
+    }
+    run.undone = false;
+    run.open = true;
+    if (this.view === "run") this.renderRun();
   }
 
   private async undoRun(run: RunState) {
@@ -894,10 +947,18 @@ export class Spotlight {
       if (key === "Delete" && commands[this.commandSelected]) return void this.deleteCommand(commands[this.commandSelected].id), true;
       if (key === "Backspace" || key === "ArrowLeft") return this.setView("list"), true;
     }
-    if (this.view === "run" && inSearchField && !this.input.value && (event.ctrlKey || event.metaKey) && key.toLowerCase() === "z") {
-      const run = this.latestUndoable();
-      if (run) void this.undoRun(run);
-      return true;
+    if (this.view === "run" && inSearchField && !this.input.value && (event.ctrlKey || event.metaKey)) {
+      const lower = key.toLowerCase();
+      if ((lower === "z" && event.shiftKey) || lower === "y") {
+        const run = this.latestRedoable();
+        if (run) void this.redoRun(run);
+        return true;
+      }
+      if (lower === "z") {
+        const run = this.latestUndoable();
+        if (run) void this.undoRun(run);
+        return true;
+      }
     }
     if (this.view === "list" && !this.input.value) {
       if (key === "ArrowRight" && this.deps.history().length) return this.setView("history"), true;

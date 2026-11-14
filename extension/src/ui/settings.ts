@@ -63,6 +63,7 @@ function cameraSection(state: StoredState): Node {
       toggle("Air pointer", "Point to move, pinch thumb and finger to click.", camera.pointer, (on) => set({ pointer: on })),
       toggle("Hand scrolling", "Open palm high to scroll up, low to scroll down.", camera.handScroll, (on) => set({ handScroll: on })),
       toggle("Head scrolling", "Tilt your head down or up to scroll.", camera.headScroll, (on) => set({ headScroll: on })),
+      toggle("Swipe to go back", "Swipe an open palm sideways for back or forward.", camera.swipeNav !== false, (on) => set({ swipeNav: on })),
     );
     const options: Array<[number, string]> = [[0, "Off"], [800, "0.8s"], [1200, "1.2s"], [2000, "2s"]];
     const segments = options.map(([value, label]) => {
@@ -72,7 +73,7 @@ function cameraSection(state: StoredState): Node {
       button.addEventListener("click", () => set({ dwellMs: value }));
       return button;
     });
-    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click, for when pinching is hard."), h("div", "s-seg s-seg4", "", segments), h("div", "s-note", "Thumbs down to cancel. Hold a fist for a second to pause or resume."));
+    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click, for when pinching is hard."), h("div", "s-seg s-seg4", "", segments), h("div", "s-note", "Thumbs down to cancel. Pause from the camera preview: point at Pause and pinch."));
   }
   return h("section", "s-sec", "", [h("h3", "", "Camera"), ...rows]);
 }
