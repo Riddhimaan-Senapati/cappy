@@ -4,9 +4,11 @@ import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
 import { activeChanges, applyChange, revertAll, revertChange, setBusy } from "./engine.js";
 import { inspect, readPage } from "./outline.js";
+import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
+onSpeechChange((on) => ensureOverlay().setSpeaking(on));
 
 const send = (request: BackgroundRequest) => chrome.runtime.sendMessage(request).catch(() => undefined);
 
@@ -40,6 +42,11 @@ function ensureOverlay(): OverlayUi {
       for (const change of activeChanges()) await revert(change.id);
     },
     openDebug: () => void send({ kind: "openDebug" }),
+    readAloud: () => {
+      if (!readPageAloud()) ensureOverlay().showToast("No readable text on this page.", [], true);
+    },
+    stopSpeaking: stopSpeech,
+    isSpeaking: speechActive,
     settings: {
       listChanges: async () => activeChanges(),
       revert: async (id) => void (await revert(id)),
@@ -71,6 +78,8 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return setBusy(request.on);
     case "toast":
       return ensureOverlay().showToast(request.text, request.undoIds);
+    case "readAloud":
+      return readPageAloud();
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
     case "ui":

@@ -81,6 +81,7 @@ export const OVERLAY_CSS = `
   border-radius: 18px; background: var(--bg); backdrop-filter: blur(26px) saturate(1.4); border: 1px solid var(--line); color: var(--text); font-size: 13.5px; line-height: 1.4; overflow: hidden;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55); transform: translateY(16px) scale(0.96); opacity: 0; transition: transform 0.45s var(--spring), opacity 0.25s; }
 .toast.show { transform: none; opacity: 1; }
+.toast.speak { bottom: 22px; right: 76px; padding: 10px 12px; align-items: center; }
 .toast > .ico { width: 24px; height: 24px; border-radius: 50%; background: var(--grad); color: #0d0d12; }
 .toast.error > .ico { background: rgba(248, 113, 113, 0.22); color: var(--bad); }
 .toast .msg { flex: 1; padding-top: 2px; }

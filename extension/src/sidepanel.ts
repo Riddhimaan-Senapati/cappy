@@ -1,4 +1,4 @@
-import type { DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "./messages.js";
+import type { ContentRequest, DebugPortMessage, DebugPortRequest, StatusInfo, TtsRequest, TtsStateMessage, UiEvent } from "./messages.js";
 import { adoptStyles, h } from "./ui/dom.js";
 import { TOKENS } from "./ui/theme.js";
 
@@ -10,6 +10,7 @@ h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
 .dot.on { background: var(--good); } .dot.off { background: var(--bad); }
+.tts { display: flex; gap: 8px; } .tts button[hidden] { display: none; }
 .timeline { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
 .run { padding: 12px; border-radius: 14px; background: var(--raise); border: 1px solid var(--line); animation: rise 0.3s var(--spring); }
 .run .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -38,9 +39,28 @@ const input = h("textarea");
 input.rows = 2;
 input.placeholder = "Debug chat: runs on the active tab, always asks the AI fresh";
 const form = h("form", "", "", [input, h("button", "", "Send")]);
+const readButton = h("button", "", "Read page aloud");
+readButton.type = "button";
+const stopButton = h("button", "", "Stop");
+stopButton.type = "button";
+stopButton.hidden = true;
+readButton.addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (tab?.id) void chrome.tabs.sendMessage(tab.id, { kind: "readAloud" } satisfies ContentRequest).catch(() => undefined);
+});
+stopButton.addEventListener("click", () => void chrome.runtime.sendMessage({ type: "tts-stop" } satisfies TtsRequest).catch(() => undefined));
+chrome.runtime.onMessage.addListener((message: unknown) => {
+  const state = message as Partial<TtsStateMessage>;
+  if (state?.type === "tts-state") {
+    stopButton.hidden = !state.speaking;
+    readButton.hidden = !!state.speaking;
+  }
+  return false;
+});
 
 document.body.append(
   h("div", "head", "", [h("h1", "", "Debug"), h("div", "status", "", [statusDot, statusText])]),
+  h("div", "tts", "", [readButton, stopButton]),
   timeline,
   tools,
   form,

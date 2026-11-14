@@ -12,6 +12,9 @@ export interface SpotlightDeps {
   revert(id: string): Promise<void>;
   revertAll(): Promise<void>;
   openDebug(): void;
+  readAloud(): void;
+  stopSpeaking(): void;
+  isSpeaking(): boolean;
   settings: SettingsContext;
 }
 
@@ -228,6 +231,9 @@ export class Spotlight {
     const commands: Item[] = [
       { id: "settings", icon: "settings", title: "Settings", hint: "preferences", kind: "command", section: "Commands", keywords: "profile model routing options", run: () => this.setView("settings") },
       cycleModel,
+      ...(this.deps.isSpeaking()
+        ? [{ id: "stop-reading", icon: "pause" as IconName, title: "Stop reading aloud", hint: "esc", kind: "command" as const, section: "Commands", keywords: "speech tts silence quiet", run: () => (this.deps.stopSpeaking(), this.hide()) }]
+        : [{ id: "read-aloud", icon: "volume" as IconName, title: "Read this page aloud", hint: "main text", kind: "command" as const, section: "Commands", keywords: "speech tts speak listen narrate", run: () => (this.deps.readAloud(), this.hide()) }]),
       ...(changes.length
         ? [{ id: "undo-all", icon: "undo" as IconName, title: "Undo all changes on this page", kind: "command" as const, section: "Commands", keywords: "revert reset", run: async () => (await this.deps.revertAll(), this.hide()) }]
         : []),
