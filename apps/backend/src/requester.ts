@@ -4,11 +4,14 @@ import {
   AdaptationId,
   HostPattern,
   NeedId,
+  Schedule,
   type Adaptation,
   type AdaptResponse,
   type BlockConfig,
   type BlockOf,
+  type ClientTime,
   type ContentFilter,
+  type Day,
   type ItemGroup,
   type RequestBody,
 } from "@browser-agent/shared";
@@ -17,6 +20,7 @@ import {
   CHANGE_RULES,
   FILTER_RULES,
   MEASURED_RULE,
+  clientTimeLines,
   elementLines,
   groupLines,
   measuredLines,
@@ -42,6 +46,23 @@ const HIDE = /hide (the )?(sidebar|ads?|recommendations)/i;
 const HIDE_TARGET = /sidebar|\bads?\b|recommend/i;
 const MAX_HIDE_IDS = 50;
 const FILTER_VERB = /\b(remove|hide|dim|no more|get rid of)( all)?( the)? (\w+)/i;
+const EVERYWHERE = /\beverywhere\b|\bon every site\b/i;
+const WEEKDAYS: Day[] = ["mon", "tue", "wed", "thu", "fri"];
+const WEEKENDS: Day[] = ["sat", "sun"];
+const MONTH_NAME =
+  "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+const MONTH_DAY = `${MONTH_NAME}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?!\\d)`;
+const MONTH_WORD = new RegExp(`\\b${MONTH_NAME}\\b`, "i");
+// Clock ranges such as "9 to 5", "9:00 am - 5 pm". The lookarounds keep dates like 2026-11-05 out.
+const CLOCK_RANGE =
+  /(?<![\w:/-])(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|-|–)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?![\w:/-])/i;
+const DATE_RANGE = new RegExp(`\\bfrom\\s+${MONTH_DAY}\\s+(?:to|through|until|-|–)\\s+${MONTH_DAY}`, "i");
+const DATE_FROM = new RegExp(`\\bfrom\\s+${MONTH_DAY}`, "i");
+const DATE_UNTIL = new RegExp(`\\buntil\\s+${MONTH_DAY}`, "i");
+const MONTH_NUMBER: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 const INVERT_CSS =
   "html { filter: invert(1) hue-rotate(180deg); } img, video, picture, canvas { filter: invert(1) hue-rotate(180deg); }";
 
@@ -101,7 +122,84 @@ function pluralVariants(word: string): string[] {
   return [...new Set([word, word.endsWith("s") ? word.slice(0, -1) : `${word}s`])];
 }
 
-// Largest repeated group whose samples name the keyword, else the largest group on the page.
+function localDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function todayFor(clientTime: ClientTime | undefined): string {
+  const iso = clientTime?.iso.slice(0, 10);
+  return iso && /^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso : localDate(new Date());
+}
+
+function hourOf(text: string, meridiem: string | undefined): number | undefined {
+  const n = Number(text);
+  if (meridiem) return n >= 1 && n <= 12 ? (n % 12) + (meridiem.toLowerCase() === "pm" ? 12 : 0) : undefined;
+  return n <= 23 ? n : undefined;
+}
+
+// "9 to 5" means 09:00-17:00: without a meridiem an end hour at or before the start is read as afternoon.
+export function clockRangeFor(text: string): { start: string; end: string } | undefined {
+  const m = CLOCK_RANGE.exec(text);
+  if (!m) return undefined;
+  const [, h1, m1, mer1, h2, m2, mer2] = m;
+  const bare = !mer1 && !mer2 && !m[2] && !m[5];
+  if (bare && MONTH_WORD.test(text)) return undefined;
+  const startHour = hourOf(h1!, mer1);
+  let endHour = hourOf(h2!, mer2);
+  if (startHour === undefined || endHour === undefined) return undefined;
+  if (bare && endHour < 12 && endHour <= startHour) endHour += 12;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const start = `${pad(startHour)}:${pad(Number(m1 ?? 0))}`;
+  const end = `${pad(endHour)}:${pad(Number(m2 ?? 0))}`;
+  return start === end ? undefined : { start, end };
+}
+
+function daysInMonth(month: number, day: number): boolean {
+  return day >= 1 && day <= (DAYS_IN_MONTH[month - 1] ?? 0);
+}
+
+function dateString(year: number, month: number, day: number): string | undefined {
+  if (!daysInMonth(month, day)) return undefined;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+// A month and day with no year means the first time it falls on or after `notBefore`.
+function nextDate(month: string, day: string, notBefore: string): string | undefined {
+  const m = MONTH_NUMBER[month.slice(0, 3).toLowerCase()];
+  if (!m) return undefined;
+  const year = Number(notBefore.slice(0, 4));
+  const thisYear = dateString(year, m, Number(day));
+  if (!thisYear) return undefined;
+  return thisYear >= notBefore ? thisYear : dateString(year + 1, m, Number(day));
+}
+
+export function scheduleFor(text: string, clientTime: ClientTime | undefined): Schedule | undefined {
+  const draft: Record<string, unknown> = {};
+  const clock = clockRangeFor(text);
+  if (clock) Object.assign(draft, clock);
+  if (/\bweekdays?\b/i.test(text)) draft.days = WEEKDAYS;
+  else if (/\bweekends?\b/i.test(text)) draft.days = WEEKENDS;
+  const today = todayFor(clientTime);
+  const range = DATE_RANGE.exec(text);
+  if (range) {
+    const from = nextDate(range[1]!, range[2]!, today);
+    const until = from && nextDate(range[3]!, range[4]!, from);
+    if (from && until) Object.assign(draft, { from, until });
+  } else {
+    const fromOnly = DATE_FROM.exec(text);
+    const untilOnly = DATE_UNTIL.exec(text);
+    const from = fromOnly && nextDate(fromOnly[1]!, fromOnly[2]!, today);
+    const until = untilOnly && nextDate(untilOnly[1]!, untilOnly[2]!, today);
+    if (from) draft.from = from;
+    if (until) draft.until = until;
+  }
+  if (Object.keys(draft).length === 0) return undefined;
+  const checked = Schedule.safeParse(draft);
+  return checked.success ? checked.data : undefined;
+}
+
+// Largest repeated group whose samples name the keyword. Without one the filter applies to all repeated items.
 function filterFor(body: RequestBody, verb: string, word: string): ContentFilter | undefined {
   const groups = body.outline.groups ?? [];
   if (groups.length === 0 || word.length < 2 || word.length > 40) return undefined;
@@ -109,9 +207,16 @@ function filterFor(body: RequestBody, verb: string, word: string): ContentFilter
   const bySize = (a: ItemGroup, b: ItemGroup) => b.count - a.count;
   const mentions = (g: ItemGroup) =>
     g.samples.some((s) => keywords.some((k) => s.toLowerCase().includes(k)));
-  const group = [...groups].filter(mentions).sort(bySize)[0] ?? [...groups].sort(bySize)[0];
-  if (!group) return undefined;
-  return { itemSelector: group.selector, keywords, action: verb.toLowerCase() === "dim" ? "dim" : "hide" };
+  const group = [...groups].filter(mentions).sort(bySize)[0];
+  const action = verb.toLowerCase() === "dim" ? "dim" : "hide";
+  const schedule = scheduleFor(body.request, body.clientTime);
+  return {
+    ...(group ? { itemSelector: group.selector } : {}),
+    keywords,
+    action,
+    ...(schedule ? { schedule } : {}),
+    ...(EVERYWHERE.test(body.request) ? { everywhere: true } : {}),
+  };
 }
 
 export const stubRequester: Requester = async (body) => {
@@ -150,10 +255,14 @@ export function buildRequestPrompt(body: RequestBody): string {
     ...REQUEST_RULES,
     "",
     `Page host: ${new URL(body.url).hostname}`,
+    ...clientTimeLines(body.clientTime),
     `User request: ${JSON.stringify(body.request)}`,
     `Profile summary: ${body.profile.summary}`,
     `Profile needs: ${JSON.stringify(body.profile.needs)}`,
     ...measuredLines(body.outline.stats),
+    ...(body.retryNote
+      ? [`Your previous filter matched nothing on this page: ${body.retryNote.replaceAll("<", "\\u003c")}. Choose a different group or keywords.`]
+      : []),
     `Set reason.needId to the id of the profile need this serves, or to "${needIdFor(body)}" if none fits.`,
     "<page_outline_untrusted>",
     JSON.stringify({ ...body.outline, elements: undefined }).replaceAll("<", "\\u003c"),

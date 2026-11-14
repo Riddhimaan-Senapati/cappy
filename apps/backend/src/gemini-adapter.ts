@@ -1,5 +1,12 @@
 import { GoogleGenAI, type ThinkingLevel } from "@google/genai";
-import { AdaptRequest, AdaptResponse, type ItemGroup, type OutlineElement, type PageStats } from "@browser-agent/shared";
+import {
+  AdaptRequest,
+  AdaptResponse,
+  type ClientTime,
+  type ItemGroup,
+  type OutlineElement,
+  type PageStats,
+} from "@browser-agent/shared";
 import { z } from "zod";
 import type { Adapter } from "./adapter";
 import { BLOCKED_VALIDATION } from "./guard";
@@ -18,6 +25,10 @@ export const CHANGE_RULES = [
 
 export const FILTER_RULES = [
   "To remove, hide, dim or keep only a kind of content (e.g. remove all podcasts, hide Shorts, hide posts about crypto), return filters: pick itemSelector exactly from the repeated item groups (the outermost card/shelf, not a title), and keywords that appear in matching items (include singular/plural and close variants, e.g. podcast, podcasts, episode). Filters keep applying as new items load. Prefer filters over ops for content kinds; use ops only for one specific element.",
+  "For time-limited requests set filter.schedule: days (mon..sun), start/end 24h HH:MM local, from/until YYYY-MM-DD inclusive. Weekdays = mon–fri. Omit fields that are not stated.",
+  "Set everywhere: true only if the user says everywhere / on every site.",
+  "If no listed group fits, you may omit itemSelector; the filter then applies to all repeated items on the page. Prefer a listed group when one fits.",
+  "Keywords must appear in matching items' text, aria-labels or link URLs; include singular/plural and close variants; for reels/shorts include url words like reel, shorts.",
 ];
 
 export const MEASURED_RULE =
@@ -37,6 +48,10 @@ const SYSTEM_RULES = [
 
 export const ELEMENT_LINES_MAX = 6000;
 
+export function clientTimeLines(clientTime: ClientTime | undefined): string[] {
+  return clientTime ? [`Current local time: ${clientTime.iso} (${clientTime.timeZone})`] : [];
+}
+
 export function measuredLines(stats: PageStats | undefined): string[] {
   return stats ? [`Measured page problems: ${JSON.stringify(stats)}`] : [];
 }
@@ -46,7 +61,10 @@ export function groupLines(groups: readonly ItemGroup[] | undefined): string[] {
   if (!groups?.length) return [];
   return [
     "Repeated item groups (selector ×count: samples):",
-    ...groups.map((g) => `${g.selector} ×${g.count}: ${g.samples.map((s) => JSON.stringify(s)).join(" | ")}`.replaceAll("<", "\\u003c")),
+    ...groups.map((g) => {
+      const label = g.label ? ` [${g.label}]` : "";
+      return `${g.selector} ×${g.count}${label}: ${g.samples.map((s) => JSON.stringify(s)).join(" | ")}`.replaceAll("<", "\\u003c");
+    }),
   ];
 }
 
@@ -109,6 +127,7 @@ export function buildAdaptPrompt(req: AdaptRequest): string {
     ...SYSTEM_RULES,
     "",
     `Page host: ${new URL(req.url).hostname}`,
+    ...clientTimeLines(req.clientTime),
     `Profile summary: ${req.profile.summary}`,
     `Profile needs: ${JSON.stringify(req.profile.needs)}`,
     ...measuredLines(req.outline.stats),

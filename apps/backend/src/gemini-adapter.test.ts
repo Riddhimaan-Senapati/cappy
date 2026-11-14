@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AdaptResponse, SnapshotId, type AdaptRequest } from "@browser-agent/shared";
+import { AdaptResponse, SnapshotId, type AdaptRequest, type ContentFilter } from "@browser-agent/shared";
 import { ELEMENT_LINES_MAX, buildAdaptPrompt, elementLines, groupLines, parseAdaptText, responseJsonSchema } from "./gemini-adapter";
 
 const req: AdaptRequest = {
@@ -118,5 +118,35 @@ describe("repeated item groups and content filters", () => {
     expect(text).toContain('"itemSelector"');
     expect(text).toContain('"keywords"');
     expect(text).not.toContain('"pattern"');
+  });
+});
+
+describe("schedules and optional itemSelector", () => {
+  const filter: ContentFilter = {
+    keywords: ["podcast", "podcasts"],
+    action: "hide",
+    schedule: { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "17:00" },
+  };
+  const scheduled = {
+    kind: "adaptation",
+    adaptation: {
+      id: "a1",
+      sites: ["youtube.com"],
+      reason: { text: "Hide podcasts on weekdays", needId: "n1" },
+      blocks: [],
+      filters: [filter],
+    },
+  };
+
+  test("the response schema keeps schedule and everywhere", () => {
+    const text = JSON.stringify(responseJsonSchema());
+    expect(text).toContain("schedule");
+    expect(text).toContain("everywhere");
+  });
+
+  test("a scheduled filter without itemSelector parses", () => {
+    const parsed = parseAdaptText(JSON.stringify(scheduled));
+    expect(parsed.kind).toBe("adaptation");
+    expect(parsed.kind === "adaptation" && parsed.adaptation.filters?.[0]).toEqual(filter);
   });
 });
