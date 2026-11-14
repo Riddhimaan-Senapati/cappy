@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { Adaptation, ItemSelector, SnapshotId } from "./adaptation";
+import { Adaptation, BlockConfig, ContentFilter, ItemSelector, SnapshotId } from "./adaptation";
+import { scanCss } from "./css-scan";
+import { Need } from "./profile";
 
 export const ItemGroup = z
   .object({
@@ -126,6 +128,45 @@ export type FrictionEvent = z.infer<typeof FrictionEvent>;
 
 export const INJECTION_BLOCK_REASON = "This page tried to give the agent instructions, so no changes were made.";
 
+// A saved preference compiled once into a change that is safe to apply on any site with no model call.
+// Filters carry no itemSelector so they target whatever repeated items each site has.
+export const GlobalChange = z
+  .object({
+    css: z.string().max(6000).optional(),
+    blocks: z.array(BlockConfig).max(6),
+    filters: z.array(ContentFilter).max(6),
+  })
+  .strict()
+  .superRefine((c, ctx) => {
+    if (!c.css && c.blocks.length === 0 && c.filters.length === 0) {
+      ctx.addIssue({ code: "custom", message: "change does nothing" });
+    }
+    if (c.css) {
+      const scan = scanCss(c.css);
+      if (!scan.ok) ctx.addIssue({ code: "custom", path: ["css"], message: scan.reason });
+    }
+    c.filters.forEach((f, i) => {
+      if (f.itemSelector !== undefined) {
+        ctx.addIssue({ code: "custom", path: ["filters", i, "itemSelector"], message: "global filters cannot name a site selector" });
+      }
+    });
+    const names = c.blocks.map((b) => b.block);
+    if (new Set(names).size !== names.length) ctx.addIssue({ code: "custom", path: ["blocks"], message: "each block may appear once" });
+  });
+export type GlobalChange = z.infer<typeof GlobalChange>;
+
+export const CompilePreferenceRequest = z
+  .object({ need: Need, clientTime: ClientTime.optional() })
+  .strict();
+export type CompilePreferenceRequest = z.infer<typeof CompilePreferenceRequest>;
+
+export const CompilePreferenceResponse = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("compiled"), change: GlobalChange, summary: z.string().min(1).max(160) }).strict(),
+  z.object({ kind: z.literal("none"), reason: z.string().max(200) }).strict(),
+]);
+export type CompilePreferenceResponse = z.infer<typeof CompilePreferenceResponse>;
+
+export const COMPILE_PREFERENCE_PATH = "/compile-preference";
 export const ADAPT_PATH = "/adapt";
 export const REQUEST_PATH = "/request";
 export const VERIFY_PATH = "/verify";

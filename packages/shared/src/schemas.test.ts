@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Adaptation, Profile, Rule, ruleAppliesTo, filtersTargetKnownGroups, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
+import { Adaptation, GlobalChange, Profile, Rule, ruleAppliesTo, filtersTargetKnownGroups, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
 
 const valid = {
   id: "a1",
@@ -69,4 +69,13 @@ test("filters may omit the selector and carry a schedule; rules scope by host", 
 
 test("profiles accept free-text preferences", () => {
   expect(Profile.safeParse({ version: 1, summary: "", needs: [{ id: "p1", kind: "preference", detail: "prefers dark mode", source: "onboarding" }] }).success).toBe(true);
+});
+
+test("global changes are safe on any site", () => {
+  expect(GlobalChange.safeParse({ css: "html { filter: invert(1) hue-rotate(180deg); }", blocks: [], filters: [] }).success).toBe(true);
+  expect(GlobalChange.safeParse({ blocks: [{ block: "text_scale", scale: 1.3 }], filters: [] }).success).toBe(true);
+  expect(GlobalChange.safeParse({ blocks: [], filters: [{ keywords: ["shorts"], action: "hide" }] }).success).toBe(true);
+  expect(GlobalChange.safeParse({ blocks: [], filters: [{ itemSelector: "ytd-rich-item-renderer", keywords: ["shorts"], action: "hide" }] }).success).toBe(false);
+  expect(GlobalChange.safeParse({ css: "body{background:url(https://x.test)}", blocks: [], filters: [] }).success).toBe(false);
+  expect(GlobalChange.safeParse({ blocks: [], filters: [] }).success).toBe(false);
 });
