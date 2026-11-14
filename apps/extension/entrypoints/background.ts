@@ -9,6 +9,7 @@ import {
 import { colorFilterSvg, compileAdaptationCss } from "@browser-agent/blocks";
 import { Message, PageReady, ToContentMessage } from "../utils/messages";
 import { Applied, AppliedMap, KEYS, LastResult, loadProfile, readParsed, setLast } from "../utils/state";
+import { verifyAdaptation } from "../utils/verify";
 
 const APPLIED_KEY = KEYS.applied;
 
@@ -98,29 +99,43 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
     return;
   }
 
-  try {
-    if (css.trim()) await chrome.scripting.insertCSS({ target: { tabId }, css });
-    if (svg) await sendToTab(tabId, { type: "inject-svg", svg });
-    await sendToTab(tabId, {
-      type: "show-banner",
-      reason: adaptation.reason.text,
+  // Verification captures the "before" screenshot, so it has to own the apply call.
+  const applyFn = async (): Promise<boolean> => {
+    try {
+      if (css.trim()) await chrome.scripting.insertCSS({ target: { tabId }, css });
+      if (svg) await sendToTab(tabId, { type: "inject-svg", svg });
+      await sendToTab(tabId, {
+        type: "show-banner",
+        reason: adaptation.reason.text,
+        adaptationId: adaptation.id,
+      });
+    } catch (err) {
+      console.error("could not apply adaptation", err);
+      if (css.trim()) await chrome.scripting.removeCSS({ target: { tabId }, css }).catch(() => undefined);
+      await setLast({ status: "error", url: msg.url, message: "Could not apply this adaptation to the page" });
+      return false;
+    }
+    await writeApplied(tabId, { adaptationId: adaptation.id, css });
+    await setLast({
+      status: "applied",
+      url: msg.url,
+      tabId,
       adaptationId: adaptation.id,
+      reason: adaptation.reason.text,
+      blocks: adaptation.blocks.map((b) => b.block),
     });
-  } catch (err) {
-    console.error("could not apply adaptation", err);
-    if (css.trim()) await chrome.scripting.removeCSS({ target: { tabId }, css }).catch(() => undefined);
-    await setLast({ status: "error", url: msg.url, message: "Could not apply this adaptation to the page" });
-    return;
-  }
+    return true;
+  };
 
-  await writeApplied(tabId, { adaptationId: adaptation.id, css });
-  await setLast({
-    status: "applied",
-    url: msg.url,
-    tabId,
-    adaptationId: adaptation.id,
-    reason: adaptation.reason.text,
-    blocks: adaptation.blocks.map((b) => b.block),
+  const undoFn = async () => {
+    if (css.trim()) await chrome.scripting.removeCSS({ target: { tabId }, css }).catch(() => undefined);
+    await sendToTab(tabId, { type: "remove-banner" }).catch(() => undefined);
+    await forgetApplied(tabId);
+    await setLast({ status: "undone", url: msg.url, adaptationId: adaptation.id });
+  };
+
+  void verifyAdaptation(tabId, adaptation, applyFn, undoFn).catch((err: unknown) => {
+    console.error("verification failed", err);
   });
 }
 

@@ -16,7 +16,18 @@ export const InjectSvg = z.object({ type: z.literal("inject-svg"), svg: z.string
 
 export const RemoveBanner = z.object({ type: z.literal("remove-banner") }).strict();
 
-export const ToContentMessage = z.discriminatedUnion("type", [ShowBanner, InjectSvg, RemoveBanner]);
+export const BannerNote = z.object({ type: z.literal("banner-note"), text: z.string().max(200) }).strict();
+
+export const AxeCount = z.object({ type: z.literal("axe-count") }).strict();
+export const AxeCountReply = z.object({ count: z.number().int().nonnegative() });
+
+export const ToContentMessage = z.discriminatedUnion("type", [
+  ShowBanner,
+  InjectSvg,
+  RemoveBanner,
+  BannerNote,
+  AxeCount,
+]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;
 
 export const Message = z.discriminatedUnion("type", [PageReady, Undo, ShowBanner, InjectSvg, RemoveBanner]);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdaptationId, EMPTY_PROFILE, Profile } from "@browser-agent/shared";
+import { AdaptationId, EMPTY_PROFILE, Profile, Screenshot, Verdict } from "@browser-agent/shared";
 
 export const KEYS = {
   profile: "profile",
@@ -64,3 +64,30 @@ export async function getInstallId(): Promise<string> {
 export async function setLast(last: LastResult): Promise<void> {
   await chrome.storage.session.set({ [KEYS.last]: LastResult.parse(last) });
 }
+
+export const VERIFICATION_KEY = "verification";
+
+export const VerificationState = z.enum([
+  "proposed",
+  "applied",
+  "verifying",
+  "retrying",
+  "rolling_back",
+  "verified",
+  "rolled_back",
+]);
+
+export const Verification = z
+  .object({
+    adaptationId: AdaptationId,
+    state: VerificationState,
+    attempt: z.union([z.literal(1), z.literal(2)]).optional(),
+    verdict: Verdict.optional(),
+    notes: z.string().max(300).optional(),
+    axeBefore: z.number().int().nonnegative(),
+    axeAfter: z.number().int().nonnegative().optional(),
+    before: Screenshot.optional(),
+    after: Screenshot.optional(),
+  })
+  .strict();
+export type Verification = z.infer<typeof Verification>;

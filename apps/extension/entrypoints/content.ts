@@ -37,7 +37,7 @@ export default defineContentScript({
       document.getElementById(FILTER_ID)?.remove();
     };
 
-    const showBanner = async (reason: string, adaptationId: AdaptationId) => {
+    const showBanner = async (message: string, adaptationId?: AdaptationId) => {
       banner?.remove();
       banner = await createShadowRootUi(ctx, {
         name: "adaptive-agent-banner",
@@ -52,14 +52,19 @@ export default defineContentScript({
           bar.setAttribute("role", "status");
           const text = document.createElement("p");
           text.className = "text";
-          text.textContent = `Changed this page for you: ${reason}`;
-          const undo = document.createElement("button");
-          undo.type = "button";
-          undo.textContent = "Undo";
-          undo.addEventListener("click", () => {
-            void chrome.runtime.sendMessage(Message.parse({ type: "undo", adaptationId }));
-          });
-          bar.append(text, undo);
+          text.textContent = message;
+          const button = document.createElement("button");
+          button.type = "button";
+          if (adaptationId) {
+            button.textContent = "Undo";
+            button.addEventListener("click", () => {
+              void chrome.runtime.sendMessage(Message.parse({ type: "undo", adaptationId }));
+            });
+          } else {
+            button.textContent = "Dismiss";
+            button.addEventListener("click", () => removeAdaptationUi());
+          }
+          bar.append(text, button);
           container.append(style, bar);
         },
       });
@@ -83,7 +88,10 @@ export default defineContentScript({
       const msg = parsed.data;
       switch (msg.type) {
         case "show-banner":
-          void showBanner(msg.reason, msg.adaptationId);
+          void showBanner(`Changed this page for you: ${msg.reason}`, msg.adaptationId);
+          break;
+        case "banner-note":
+          void showBanner(msg.text);
           break;
         case "inject-svg":
           injectFilters(msg.svg);
