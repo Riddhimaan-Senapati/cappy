@@ -5,15 +5,17 @@
   "type": "module",
   "scripts": {
     "server": "tsx watch server/index.ts",
-    "build:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist && esbuild content=extension/src/content/index.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist",
-    "watch:ext": "concurrently -r \"esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch\" \"esbuild content=extension/src/content/index.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist --watch\"",
+    "build:ext": "npm run setup:vendor && esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts camera=extension/src/camera/camera.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist && esbuild content=extension/src/content/index.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist",
+    "watch:ext": "npm run setup:vendor && concurrently -r \"esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts camera=extension/src/camera/camera.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch\" \"esbuild content=extension/src/content/index.ts --bundle --format=iife --target=chrome120 --outdir=extension/dist --watch\"",
     "dev": "npm run build:ext && concurrently -k -n server,ext \"npm run server\" \"npm run watch:ext\"",
     "typecheck": "tsc --noEmit",
-    "chatgpt:login": "tsx server/auth/chatgpt.ts"
+    "chatgpt:login": "tsx server/auth/chatgpt.ts",
+    "setup:vendor": "node scripts/setup-vendor.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "@google/genai": "^3.3.0",
+    "@mediapipe/tasks-vision": "^1.2.3",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
     "jose": "^6.2.17",

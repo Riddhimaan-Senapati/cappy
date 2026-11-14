@@ -226,3 +226,4 @@ extension/dist/
 .env.local
 .chatgpt-credentials.json*
 .agent-keys.json*
+extension/vendor/
