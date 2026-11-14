@@ -38,3 +38,9 @@ describe("gemini adapter helpers", () => {
     expect(AdaptResponse.parse(parseAdaptText(text))).toEqual({ kind: "none", reason: "nothing to change" });
   });
 });
+
+test("response schema has no const keywords for Gemini", () => {
+  const text = JSON.stringify(responseJsonSchema());
+  expect(text).not.toContain('"const"');
+  expect(text).toContain('"enum":["text_focus"]');
+});

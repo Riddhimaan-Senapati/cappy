@@ -1,4 +1,5 @@
-import { GoogleGenAI, type Content } from "@google/genai";
+import { GoogleGenAI, type Content, type ThinkingLevel } from "@google/genai";
+import { toGeminiSchema } from "./gemini-adapter";
 import type { LlmRequest } from "@browser-agent/shared";
 import type { LlmClient } from "./llm";
 
@@ -19,7 +20,7 @@ export function systemInstruction(req: LlmRequest): string | undefined {
   return text || undefined;
 }
 
-export function geminiLlm(apiKey: string, model: string): LlmClient {
+export function geminiLlm(apiKey: string, model: string, thinkingLevel?: ThinkingLevel): LlmClient {
   const ai = new GoogleGenAI({ apiKey });
   return async (req) => {
     const res = await ai.models.generateContent({
@@ -27,8 +28,9 @@ export function geminiLlm(apiKey: string, model: string): LlmClient {
       contents: toContents(req),
       config: {
         systemInstruction: systemInstruction(req),
+        ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
         ...(req.jsonSchema
-          ? { responseMimeType: "application/json", responseJsonSchema: req.jsonSchema }
+          ? { responseMimeType: "application/json", responseJsonSchema: toGeminiSchema(req.jsonSchema) }
           : {}),
       },
     });
