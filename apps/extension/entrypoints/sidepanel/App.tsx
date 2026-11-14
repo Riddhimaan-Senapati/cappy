@@ -5,6 +5,7 @@ import { ProfileEditor, KIND_LABELS } from "./ProfileEditor";
 import { RequestBox } from "./RequestBox";
 import { callLlm } from "../../utils/backend";
 import { GesturePanel } from "./GesturePanel";
+import { VerifyPanel } from "./VerifyPanel";
 import {
   KEYS,
   LastResult,
@@ -60,6 +61,8 @@ export function App() {
       <Section title="Last change">
         <LastChange last={last} />
       </Section>
+
+      <VerifyPanel />
 
       <Section title="Companion">
         <CompanionPanel />

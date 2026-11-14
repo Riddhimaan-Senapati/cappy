@@ -46,6 +46,8 @@ export const ApplyRuntime = z
   .strict();
 export const UndoRuntime = z.object({ type: z.literal("undo-runtime") }).strict();
 export const AxeCount = z.object({ type: z.literal("axe-count") }).strict();
+export const BannerNote = z.object({ type: z.literal("banner-note"), text: z.string().max(200) }).strict();
+export const AxeCountReply = z.object({ count: z.number().int().nonnegative() });
 
 export const ToContentMessage = z.discriminatedUnion("type", [
   ShowBanner,
@@ -57,6 +59,7 @@ export const ToContentMessage = z.discriminatedUnion("type", [
   Gesture,
   ApplyRuntime,
   UndoRuntime,
+  BannerNote,
   AxeCount,
 ]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;

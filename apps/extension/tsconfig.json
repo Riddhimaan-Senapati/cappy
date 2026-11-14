@@ -6,5 +6,5 @@
     "types": ["chrome", "bun"]
   },
   "include": ["entrypoints", "utils", "wxt.config.ts", ".wxt/wxt.d.ts", ".wxt/types/**/*.d.ts"],
-  "exclude": ["utils/**/*.test.ts"]
+  "exclude": ["**/*.test.ts"]
 }

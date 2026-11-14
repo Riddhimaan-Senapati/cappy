@@ -89,6 +89,18 @@ export default defineContentScript({
         bar.append(text, undo);
       });
 
+    const showNote = (message: string) =>
+      mountBar((bar) => {
+        const text = document.createElement("p");
+        text.className = "text";
+        text.textContent = message;
+        const dismiss = document.createElement("button");
+        dismiss.type = "button";
+        dismiss.textContent = "Dismiss";
+        dismiss.addEventListener("click", removeAdaptationUi);
+        bar.append(text, dismiss);
+      });
+
     const showFrictionPrompt = (question: string) =>
       mountBar((bar) => {
         const text = document.createElement("p");
@@ -130,6 +142,9 @@ export default defineContentScript({
         case "show-banner":
           stopPreblur();
           void showBanner(msg.reason, msg.adaptationId);
+          break;
+        case "banner-note":
+          void showNote(msg.text);
           break;
         case "inject-svg":
           injectFilters(msg.svg);

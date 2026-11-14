@@ -14,6 +14,7 @@ import { Applied, AppliedMap, KEYS, LastResult, loadProfile, readParsed, savePro
 import { startFriction } from "../utils/friction";
 import { buildRequestBody, parseOutlineReply, postRequest } from "../utils/request";
 import { reasonBadge } from "../utils/badge";
+import { verifyAdaptation } from "../utils/verify";
 
 const APPLIED_KEY = KEYS.applied;
 const FRICTION_PROMPT = "Make text bigger on every site?";
@@ -123,31 +124,46 @@ export async function applyResponse(
   }
 
   const reason = reasonBadge(adaptation.reason.text, adaptation.reason.needId, profile);
-  await clearTabCss(tabId);
-  try {
-    if (css.trim()) await chrome.scripting.insertCSS({ target: { tabId }, css });
-    if (svg) await sendToTab(tabId, { type: "inject-svg", svg });
-    await sendToTab(tabId, { type: "show-banner", reason, adaptationId: adaptation.id });
-  } catch (err) {
-    console.error("could not apply adaptation", err);
-    if (css.trim()) await chrome.scripting.removeCSS({ target: { tabId }, css }).catch(() => undefined);
-    await setLast({ status: "error", url, message: "Could not apply this adaptation to the page" });
-    return false;
-  }
 
-  await writeApplied(tabId, { adaptationId: adaptation.id, css });
-  if (adaptation.blocks.some((b) => b.block === "form_fixer")) {
-    await sendToTab(tabId, { type: "apply-runtime", adaptationId: adaptation.id, blocks: adaptation.blocks }).catch(
-      (err: unknown) => console.warn("runtime blocks failed to apply", err),
-    );
-  }
-  await setLast({
-    status: "applied",
-    url,
-    tabId,
-    adaptationId: adaptation.id,
-    reason,
-    blocks: adaptation.blocks.map((b) => b.block),
+  // Verification captures the "before" screenshot, so it has to own the apply call.
+  const applyFn = async (): Promise<boolean> => {
+    await clearTabCss(tabId);
+    try {
+      if (css.trim()) await chrome.scripting.insertCSS({ target: { tabId }, css });
+      if (svg) await sendToTab(tabId, { type: "inject-svg", svg });
+      await sendToTab(tabId, { type: "show-banner", reason, adaptationId: adaptation.id });
+    } catch (err) {
+      console.error("could not apply adaptation", err);
+      if (css.trim()) await chrome.scripting.removeCSS({ target: { tabId }, css }).catch(() => undefined);
+      await setLast({ status: "error", url, message: "Could not apply this adaptation to the page" });
+      return false;
+    }
+    await writeApplied(tabId, { adaptationId: adaptation.id, css });
+    if (adaptation.blocks.some((b) => b.block === "form_fixer")) {
+      await sendToTab(tabId, { type: "apply-runtime", adaptationId: adaptation.id, blocks: adaptation.blocks }).catch(
+        (err: unknown) => console.warn("runtime blocks failed to apply", err),
+      );
+    }
+    await setLast({
+      status: "applied",
+      url,
+      tabId,
+      adaptationId: adaptation.id,
+      reason,
+      blocks: adaptation.blocks.map((b) => b.block),
+    });
+    return true;
+  };
+
+  const undoFn = async () => {
+    if (css.trim()) await chrome.scripting.removeCSS({ target: { tabId }, css }).catch(() => undefined);
+    await sendToTab(tabId, { type: "remove-banner" }).catch(() => undefined);
+    await forgetApplied(tabId);
+    await setLast({ status: "undone", url, adaptationId: adaptation.id });
+  };
+
+  void verifyAdaptation(tabId, adaptation, applyFn, undoFn).catch((err: unknown) => {
+    console.error("verification failed", err);
   });
   return true;
 }
