@@ -8,8 +8,13 @@ import { startPreblur } from "../utils/preblur";
 import { buildPageText } from "../utils/outline";
 import { countViolations } from "../utils/axe";
 import { applyRuntimeBlocks } from "../utils/runtime-blocks";
+import { applyOps } from "../utils/apply-ops";
+import { buildSnapshot } from "../utils/snapshot";
 
 const FILTER_ID = "adaptive-agent-filters";
+
+// The ids in the last outline sent to the backend; ops from the model may only name these.
+let snapshotMap = new Map<string, Element>();
 
 const BANNER_CSS = `
   :host { all: initial; }
@@ -47,6 +52,13 @@ export default defineContentScript({
     const revertRuntime = () => {
       undoRuntime?.();
       undoRuntime = undefined;
+    };
+
+    let undoOps: (() => void) | undefined;
+
+    const revertOps = () => {
+      undoOps?.();
+      undoOps = undefined;
     };
 
     const removeAdaptationUi = () => {
@@ -141,6 +153,7 @@ export default defineContentScript({
       switch (msg.type) {
         case "show-banner":
           stopPreblur();
+          revertOps();
           void showBanner(msg.reason, msg.adaptationId);
           break;
         case "banner-note":
@@ -152,6 +165,7 @@ export default defineContentScript({
         case "remove-banner":
           removeAdaptationUi();
           revertRuntime();
+          revertOps();
           break;
         case "gesture":
           if (msg.action === "back") history.back();
@@ -172,6 +186,10 @@ export default defineContentScript({
           break;
         case "undo-runtime":
           revertRuntime();
+          break;
+        case "apply-ops":
+          revertOps();
+          undoOps = applyOps(msg.ops, snapshotMap);
           break;
         case "axe-count":
           countViolations().then(
@@ -203,6 +221,8 @@ async function hasNeeds(): Promise<boolean> {
 }
 
 function buildOutline(): PageOutline {
+  const snapshot = buildSnapshot(document);
+  snapshotMap = snapshot.map;
   const headings = Array.from(document.querySelectorAll("h1, h2, h3"))
     .map((h) => (h.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 120))
     .filter((text) => text.length > 0)
@@ -214,6 +234,7 @@ function buildOutline(): PageOutline {
     images: document.images.length,
     videos: document.querySelectorAll("video").length,
     canvases: document.querySelectorAll("canvas").length,
+    elements: snapshot.elements,
     text: buildPageText(document.body?.innerText ?? "", document.body?.textContent ?? ""),
   };
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdaptationId, BlockConfig, PageOutline } from "@browser-agent/shared";
+import { AdaptationId, BlockConfig, PageOutline, SnapshotOp } from "@browser-agent/shared";
 
 export const PageReady = z
   .object({ type: z.literal("page-ready"), url: z.string().max(2048), outline: PageOutline })
@@ -45,6 +45,9 @@ export const ApplyRuntime = z
   .object({ type: z.literal("apply-runtime"), adaptationId: AdaptationId, blocks: z.array(BlockConfig).max(4) })
   .strict();
 export const UndoRuntime = z.object({ type: z.literal("undo-runtime") }).strict();
+export const ApplyOps = z
+  .object({ type: z.literal("apply-ops"), adaptationId: AdaptationId, ops: z.array(SnapshotOp).min(1).max(20) })
+  .strict();
 export const AxeCount = z.object({ type: z.literal("axe-count") }).strict();
 export const BannerNote = z.object({ type: z.literal("banner-note"), text: z.string().max(200) }).strict();
 export const AxeCountReply = z.object({ count: z.number().int().nonnegative() });
@@ -61,6 +64,7 @@ export const ToContentMessage = z.discriminatedUnion("type", [
   UndoRuntime,
   BannerNote,
   AxeCount,
+  ApplyOps,
 ]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;
 

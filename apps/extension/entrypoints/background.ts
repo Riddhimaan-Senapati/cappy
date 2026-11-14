@@ -142,7 +142,7 @@ export async function applyResponse(
     await setLast({ status: "error", url, message: "Could not build this adaptation" });
     return false;
   }
-  if (!css.trim() && !svg) {
+  if (!css.trim() && !svg && !adaptation.ops?.length) {
     await setLast({ status: "none", url, reason: "Nothing to change on this page" });
     return false;
   }
@@ -168,6 +168,11 @@ export async function applyResponse(
     if (adaptation.blocks.some((b) => b.block === "form_fixer")) {
       await sendToTab(tabId, { type: "apply-runtime", adaptationId: adaptation.id, blocks: adaptation.blocks }).catch(
         (err: unknown) => console.warn("runtime blocks failed to apply", err),
+      );
+    }
+    if (adaptation.ops?.length) {
+      await sendToTab(tabId, { type: "apply-ops", adaptationId: adaptation.id, ops: adaptation.ops }).catch(
+        (err: unknown) => console.warn("element ops failed to apply", err),
       );
     }
     await setLast({
