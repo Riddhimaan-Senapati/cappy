@@ -1,6 +1,7 @@
 import { z } from "zod";
 
-export const NeedKind = z.enum(["color_vision", "light_sensitivity", "text_size", "motor", "focus"]);
+// "preference" holds any free-text taste or habit that is not one of the five access needs.
+export const NeedKind = z.enum(["color_vision", "light_sensitivity", "text_size", "motor", "focus", "preference"]);
 export type NeedKind = z.infer<typeof NeedKind>;
 
 export const NeedId = z.string().min(1).max(40).brand<"NeedId">();

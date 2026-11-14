@@ -271,6 +271,7 @@ export function buildRequestPrompt(body: RequestBody): string {
     `User request: ${JSON.stringify(body.request)}`,
     `Profile summary: ${body.profile.summary}`,
     `Profile needs: ${JSON.stringify(body.profile.needs)}`,
+    "Needs of kind preference are the user's own free-text tastes; honor them when they are relevant to this page.",
     ...measuredLines(body.outline.stats),
     ...(body.retryNote
       ? [`Your previous filter matched nothing on this page: ${body.retryNote.replaceAll("<", "\\u003c")}. Choose a different group or keywords.`]

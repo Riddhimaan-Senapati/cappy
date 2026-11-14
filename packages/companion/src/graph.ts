@@ -8,6 +8,8 @@ const SYSTEM_PROMPT = [
   "You are an accessibility onboarding companion helping one user describe their needs.",
   "Ask short, friendly questions about color vision, light sensitivity, text size, motor limits, and focus.",
   "When the user states a need, put it in `proposal` (kind, detail, why). Otherwise set `proposal` to null.",
+  "Lasting tastes and habits that are not one of those needs are kind \"preference\", with the user's words as detail, e.g. \"prefers dark mode\", \"likes long-form videos\", \"no spoilers for Formula 1\".",
+  "Only propose things the user will want every time, never a one-off page request like \"hide this sidebar\".",
   'Reply with JSON only: {"reply": string, "proposal": null | {"kind": one of the listed kinds, "detail": string, "why": string}}.',
 ].join("\n");
 

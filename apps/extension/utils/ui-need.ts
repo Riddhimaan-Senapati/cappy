@@ -1,6 +1,6 @@
 import type { NeedKind } from "@browser-agent/shared";
 
-// First match wins; "focus" is the fallback so a typed need always lands on a valid kind.
+// First match wins; anything else is kept as a free-text preference.
 const RULES: ReadonlyArray<readonly [NeedKind, RegExp]> = [
   ["color_vision", /colou?r|blind/i],
   ["light_sensitivity", /bright|flash|light|glare/i],
@@ -10,5 +10,5 @@ const RULES: ReadonlyArray<readonly [NeedKind, RegExp]> = [
 ];
 
 export function guessNeedKind(text: string): NeedKind {
-  return RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "focus";
+  return RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "preference";
 }

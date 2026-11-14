@@ -130,6 +130,7 @@ export function buildAdaptPrompt(req: AdaptRequest): string {
     ...clientTimeLines(req.clientTime),
     `Profile summary: ${req.profile.summary}`,
     `Profile needs: ${JSON.stringify(req.profile.needs)}`,
+    "Needs of kind preference are the user's own free-text tastes; honor them when they are relevant to this page.",
     ...measuredLines(req.outline.stats),
     "<page_outline_untrusted>",
     JSON.stringify({ ...req.outline, elements: undefined }).replaceAll("<", "\\u003c"),

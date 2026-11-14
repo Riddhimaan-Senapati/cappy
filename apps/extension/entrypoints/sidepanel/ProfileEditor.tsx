@@ -10,6 +10,7 @@ export const KIND_LABELS: Record<NeedKind, string> = {
   text_size: "Text size",
   motor: "Motor",
   focus: "Focus",
+  preference: "Preference",
 };
 
 const DEMO_PROFILE = Profile.parse({
@@ -146,7 +147,7 @@ export function ProfileEditor() {
       >
         <input
           aria-label="Add a need"
-          placeholder="Add a need, e.g. light sensitive"
+          placeholder="Add a need or preference, e.g. prefers dark mode"
           value={newNeed}
           maxLength={MAX_DETAIL}
           onChange={(event) => setNewNeed(event.target.value)}

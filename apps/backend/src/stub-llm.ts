@@ -18,11 +18,24 @@ export function lastUserMessage(req: LlmRequest): string {
   return user?.content ?? "";
 }
 
+const PREFERENCE = /\bi (?:prefer|like|love|hate|don't like|do not like|always want|never want)\b[^.!?]{2,120}/i;
+
+function preferenceProposal(text: string) {
+  const match = PREFERENCE.exec(text);
+  if (!match) return null;
+  const detail = match[0].replace(/^i\s+/i, "").trim();
+  return {
+    reply: `Got it, I'll keep that in mind: ${detail}.`,
+    proposal: { kind: "preference", detail, why: "You told me this preference" },
+  };
+}
+
 export function stubReply(req: LlmRequest): LlmResponse {
   if (!req.jsonSchema) return { text: PLAIN_REPLY };
-  const proposal = COLOR_BLIND.test(lastUserMessage(req))
+  const message = lastUserMessage(req);
+  const proposal = COLOR_BLIND.test(message)
     ? COLOR_PROPOSAL
-    : { reply: PLAIN_REPLY, proposal: null };
+    : preferenceProposal(message) ?? { reply: PLAIN_REPLY, proposal: null };
   return { text: JSON.stringify(proposal) };
 }
 

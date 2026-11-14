@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Adaptation, Rule, ruleAppliesTo, filtersTargetKnownGroups, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
+import { Adaptation, Profile, Rule, ruleAppliesTo, filtersTargetKnownGroups, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
 
 const valid = {
   id: "a1",
@@ -65,4 +65,8 @@ test("filters may omit the selector and carry a schedule; rules scope by host", 
   expect(ruleAppliesTo(rule, "www.youtube.com")).toBe(false);
   expect(ruleAppliesTo({ ...rule, everywhere: true }, "www.youtube.com")).toBe(true);
   expect(ruleAppliesTo({ ...rule, enabled: false }, "www.instagram.com")).toBe(false);
+});
+
+test("profiles accept free-text preferences", () => {
+  expect(Profile.safeParse({ version: 1, summary: "", needs: [{ id: "p1", kind: "preference", detail: "prefers dark mode", source: "onboarding" }] }).success).toBe(true);
 });

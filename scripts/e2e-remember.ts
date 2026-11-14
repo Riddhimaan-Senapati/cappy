@@ -37,6 +37,21 @@ try {
   for (let i = 0; i < 20 && (await colorNeeds(worker)) < 2; i++) await Bun.sleep(200);
   assert((await colorNeeds(worker)) === 2, "Accept saves the proposed need");
 
+  await panel.getByLabel("Ask before remembering").uncheck();
+  await panel.getByLabel("Ask for a change").fill("I prefer dark mode on every site");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
+  let preference = "";
+  for (let i = 0; i < 50 && !preference; i++) {
+    preference = await worker.evaluate(async () => {
+      const { profile } = await chrome.storage.local.get("profile");
+      return ((profile?.needs ?? []) as { kind: string; detail: string }[]).find((n) => n.kind === "preference")?.detail ?? "";
+    });
+    if (!preference) await Bun.sleep(200);
+  }
+  assert(/dark mode/i.test(preference), `a free-text preference is remembered as kind preference ("${preference}")`);
+  await panel.getByText("Preference", { exact: true }).first().waitFor({ timeout: 5_000 });
+  console.log("ok: the profile card shows it as a Preference chip");
+
   console.log("REMEMBER PASSED");
 } finally {
   await context?.close();

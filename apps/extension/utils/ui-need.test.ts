@@ -12,5 +12,6 @@ test("guesses the need kind from keywords in the typed line", () => {
 });
 
 test("falls back to focus when no keyword matches", () => {
-  expect(guessNeedKind("something else entirely")).toBe("focus");
+  expect(guessNeedKind("prefers dark mode")).toBe("preference");
+  expect(guessNeedKind("something else entirely")).toBe("preference");
 });
