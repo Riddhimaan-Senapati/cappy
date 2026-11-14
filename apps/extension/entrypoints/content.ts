@@ -15,6 +15,7 @@ import { adapterGroups, mergeGroups } from "../utils/site-adapters";
 import { buildSnapshot } from "../utils/snapshot";
 import { computePageStats } from "../utils/page-stats";
 import { loadClock, onClockChange } from "../utils/clock";
+import { applyPreferenceLayer, type PreferenceLayerHandle } from "../utils/preferences-layer";
 
 const FILTER_ID = "adaptive-agent-filters";
 
@@ -81,7 +82,18 @@ export default defineContentScript({
       undoRules = undefined;
     };
 
-    onClockChange(() => undoRules?.refresh());
+    // Saved preferences are their own layer: replaced wholesale on every message and never undone by a page change.
+    let undoPreferences: PreferenceLayerHandle | undefined;
+
+    const revertPreferences = () => {
+      undoPreferences?.();
+      undoPreferences = undefined;
+    };
+
+    onClockChange(() => {
+      undoRules?.refresh();
+      undoPreferences?.refresh();
+    });
     void loadClock();
 
     const removeAdaptationUi = () => {
@@ -225,6 +237,12 @@ export default defineContentScript({
           void loadClock().then(() => {
             revertRules();
             if (msg.rules.length > 0) undoRules = applyContentFilters(msg.rules.map((r) => r.filter), document);
+          });
+          break;
+        case "apply-preferences":
+          void loadClock().then(() => {
+            revertPreferences();
+            undoPreferences = applyPreferenceLayer(msg.layer, document);
           });
           break;
         case "page-stats":

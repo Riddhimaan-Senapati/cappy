@@ -2,9 +2,13 @@ import {
   AdaptRequest,
   AdaptResponse,
   ADAPT_PATH,
+  COMPILE_PREFERENCE_PATH,
+  CompilePreferenceRequest,
+  CompilePreferenceResponse,
   DEFAULT_BACKEND_URL,
   NeedId,
   RequestBody,
+  type Need,
   matchesHost,
   ruleAppliesTo,
   type Adaptation,
@@ -43,10 +47,24 @@ import { describeChoice, logForTab, startRun } from "../utils/steps";
 import { hasRuntimeBlock } from "../utils/runtime-blocks";
 import { clientTime, loadClock, now } from "../utils/clock";
 import { RULES_KEY, addRulesFromAdaptation, loadRules, parseRules, rulesForHost, saveRules } from "../utils/rules";
+import {
+  EMPTY_LAYER,
+  PREFERENCE_KEY,
+  diffPreferences,
+  mergeChanges,
+  readPreferenceStore,
+  updatePreferenceStore,
+  withoutCompiledPreferences,
+  type PreferenceEntry,
+} from "../utils/preferences";
 
 const APPLIED_KEY = KEYS.applied;
 const RULES_BY_ADAPTATION = "rulesByAdaptation";
 const FRICTION_PROMPT = "Make text bigger on every site?";
+const COMPILE_TIMEOUT_MS = 60_000;
+
+// Preference compiles running in this worker, so a profile change that arrives mid-compile does not send a duplicate.
+const compiling = new Set<string>();
 
 export default defineBackground(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err: unknown) => {
@@ -78,12 +96,15 @@ export default defineBackground(() => {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && "paused" in changes) void applyPause(changes.paused?.newValue === true);
+    if (area === "local" && KEYS.profile in changes) void syncPreferences();
+    if (area === "local" && PREFERENCE_KEY in changes) void broadcastPreferences();
     if (area !== "local" || !(RULES_KEY in changes)) return;
     const change = changes[RULES_KEY];
     void resendRules(parseRules(change?.oldValue), parseRules(change?.newValue));
   });
 
   startFriction(promptFriction);
+  void syncPreferences();
 });
 
 async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
@@ -92,8 +113,12 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   const { paused, proactive } = await chrome.storage.local.get(["paused", "proactive"]);
   if (paused === true) return notifyDone(tabId);
   await applyRulesToTab(tabId, msg.url);
+  const store = await readPreferenceStore();
+  await sendToTab(tabId, { type: "apply-preferences", layer: mergeChanges(store) }).catch(() => undefined);
   const profile = await loadProfile();
-  if (profile.needs.length === 0) return notifyDone(tabId);
+  // Compiled preferences are already enforced by their layer, so the model only sees the rest.
+  const modelProfile = withoutCompiledPreferences(profile, store);
+  if (modelProfile.needs.length === 0) return notifyDone(tabId);
 
   const host = hostOf(msg.url);
   await startRun(tabId);
@@ -112,7 +137,7 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
     return notifyDone(tabId);
   }
 
-  const request = AdaptRequest.safeParse({ url: msg.url, outline: msg.outline, profile, clientTime: clientTime() });
+  const request = AdaptRequest.safeParse({ url: msg.url, outline: msg.outline, profile: modelProfile, clientTime: clientTime() });
   if (!request.success) {
     await setLast({ status: "error", url: msg.url, message: "Page details were not valid" });
     return notifyDone(tabId);
@@ -287,7 +312,8 @@ async function handleUserRequest(text: string): Promise<void> {
 
   await logForTab(tabId, "info", `Reading ${hostOf(reply.url) ?? "this page"}…`);
   const profile = await loadProfile();
-  const body = RequestBody.parse({ ...buildRequestBody(reply, profile, text), clientTime: clientTime() });
+  const modelProfile = withoutCompiledPreferences(profile, await readPreferenceStore());
+  const body = RequestBody.parse({ ...buildRequestBody(reply, modelProfile, text), clientTime: clientTime() });
   let raw: unknown;
   await logForTab(tabId, "info", "Asked the model for a change");
   try {
@@ -350,6 +376,74 @@ async function applyPause(paused: boolean): Promise<void> {
     if (tab.id === undefined || !host) continue;
     await sendToTab(tab.id, { type: "apply-rules", rules: rulesForHost(rules, host) }).catch(() => undefined);
     if (paused) await sendToTab(tab.id, { type: "remove-banner" }).catch(() => undefined);
+  }
+  await broadcastPreferences(paused);
+}
+
+// Every open tab gets the merged preference layer, or an empty one while the kill switch is on.
+async function broadcastPreferences(paused?: boolean): Promise<void> {
+  const isPaused = paused ?? (await chrome.storage.local.get("paused")).paused === true;
+  const layer = isPaused ? EMPTY_LAYER : mergeChanges(await readPreferenceStore());
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const tab of tabs) {
+    if (tab.id === undefined) continue;
+    await sendToTab(tab.id, { type: "apply-preferences", layer }).catch(() => undefined);
+  }
+}
+
+// Compiles every new or changed preference, drops removed ones, and retries errors. Runs on startup and on profile change.
+async function syncPreferences(): Promise<void> {
+  await loadClock();
+  const profile = await loadProfile();
+  const { toCompile, toRemove } = diffPreferences(profile, await readPreferenceStore());
+  const todo = toCompile.filter((need) => !compiling.has(compileKey(need)));
+  if (todo.length === 0 && toRemove.length === 0) return;
+  await updatePreferenceStore((store) => {
+    for (const id of toRemove) delete store[id];
+    for (const need of todo) store[need.id] = { detail: need.detail, status: "pending", compiledAt: Date.now() };
+  });
+  await Promise.all(todo.map(compilePreference));
+}
+
+function compileKey(need: Need): string {
+  return `${need.id}\u0000${need.detail}`;
+}
+
+async function compilePreference(need: Need): Promise<void> {
+  const key = compileKey(need);
+  compiling.add(key);
+  try {
+    const outcome = await requestCompile(need);
+    await updatePreferenceStore((store) => {
+      const entry = store[need.id];
+      // The need was removed or edited while compiling; the newer detail is compiled by its own sync.
+      if (!entry || entry.detail !== need.detail) return;
+      store[need.id] = { detail: need.detail, compiledAt: Date.now(), ...outcome };
+    });
+  } finally {
+    compiling.delete(key);
+  }
+}
+
+type CompileOutcome = Pick<PreferenceEntry, "status" | "change" | "summary" | "reason">;
+
+async function requestCompile(need: Need): Promise<CompileOutcome> {
+  try {
+    const body = CompilePreferenceRequest.parse({ need, clientTime: clientTime() });
+    const res = await fetch(`${DEFAULT_BACKEND_URL}${COMPILE_PREFERENCE_PATH}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(COMPILE_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`backend responded ${res.status}`);
+    const parsed = CompilePreferenceResponse.safeParse(await res.json());
+    if (!parsed.success) return { status: "error" };
+    if (parsed.data.kind === "none") return { status: "none", reason: parsed.data.reason };
+    return { status: "compiled", change: parsed.data.change, summary: parsed.data.summary };
+  } catch (err) {
+    console.warn("preference compile failed", err);
+    return { status: "error" };
   }
 }
 
