@@ -6,6 +6,9 @@ import { acceptProposal, forgetLine, rejectProposal } from "../memory.js";
 import { load, save, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
+import { paintMic, liveRegion, micButton } from "../voice/button.js";
+import { VoiceController } from "../voice/controller.js";
+import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
 
 export interface SpotlightDeps {
   ask(message: string, fresh: boolean): void;
@@ -79,6 +82,14 @@ export class Spotlight {
   private cache: StoredState | null = null;
   private previousFocus: HTMLElement | null = null;
   private idlePlaceholder = 'Try "Make the text bigger"';
+  private mic = micButton();
+  private live = liveRegion();
+  private voiceBase = "";
+  private voice = new VoiceController({
+    onState: (state) => this.onVoiceState(state),
+    onInterim: (text) => this.input.value = joinVoiceText(this.voiceBase, text),
+    onFinal: (text) => this.onVoiceFinal(text),
+  });
 
   constructor(
     private shadow: ShadowRoot,
@@ -95,7 +106,8 @@ export class Spotlight {
     this.input.autocomplete = "off";
     this.body.setAttribute("role", "listbox");
 
-    this.bar.append(h("div", "row", "", [this.orb, this.input, this.trail]), this.body, this.foot);
+    this.mic.addEventListener("click", () => this.toggleVoice());
+    this.bar.append(h("div", "row", "", [this.orb, this.input, this.mic, this.trail]), this.body, this.foot, this.live);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
 
@@ -143,6 +155,7 @@ export class Spotlight {
 
   hide() {
     if (!this.opened) return;
+    this.voice.stop();
     this.opened = false;
     window.clearTimeout(this.closeTimer);
     this.layer.classList.remove("open");
@@ -167,6 +180,7 @@ export class Spotlight {
   private render() {
     this.layer.classList.toggle("running", this.view === "run");
     this.input.readOnly = this.view === "settings";
+    this.mic.disabled = this.view === "settings";
     this.input.placeholder = this.view === "settings" ? "Settings" : this.view === "run" ? "Refine, or ask for something else" : this.idlePlaceholder;
     this.orb.classList.toggle("work", this.working);
     this.renderTrail();
@@ -456,10 +470,49 @@ export class Spotlight {
     return true;
   }
 
+  private toggleVoice() {
+    if (this.voice.active) {
+      this.voice.stop();
+      return;
+    }
+    this.voiceBase = this.input.value;
+    void this.voice.start();
+  }
+
+  handleVoice(event: VoiceEvent) {
+    this.voice.receive(event);
+  }
+
+  private onVoiceState(state: VoiceState) {
+    paintMic(this.mic, state);
+    if (this.opened) this.live.textContent = voiceStatusText(state);
+  }
+
+  private onVoiceFinal(text: string) {
+    if (!this.opened) return;
+    const value = joinVoiceText(this.voiceBase, text);
+    this.voiceBase = "";
+    this.input.value = value;
+    if (text && (this.cache?.voiceAutoSend ?? true)) {
+      this.input.value = "";
+      this.ask(value, false);
+      return;
+    }
+    this.input.focus({ preventScroll: true });
+  }
+
   handleKey(event: KeyboardEvent): boolean {
     if (!this.opened || event.isComposing) return false;
     const { key } = event;
+    if (event.altKey && event.code === "KeyM" && this.view !== "settings") {
+      this.toggleVoice();
+      return true;
+    }
     if (key === "Escape") {
+      if (this.voice.active) {
+        this.voice.stop();
+        return true;
+      }
       if (this.view === "settings") this.setView("list");
       else this.hide();
       return true;

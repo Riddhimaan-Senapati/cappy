@@ -1,6 +1,7 @@
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
 import { load } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
+import { handleVoiceRequest } from "./voice.js";
 import { registerTts } from "./tts.js";
 
 registerTts();
@@ -57,6 +58,7 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
 }
 
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
+  if (handleVoiceRequest(request, sender)) return false;
   switch (request.kind) {
     case "runChat":
       if (sender.tab) void agent.startRun(sender.tab, "chat", request.message, request.fresh);

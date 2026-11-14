@@ -2,6 +2,7 @@ import type { UiEvent } from "../messages.js";
 import { forgetLine } from "../memory.js";
 import { adoptStyles, h, icon } from "../ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "../ui/theme.js";
+import { VOICE_CSS } from "../voice/styles.js";
 import { Spotlight, type SpotlightDeps } from "./spotlight.js";
 import { OVERLAY_CSS } from "./styles.js";
 
@@ -24,7 +25,7 @@ export class OverlayUi {
     this.host.setAttribute("popover", "manual");
     this.host.style.cssText = "all:initial!important;position:fixed!important;inset:0!important;z-index:2147483647!important;pointer-events:none!important;display:block!important";
     this.shadow = this.host.attachShadow({ mode: "closed" });
-    adoptStyles(this.shadow, TOKENS + SETTINGS_CSS + OVERLAY_CSS);
+    adoptStyles(this.shadow, TOKENS + SETTINGS_CSS + OVERLAY_CSS + VOICE_CSS);
 
     this.spotlight = new Spotlight(this.shadow, deps, (open) => {
       this.fab.classList.toggle("hide", open);

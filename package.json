@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "server": "bun --watch server/index.ts",
-    "build:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist",
-    "watch:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch",
+    "build:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts offscreen=extension/src/offscreen/voice.ts mic=extension/src/mic.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist",
+    "watch:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts offscreen=extension/src/offscreen/voice.ts mic=extension/src/mic.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch",
     "dev": "bun run build:ext && concurrently -k -n server,ext \"bun run server\" \"bun run watch:ext\"",
     "typecheck": "tsc --noEmit",
     "chatgpt:login": "bun server/auth/chatgpt.ts",

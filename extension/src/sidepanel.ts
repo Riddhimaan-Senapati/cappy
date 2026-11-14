@@ -1,6 +1,11 @@
 import type { ContentRequest, DebugPortMessage, DebugPortRequest, StatusInfo, TtsRequest, TtsStateMessage, UiEvent } from "./messages.js";
 import { adoptStyles, h } from "./ui/dom.js";
 import { TOKENS } from "./ui/theme.js";
+import { paintMic, liveRegion, micButton } from "./voice/button.js";
+import { VoiceController } from "./voice/controller.js";
+import { joinVoiceText, parseVoiceEvent, voiceStatusText, type VoiceState } from "./voice/core.js";
+import { VOICE_CSS } from "./voice/styles.js";
+import { load } from "./storage.js";
 
 const CSS = `
 html, body { margin: 0; height: 100%; background: #121217; }
@@ -29,7 +34,7 @@ button { padding: 0 16px; border: 0; border-radius: 12px; background: var(--grad
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 `;
 
-adoptStyles(document, TOKENS + CSS);
+adoptStyles(document, TOKENS + CSS + VOICE_CSS);
 
 const statusDot = h("span", "dot");
 const statusText = h("span", "", "Connecting");
@@ -38,7 +43,9 @@ const tools = h("div", "tools");
 const input = h("textarea");
 input.rows = 2;
 input.placeholder = "Debug chat: runs on the active tab, always asks the AI fresh";
-const form = h("form", "", "", [input, h("button", "", "Send")]);
+const mic = micButton();
+const live = liveRegion();
+const form = h("form", "", "", [input, mic, h("button", "", "Send")]);
 const readButton = h("button", "", "Read page aloud");
 readButton.type = "button";
 const stopButton = h("button", "", "Stop");
@@ -64,7 +71,38 @@ document.body.append(
   timeline,
   tools,
   form,
+  live,
 );
+
+let voiceBase = "";
+const voice = new VoiceController({
+  onState(state: VoiceState) {
+    paintMic(mic, state);
+    live.textContent = voiceStatusText(state);
+  },
+  onInterim(text) {
+    input.value = joinVoiceText(voiceBase, text);
+  },
+  async onFinal(text) {
+    input.value = joinVoiceText(voiceBase, text);
+    voiceBase = "";
+    const { voiceAutoSend } = await load();
+    if (text && voiceAutoSend) form.requestSubmit();
+    else input.focus();
+  },
+});
+mic.addEventListener("click", () => {
+  if (voice.active) voice.stop();
+  else {
+    voiceBase = input.value;
+    void voice.start();
+  }
+});
+chrome.runtime.onMessage.addListener((message: { kind?: string; event?: unknown }) => {
+  if (message?.kind !== "voiceEvent") return;
+  const event = parseVoiceEvent(message.event);
+  if (event) voice.receive(event);
+});
 
 const runs = new Map<string, { card: HTMLElement; steps: HTMLElement; tag: HTMLElement }>();
 
@@ -133,7 +171,10 @@ form.addEventListener("submit", (event) => {
   input.value = "";
 });
 input.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "Escape" && voice.active) {
+    event.preventDefault();
+    voice.stop();
+  } else if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     form.requestSubmit();
   }
