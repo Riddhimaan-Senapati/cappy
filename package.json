@@ -2,9 +2,16 @@
   "name": "browser-agent",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "test": "bun test",
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --filter '*' typecheck",
+    "e2e": "cd apps/extension && bunx wxt build && cd ../.. && bun scripts/e2e-gate.ts"
+  },
+  "devDependencies": {
+    "playwright": "1"
   }
 }
