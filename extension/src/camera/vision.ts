@@ -1,6 +1,7 @@
 export interface Point {
   x: number;
   y: number;
+  z?: number;
 }
 
 export type HandPose = "point" | "open" | "fist" | "pinch" | "thumbs_down" | "other";
@@ -11,6 +12,7 @@ export interface HandFrame {
   knuckle: Point;
   palm: Point;
   pinch: number;
+  indexOut: boolean;
 }
 
 export interface HeadFrame {
@@ -26,7 +28,8 @@ const FINGERS: Array<[tip: number, pip: number]> = [
   [20, 18],
 ];
 
-const distance = (a: Point, b: Point, aspect: number) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);
+// Includes depth: a finger pointing at the camera looks short in 2D but is fully extended in 3D.
+const distance = (a: Point, b: Point, aspect: number) => Math.hypot((a.x - b.x) * aspect, a.y - b.y, ((a.z ?? 0) - (b.z ?? 0)) * aspect);
 
 export function readHand(landmarks: Point[], aspect = 1): HandFrame | null {
   if (landmarks.length < 21) return null;
@@ -48,10 +51,10 @@ export function readHand(landmarks: Point[], aspect = 1): HandFrame | null {
   // In a real pinch the index still reaches out from the palm; in a fist with the thumb tucked it is curled in.
   else if (pinch < 0.3 && !extended[2] && !extended[3] && distance(landmarks[8], wrist, aspect) > 1.1 * handSize) pose = "pinch";
   else if (extended.every(Boolean)) pose = "open";
-  else if (extended[0] && !extended[1] && !extended[2] && !extended[3]) pose = "point";
+  else if (extended[0] && !extended[1]) pose = "point";
   else if (!extended.some(Boolean)) pose = "fist";
 
-  return { pose, index: landmarks[8], knuckle: landmarks[5], palm, pinch };
+  return { pose, index: landmarks[8], knuckle: landmarks[5], palm, pinch, indexOut: extended[0] };
 }
 
 // Head pose from face mesh landmarks: 1 nose tip, 10 forehead, 152 chin, 33 and 263 outer eye corners.

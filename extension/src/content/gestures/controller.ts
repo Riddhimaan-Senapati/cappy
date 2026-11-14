@@ -52,6 +52,7 @@ const SWIPE_DISTANCE = 0.3;
 const SWIPE_COOLDOWN_MS = 1000;
 const HEAD_DEADZONE = 0.06;
 const HAND_PRIORITY_MS = 800;
+const POINTER_GRACE_MS = 300;
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
@@ -98,6 +99,8 @@ export class CameraController {
   private headSamples: number[] = [];
   private lastHeadAt = 0;
   private lastHandAt = 0;
+  private pointerLatched = false;
+  private pointerSeenAt = 0;
   private raf = 0;
 
   constructor(
@@ -216,8 +219,7 @@ export class CameraController {
   private onFrame(t: number, hand: HandFrame | null, head: HeadFrame | null) {
     if (this.paused) {
       this.scrollSpeed = 0;
-      if (hand && this.settings.pointer && (hand.pose === "point" || hand.pose === "pinch")) this.updatePointer(t, hand);
-      else this.hidePointer();
+      this.trackPointer(t, hand);
       return this.setMode("Paused", "paused");
     }
 
@@ -288,13 +290,23 @@ export class CameraController {
     }
     this.scrollSpeed = speed;
 
-    if (hand && this.settings.pointer && (hand.pose === "point" || hand.pose === "pinch")) {
-      this.updatePointer(t, hand);
-      mode = this.pinching ? "Click" : "Pointing";
-    } else {
-      this.hidePointer();
-    }
+    if (this.trackPointer(t, hand)) mode = this.pinching ? "Click" : "Pointing";
     this.setMode(mode, hand || head ? "on" : "idle");
+  }
+
+  // Sticky pointer: once pointing, stay pointing while the index is out, and ride out brief tracking dropouts.
+  private trackPointer(t: number, hand: HandFrame | null): boolean {
+    const pointing = Boolean(hand) && this.settings.pointer && (hand!.pose === "point" || hand!.pose === "pinch" || (this.pointerLatched && hand!.indexOut && hand!.pose !== "open"));
+    if (pointing) {
+      this.pointerLatched = true;
+      this.pointerSeenAt = t;
+      this.updatePointer(t, hand!);
+      return true;
+    }
+    if (this.pointerLatched && t - this.pointerSeenAt < POINTER_GRACE_MS) return true;
+    this.pointerLatched = false;
+    this.hidePointer();
+    return false;
   }
 
   private updatePointer(t: number, hand: HandFrame) {
