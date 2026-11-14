@@ -1,9 +1,10 @@
 import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js";
+import { detectInjection } from "../../../shared/safety.js";
 import { isOneShot, isScheduleActive, validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
-import { computeStats, lowContrastSamples } from "./outline.js";
+import { computeStats, lowContrastSamples, readPage } from "./outline.js";
 import { isSiteControlInput, siteControlId, useSiteControl } from "./site-controls.js";
 
 type Undo = () => void;
@@ -431,6 +432,12 @@ function observedProblems(
 }
 
 export async function applyChange(change: Change, animate = true): Promise<ApplyOutcome> {
+  // Recipe replay and page-load restore call this too, so a trap page is refused before any DOM write.
+  const injection = detectInjection(readPage());
+  if (injection) {
+    const before = computeStats();
+    return { ok: false, error: `Blocked: this page tried to instruct the agent (${injection}).`, matched: {}, before, after: before };
+  }
   ensureBaseStyle();
   const problem = validateChange(change);
   if (problem) {
