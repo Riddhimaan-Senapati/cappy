@@ -125,6 +125,7 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
     select: (element) => void selectByGesture(element),
     release: () => overlay?.spotlight.finishVoice(),
     hasSelection: () => Boolean(targetElement) || picker.isActive,
+    pointAt: (x, y) => overlay?.pointAt(x, y) ?? { covered: false, control: null },
     cancel: () => {
       const hadSomething = Boolean(targetElement) || Boolean(overlay?.spotlight.isOpen()) || picker.isActive;
       picker.stop();
