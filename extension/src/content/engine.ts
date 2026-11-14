@@ -197,6 +197,7 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
 
   const matched: Record<string, number> = {};
   let error: string | undefined;
+  let note: Promise<string> | undefined;
 
   await transition(() => {
     revertNow(change.id);
@@ -213,6 +214,7 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
         const block = applyBlock(change.block);
         entry.undo.push(block.undo);
         if (block.reapply) entry.reapply.push(block.reapply);
+        note = block.note;
       }
       applied.set(change.id, entry);
       if (entry.reapply.length) startObserving();
@@ -222,7 +224,8 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
     }
   }, animate);
 
-  return { ok: !error, error, matched, before, after: computeStats() };
+  const outcome = { ok: !error, error, matched, before, after: computeStats() };
+  return note ? { ...outcome, note: await note } : outcome;
 }
 
 export async function revertChange(id: string, animate = true): Promise<boolean> {

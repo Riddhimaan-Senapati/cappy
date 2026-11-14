@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dark toggle fixture</title>
+<style>
+  body { background: #fff; color: #222; font-family: sans-serif; margin: 8px; }
+  main { padding: 24px; }
+  body.zz-night { background: #111; color: #eee; }
+</style>
+</head>
+<body>
+<header><button type="button" id="theme-toggle" aria-label="Toggle dark mode">Toggle dark mode</button></header>
+<main>
+  <h1>Toggle-based dark theme</h1>
+  <p>This page only goes dark when its own switch is clicked.</p>
+</main>
+<script>
+  document.getElementById("theme-toggle").addEventListener("click", () => {
+    document.body.classList.toggle("zz-night");
+  });
+</script>
+</body>
+</html>
