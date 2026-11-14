@@ -29,10 +29,16 @@ export class VoiceController {
     if (this.state.phase !== "idle" && this.state.phase !== "error") return;
     this.launching = true;
     this.apply(reduceVoice(this.state, { type: "start" }));
-    const { voiceLang } = await load();
-    if (!this.launching) return;
-    this.launching = false;
-    void chrome.runtime.sendMessage({ kind: "voiceStart", lang: voiceLang } satisfies BackgroundRequest).catch(() => undefined);
+    try {
+      const { voiceLang } = await load();
+      if (!this.launching) return;
+      this.launching = false;
+      const accepted = await chrome.runtime.sendMessage({ kind: "voiceStart", lang: voiceLang } satisfies BackgroundRequest);
+      if (accepted !== true) throw new Error("Voice start was not acknowledged");
+    } catch {
+      this.launching = false;
+      if (this.phase === "starting") this.apply(reduceVoice(this.state, { type: "error", error: "start-failed" }));
+    }
   }
 
   stop() {

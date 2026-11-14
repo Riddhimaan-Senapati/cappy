@@ -21,6 +21,7 @@ export interface StoredState {
   floatingButton: boolean;
   routing: Routing;
   modelOverrides: Partial<Record<Tier, string>>;
+  modelOverrideProvider: string;
   serverUrl: string;
   askBeforeRemember: boolean;
   speakReplies: boolean;
@@ -28,6 +29,8 @@ export interface StoredState {
   ttsRate: number;
   voiceAutoSend: boolean;
   voiceLang: string;
+  voiceProvider: "chrome" | "openai";
+  openAIVoiceVerified: boolean;
 }
 
 export const DEFAULTS: StoredState = {
@@ -43,6 +46,7 @@ export const DEFAULTS: StoredState = {
   floatingButton: true,
   routing: "auto",
   modelOverrides: {},
+  modelOverrideProvider: "",
   serverUrl: "ws://localhost:8787/agent",
   askBeforeRemember: false,
   speakReplies: false,
@@ -50,13 +54,17 @@ export const DEFAULTS: StoredState = {
   ttsRate: 1,
   voiceAutoSend: true,
   voiceLang: "",
+  voiceProvider: "chrome",
+  openAIVoiceVerified: false,
 };
 
 const MAX_RECIPES = 60;
 
 export async function load(): Promise<StoredState> {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
-  return { ...DEFAULTS, ...stored } as StoredState;
+  const state = { ...DEFAULTS, ...stored } as StoredState;
+  if (!state.openAIVoiceVerified) state.voiceProvider = "chrome";
+  return state;
 }
 
 export async function save(patch: Partial<StoredState>) {
@@ -81,6 +89,24 @@ export function recordSubmittedRequest(message: string): Promise<void> {
 }
 
 const normalizeRequest = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+
+export function removeSubmittedRequest(message: string): Promise<void> {
+  const target = normalizeRequest(message);
+  const write = requestWrite.then(async () => {
+    const state = await load();
+    await save({
+      submittedRequests: requestHistory(state).filter((request) => normalizeRequest(request) !== target),
+      history: state.history.filter((turn) => turn.role !== "user" || normalizeRequest(turn.text) !== target),
+    });
+  });
+  requestWrite = write.catch(() => undefined);
+  return write;
+}
+
+export async function deleteRequest(message: string) {
+  const response = await chrome.runtime.sendMessage({ kind: "deleteRequest", message });
+  if (!response?.ok) throw new Error("Could not delete the saved request.");
+}
 
 export function suggestRequests(state: Pick<StoredState, "history" | "submittedRequests">, input: string): string[] {
   const query = normalizeRequest(input);

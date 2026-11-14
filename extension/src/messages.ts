@@ -1,3 +1,4 @@
+import type { ProviderOptions, ProviderSetup } from "../../shared/protocol.js";
 import type { Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
 
@@ -48,16 +49,19 @@ export interface StatusInfo {
   provider?: string;
   models?: Record<Tier, string>;
   available?: string[];
+  providers?: ProviderOptions;
   error?: string;
 }
 
 export type BackgroundRequest =
   | { kind: "runChat"; message: string; fresh: boolean }
+  | { kind: "deleteRequest"; message: string }
   | { kind: "frictionAccept" }
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
   | { kind: "status" }
+  | ({ kind: "providerSetup" } & Omit<ProviderSetup, "id" | "type">)
   | { kind: "voiceStart"; lang: string }
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }

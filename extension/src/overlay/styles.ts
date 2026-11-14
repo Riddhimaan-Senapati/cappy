@@ -25,6 +25,9 @@ export const OVERLAY_CSS = `
 .body:empty { display: none; }
 .sec { padding: 10px 12px 5px; font-size: 11px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--faint); }
 .item { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 13px; cursor: pointer; transition: background 0.12s; }
+.request-row { display: flex; align-items: center; gap: 6px; }
+.request-row .delete-request { color: #f87171; }
+.request-row .item { flex: 1; min-width: 0; }
 .item .ico { width: 30px; height: 30px; border-radius: 10px; background: var(--raise); color: var(--muted); transition: background 0.2s, color 0.2s, transform 0.3s var(--spring); }
 .item .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .hint { color: var(--faint); font-size: 12px; flex: none; }

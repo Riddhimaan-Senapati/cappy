@@ -1,3 +1,4 @@
+import { getKey } from "../../keys.js";
 import OpenAI from "openai";
 import type { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
@@ -78,7 +79,7 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
 }
 
 export function createOpenAIKeyProvider(): AgentProvider {
-  const client = new OpenAI();
+  const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
   const models: Record<Tier, string> = {
     fast: process.env.OPENAI_MODEL_FAST ?? "gpt-6-luna",
     frontier: process.env.OPENAI_MODEL_FRONTIER ?? process.env.OPENAI_MODEL ?? "gpt-6.1-sol",

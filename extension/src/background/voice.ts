@@ -6,12 +6,19 @@ type Owner = { tabId: number } | { panel: true };
 const OFFSCREEN_PATH = "offscreen.html";
 let owner: Owner | null = null;
 
-async function ensureOffscreen() {
+let opening: Promise<void> | undefined;
+
+export function ensureOffscreen() {
+  opening ??= createOffscreen().finally(() => { opening = undefined; });
+  return opening;
+}
+
+async function createOffscreen() {
   const contexts = await chrome.runtime.getContexts({ contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT] });
   if (contexts.length) return;
   await chrome.offscreen.createDocument({
     url: OFFSCREEN_PATH,
-    reasons: [chrome.offscreen.Reason.USER_MEDIA],
+    reasons: [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.AUDIO_PLAYBACK],
     justification: "Runs Chrome's speech recognition for voice input the user starts from the bar or side panel.",
   });
 }
@@ -34,14 +41,18 @@ async function onRecognitionEvent(raw: unknown) {
   deliver(event);
   if (event.type === "ended") {
     owner = null;
-    await chrome.offscreen.closeDocument().catch(() => undefined);
   }
 }
 
-export function handleVoiceRequest(request: BackgroundRequest, sender: chrome.runtime.MessageSender): boolean {
+export function handleVoiceRequest(request: BackgroundRequest, sender: chrome.runtime.MessageSender, respond: (accepted: boolean) => void): boolean {
   switch (request.kind) {
     case "voiceStart":
+      if (owner) {
+        respond(false);
+        return true;
+      }
       owner = sender.tab?.id !== undefined ? { tabId: sender.tab.id } : { panel: true };
+      respond(true);
       void ensureOffscreen()
         .then(() => chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: request.lang }))
         .catch(() => {

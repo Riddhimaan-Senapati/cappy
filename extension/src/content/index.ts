@@ -1,3 +1,4 @@
+import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange, Change } from "../../../shared/adaptation.js";
 import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "../messages.js";
 import { forgetLine, hasMemoryLine } from "../memory.js";
@@ -21,7 +22,13 @@ function mutate<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
-const send = (request: BackgroundRequest) => chrome.runtime.sendMessage(request).catch(() => undefined);
+async function send(request: BackgroundRequest) {
+  try {
+    await chrome.runtime.sendMessage(request);
+  } catch (error) {
+    reportExtensionError(error);
+  }
+}
 
 async function apply(change: Change) {
   if (change.block?.name === "textScale" && change.id !== learnedTextScale.id) {
@@ -176,9 +183,15 @@ function whenReady(callback: () => void) {
 
 (async () => {
   const state = await load();
-  const restored = state.paused ? 0 : await mutate(() => restore(false));
   whenReady(() => {
-    void send({ kind: "pageReady", origin, restored });
     if (state.floatingButton) ensureOverlay().setFab(true);
+    void mutate(async () => {
+      let restored = 0;
+      try {
+        if (!state.paused) restored = await restore(false);
+      } finally {
+        void send({ kind: "pageReady", origin, restored });
+      }
+    }).catch(reportExtensionError);
   });
-})();
+})().catch(reportExtensionError);

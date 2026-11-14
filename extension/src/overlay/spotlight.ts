@@ -1,9 +1,10 @@
+import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing } from "../../../shared/protocol.js";
 import { SUGGESTIONS } from "../defaults.js";
 import { ROUTING_LABELS, type AppliedSummary, type UiEvent } from "../messages.js";
 import { acceptProposal, forgetLine, rejectProposal } from "../memory.js";
-import { load, save, suggestRequests, type StoredState } from "../storage.js";
+import { deleteRequest, load, save, suggestRequests, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
 import { paintMic, liveRegion, micButton } from "../voice/button.js";
@@ -119,7 +120,7 @@ export class Spotlight {
         if (this.opened && this.view === "list" && !this.shadow.activeElement) this.input.focus({ preventScroll: true });
       }, 0);
     });
-    chrome.storage.onChanged.addListener(() => void this.refreshCache());
+    chrome.storage.onChanged.addListener(() => void this.refreshCache().catch(reportExtensionError));
   }
 
   isOpen() {
@@ -137,7 +138,7 @@ export class Spotlight {
 
   toggle() {
     if (this.opened) this.hide();
-    else void this.show();
+    else void this.show().catch(reportExtensionError);
   }
 
   async show(view?: View) {
@@ -273,10 +274,10 @@ export class Spotlight {
       {
         id: "fab",
         icon: "circle",
-        title: state?.floatingButton === false ? "Show floating button" : "Hide floating button",
+        title: state?.floatingButton === false ? "Show floating widget" : "Hide floating widget",
         kind: "command",
         section: "Commands",
-        keywords: "orb launcher",
+        keywords: "orb launcher floating button",
         run: async () => (await save({ floatingButton: state?.floatingButton === false }), this.hide()),
       },
       { id: "debug", icon: "bug", title: "Open debug panel", hint: "chat + tool log", kind: "command", section: "Commands", keywords: "developer console logs", run: () => (this.deps.openDebug(), this.hide()) },
@@ -320,11 +321,38 @@ export class Spotlight {
       row.style.setProperty("--i", String(index));
       row.addEventListener("pointermove", () => this.select(index, false));
       row.addEventListener("click", () => void this.runItem(item));
-      nodes.push(row);
+      if (item.kind === "previous") {
+        const remove = h("button", "link delete-request", "", [icon("trash")]);
+        remove.type = "button";
+        remove.title = "Delete saved request";
+        remove.tabIndex = -1;
+        remove.setAttribute("aria-label", `Delete saved request: ${item.title}`);
+        remove.addEventListener("click", (event) => {
+          event.stopPropagation();
+          void this.deleteSuggestion(item.title);
+        });
+        const group = h("div", "request-row", "", [row, remove]);
+        group.setAttribute("role", "presentation");
+        nodes.push(group);
+      } else {
+        nodes.push(row);
+      }
     });
     this.body.classList.toggle("enter", this.animateBody);
     this.body.replaceChildren(...nodes);
     this.renderFoot();
+  }
+
+  private async deleteSuggestion(message: string) {
+    this.input.focus({ preventScroll: true });
+    try {
+      await deleteRequest(message);
+      await this.refreshCache();
+      this.live.textContent = "Saved request deleted.";
+    } catch {
+      this.live.textContent = "Could not delete the saved request.";
+      this.live.classList.remove("sr-only");
+    }
   }
 
   private select(index: number, scroll = true) {
@@ -509,6 +537,7 @@ export class Spotlight {
   private onVoiceState(state: VoiceState) {
     paintMic(this.mic, state);
     if (this.opened) this.live.textContent = voiceStatusText(state);
+    this.live.classList.toggle("sr-only", state.phase !== "error");
   }
 
   private onVoiceFinal(text: string) {
@@ -543,8 +572,13 @@ export class Spotlight {
     if (this.view === "list" && this.items.length) {
       if (key === "ArrowDown" || (key === "Tab" && !event.shiftKey)) return this.select((this.selected + 1) % this.items.length), true;
       if (key === "ArrowUp" || (key === "Tab" && event.shiftKey)) return this.select((this.selected - 1 + this.items.length) % this.items.length), true;
+      const selected = this.items[this.selected];
+      if (key === "Delete" && event.shiftKey && selected?.kind === "previous") {
+        void this.deleteSuggestion(selected.title);
+        return true;
+      }
       if (key === "Enter") {
-        const item = this.items[this.selected];
+        const item = selected;
         if (event.shiftKey && item.kind === "ask") this.ask(this.input.value.trim(), true);
         else void this.runItem(item);
         return true;

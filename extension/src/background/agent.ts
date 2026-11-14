@@ -1,3 +1,4 @@
+import type { ProviderSetup } from "../../../shared/protocol.js";
 import { LARGER_TEXT } from "../zoom-preference.js";
 import { hasMemoryLine, rememberLines } from "../memory.js";
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
@@ -45,6 +46,7 @@ export class AgentClient {
   private socket: WebSocket | null = null;
   private opening: Promise<void> | null = null;
   private keepAlive: ReturnType<typeof setInterval> | undefined;
+  private setup = new Map<string, (error?: string) => void>();
   private runs = new Map<string, Run>();
 
   constructor(private hooks: AgentHooks) {}
@@ -65,7 +67,7 @@ export class AgentClient {
   private async open() {
     const { serverUrl } = await load();
     await new Promise<void>((resolve, reject) => {
-      const unreachable = new Error("Can't reach the agent server. Is `npm run dev` running?");
+      const unreachable = new Error("The local agent server is offline. Start it to send a new AI request.");
       const socket = new WebSocket(serverUrl);
       const timer = setTimeout(() => {
         socket.close();
@@ -86,6 +88,7 @@ export class AgentClient {
       socket.onclose = () => {
         clearInterval(this.keepAlive);
         this.socket = null;
+        for (const complete of this.setup.values()) complete("Lost connection to the agent server.");
         for (const run of [...this.runs.values()]) this.fail(run, "Lost connection to the agent server.");
         this.setStatus({ connected: false });
       };
@@ -94,6 +97,25 @@ export class AgentClient {
 
   private send(message: ClientMessage) {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message));
+  }
+
+  async configureProvider(input: Omit<ProviderSetup, "id" | "type">) {
+    const { serverUrl } = await load();
+    const url = new URL(serverUrl);
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) throw new Error("Set up providers using the local server.");
+    await this.ensureConnected();
+    const id = crypto.randomUUID();
+    await new Promise<void>((resolve, reject) => {
+      const complete = (error?: string) => {
+        clearTimeout(timer);
+        this.setup.delete(id);
+        if (error) reject(new Error(error));
+        else resolve();
+      };
+      const timer = setTimeout(() => complete("Provider setup timed out."), 180_000);
+      this.setup.set(id, complete);
+      this.send({ ...input, id, type: "providerSetup" });
+    });
   }
 
   private emit(run: Run, event: UiEvent) {
@@ -155,7 +177,7 @@ export class AgentClient {
         trigger,
         message,
         routing: state.routing,
-        models: state.modelOverrides,
+        models: this.status.provider === state.modelOverrideProvider ? state.modelOverrides : undefined,
         history: state.history.slice(-8),
         profile: trigger === "page_load" ? state.profile.filter((line) => !hasMemoryLine([line], LARGER_TEXT)) : state.profile,
         active,
@@ -193,8 +215,9 @@ export class AgentClient {
   }
 
   private async onMessage(message: ServerMessage) {
+    if (message.type === "providerSetupResult") return this.setup.get(message.id)?.(message.error);
     if (message.type === "hello") {
-      this.setStatus({ connected: true, provider: message.provider, models: message.models, available: message.available, error: undefined });
+      this.setStatus({ connected: true, provider: message.provider, models: message.models, available: message.available, providers: message.providers, error: undefined });
       return;
     }
     if (message.type === "tool") return this.runTool(message);

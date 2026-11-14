@@ -1,3 +1,4 @@
+import { getKey } from "../../keys.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { Tier } from "../../../shared/protocol.js";
@@ -17,7 +18,7 @@ function toContent(output: ToolOutput) {
 }
 
 export function createAnthropicProvider(): AgentProvider {
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
   const models: Record<Tier, string> = {
     fast: process.env.ANTHROPIC_MODEL_FAST ?? "claude-haiku-5-5",
     frontier: process.env.ANTHROPIC_MODEL_FRONTIER ?? process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5",

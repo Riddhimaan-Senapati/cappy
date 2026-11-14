@@ -1,3 +1,5 @@
+import { load } from "../storage.js";
+import { requestAudio } from "../voice/audio-api.js";
 import type { VoiceEvent } from "../voice/core.js";
 
 interface RecognitionResult {
@@ -97,8 +99,98 @@ async function start(requested: string) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string }) => {
+let recording: MediaRecorder | undefined;
+let recordingTimer: ReturnType<typeof setTimeout> | undefined;
+let playback: AbortController | undefined;
+let player: HTMLAudioElement | undefined;
+
+async function record() {
+  let stream: MediaStream | undefined;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    const chunks: Blob[] = [];
+    recording = recorder;
+    recorder.ondataavailable = ({ data }) => chunks.push(data);
+    recorder.onerror = () => {
+      emit({ type: "error", error: "start-failed" });
+      if (recorder.state !== "inactive") recorder.stop();
+    };
+    recorder.onstop = async () => {
+      clearTimeout(recordingTimer);
+      stream?.getTracks().forEach((track) => track.stop());
+      if (recording !== recorder) return;
+      try {
+        const response = await requestAudio("transcribe", new Blob(chunks, { type: "audio/webm" }), "audio/webm", AbortSignal.timeout(25_000));
+        const { text } = await response.json() as { text: string };
+        emit({ type: "final", text });
+      } catch {
+        emit({ type: "error", error: "openai-audio" });
+      } finally {
+        recording = undefined;
+        emit({ type: "ended" });
+      }
+    };
+    recorder.start();
+    emit({ type: "listening" });
+    recordingTimer = setTimeout(() => {
+      if (recorder.state === "recording") recorder.stop();
+    }, 30_000);
+  } catch (error) {
+    stream?.getTracks().forEach((track) => track.stop());
+    recording = undefined;
+    emit({ type: "error", error: error instanceof DOMException && error.name === "NotAllowedError" ? "not-allowed" : "start-failed" });
+    emit({ type: "ended" });
+  }
+}
+
+function stopPlayback() {
+  playback?.abort();
+  player?.pause();
+}
+
+async function playSpeech(text: string, rate: number) {
+  stopPlayback();
+  const controller = new AbortController();
+  playback = controller;
+  let url: string | undefined;
+  try {
+    const response = await requestAudio("speech", JSON.stringify({ text, rate }), "application/json", AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]));
+    const blob = await response.blob();
+    controller.signal.throwIfAborted();
+    url = URL.createObjectURL(blob);
+    const element = new Audio(url);
+    player = element;
+    await new Promise<void>((resolve, reject) => {
+      controller.signal.addEventListener("abort", () => resolve(), { once: true });
+      element.onended = () => resolve();
+      element.onerror = () => reject(new Error("Could not play speech"));
+      void element.play().catch(reject);
+    });
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+    if (playback === controller) {
+      playback = undefined;
+      player = undefined;
+    }
+  }
+}
+
+chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string; text?: string; rate?: number }, _sender, respond) => {
   if (message?.target !== "offscreen") return;
-  if (message.kind === "voiceStart") void start(message.lang ?? "");
-  if (message.kind === "voiceStop") recognizer?.stop();
+  if (message.kind === "voiceStart") {
+    void load().then(({ voiceProvider }) => voiceProvider === "openai" ? record() : start(message.lang ?? "")).catch(() => {
+      emit({ type: "error", error: "start-failed" });
+      emit({ type: "ended" });
+    });
+  }
+  if (message.kind === "voiceStop") {
+    if (recording?.state === "recording") recording.stop();
+    recognizer?.stop();
+  }
+  if (message.kind === "speechStop") stopPlayback();
+  if (message.kind === "speechPlay" && typeof message.text === "string") {
+    void playSpeech(message.text, message.rate ?? 1).then(() => respond(true), () => respond(false));
+    return true;
+  }
 });

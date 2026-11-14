@@ -1,11 +1,11 @@
 import type { ContentRequest, DebugPortMessage, DebugPortRequest, StatusInfo, TtsRequest, TtsStateMessage, UiEvent } from "./messages.js";
-import { adoptStyles, h } from "./ui/dom.js";
+import { adoptStyles, h, icon } from "./ui/dom.js";
 import { TOKENS } from "./ui/theme.js";
 import { paintMic, liveRegion, micButton } from "./voice/button.js";
 import { VoiceController } from "./voice/controller.js";
 import { joinVoiceText, parseVoiceEvent, voiceStatusText, type VoiceState } from "./voice/core.js";
 import { VOICE_CSS } from "./voice/styles.js";
-import { load, suggestRequests, type StoredState } from "./storage.js";
+import { deleteRequest, load, suggestRequests, type StoredState } from "./storage.js";
 
 const CSS = `
 html, body { margin: 0; height: 100%; background: #121217; }
@@ -29,7 +29,10 @@ h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .tools div { display: flex; gap: 8px; } .tools .bad { color: var(--bad); } .tools .ms { color: var(--faint); min-width: 54px; }
 form { display: flex; gap: 8px; }
 .previous-requests { display: grid; gap: 4px; }
+.previous-request button.delete-request { color: #f87171; }
 .previous-requests[hidden] { display: none; }
+.previous-request { display: flex; gap: 4px; }
+.previous-request button:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .previous-requests button { padding: 8px 12px; background: var(--raise); color: var(--text); text-align: left; }
 textarea { flex: 1; resize: none; padding: 10px 12px; border-radius: 12px; background: var(--raise); border: 1px solid var(--line); color: var(--text); font: inherit; outline: none; }
 textarea:focus { border-color: var(--accent); }
@@ -65,7 +68,21 @@ function renderPreviousRequests() {
       input.focus();
       renderPreviousRequests();
     });
-    return button;
+    const remove = h("button", "delete-request", "", [icon("trash")]);
+    remove.type = "button";
+    remove.title = "Delete saved request";
+    remove.setAttribute("aria-label", `Delete saved request: ${message}`);
+    remove.addEventListener("click", async () => {
+      input.focus();
+      try {
+        await deleteRequest(message);
+        await refreshRequestState();
+      } catch {
+        live.textContent = "Could not delete the saved request.";
+        live.classList.remove("sr-only");
+      }
+    });
+    return h("div", "previous-request", "", [button, remove]);
   }));
   previousRequests.hidden = !matches.length;
 }
@@ -114,6 +131,7 @@ const voice = new VoiceController({
   onState(state: VoiceState) {
     paintMic(mic, state);
     live.textContent = voiceStatusText(state);
+    live.classList.toggle("sr-only", state.phase !== "error");
   },
   onInterim(text) {
     input.value = joinVoiceText(voiceBase, text);

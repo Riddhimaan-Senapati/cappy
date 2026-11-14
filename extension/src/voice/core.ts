@@ -79,6 +79,10 @@ export function voiceErrorText(error: string): string {
       return "The speech service could not be reached. Check your connection.";
     case "language-not-supported":
       return "Speech recognition does not support this language yet.";
+    case "openai-audio":
+      return "OpenAI audio failed. Check the OpenAI API key and local server.";
+    case "start-failed":
+      return "Could not start voice input. Check microphone access in Settings and try again.";
     case "unsupported":
       return "Voice input is not supported in this browser.";
     default:

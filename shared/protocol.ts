@@ -94,5 +94,9 @@ export interface PingMessage {
   type: "ping";
 }
 
-export type ClientMessage = RunRequest | ToolResultMessage | PingMessage;
-export type ServerMessage = ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models: Record<Tier, string>; available: string[] };
+export type ProviderSetup = { type: "providerSetup"; id: string; provider: string; action: "select" | "key" | "signin"; key?: string };
+export type ProviderOptions = Array<{ id: string; ready: boolean }>;
+export type ProviderSetupResult = { type: "providerSetupResult"; id: string; error?: string };
+
+export type ClientMessage = ProviderSetup | RunRequest | ToolResultMessage | PingMessage;
+export type ServerMessage = ProviderSetupResult | ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models?: Record<Tier, string>; available: string[]; providers?: ProviderOptions };

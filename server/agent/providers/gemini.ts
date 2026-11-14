@@ -1,3 +1,4 @@
+import { getKey } from "../../keys.js";
 import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import { z } from "zod";
 import type { Tier } from "../../../shared/protocol.js";
@@ -9,7 +10,7 @@ import type { AgentProvider } from "./types.js";
 const MAX_STEPS = 16;
 
 export function createGeminiProvider(): AgentProvider {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getKey("GEMINI_API_KEY") });
   const fast = process.env.GEMINI_MODEL_FAST ?? process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
   const models: Record<Tier, string> = { fast, frontier: process.env.GEMINI_MODEL_FRONTIER ?? fast };
   const functionDeclarations = tools.map((tool) => ({

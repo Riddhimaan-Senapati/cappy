@@ -1,5 +1,5 @@
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
-import { load, recordSubmittedRequest } from "../storage.js";
+import { load, recordSubmittedRequest, removeSubmittedRequest } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
 import { acceptFriction, registerFriction } from "./friction.js";
@@ -72,11 +72,15 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string) {
 }
 
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
-  if (handleVoiceRequest(request, sender)) return false;
+  if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
     case "runChat":
       if (sender.tab) void submitChat(sender.tab, request.message, request.fresh).finally(() => sendResponse());
       return !!sender.tab;
+    case "deleteRequest":
+      if (typeof request.message !== "string") return false;
+      void removeSubmittedRequest(request.message).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+      return true;
     case "frictionAccept":
       if (sender.tab) void acceptFriction().catch(() => undefined);
       break;
@@ -89,6 +93,11 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "openShortcuts":
       void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
       break;
+    case "providerSetup":
+      if (sender.url !== chrome.runtime.getURL("popup.html")) return false;
+      void agent.configureProvider({ provider: request.provider, action: request.action, key: request.key })
+        .then(() => sendResponse({ ok: true }), (error: Error) => sendResponse({ ok: false, error: error.message }));
+      return true;
     case "status":
       void agent.ensureConnected().catch(() => undefined).finally(() => sendResponse(agent.status));
       return true;
