@@ -208,6 +208,9 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "suggest":
       void agent.suggest(request.page, request.applied, request.friction, sender.tab?.id).then(sendResponse);
       return true;
+    case "classify":
+      void agent.classify(request.match, request.items).then(sendResponse);
+      return true;
     case "stopRun":
       if (sender.tab?.id) agent.stopRun(sender.tab.id);
       break;

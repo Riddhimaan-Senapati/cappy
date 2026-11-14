@@ -89,6 +89,7 @@ export type BackgroundRequest =
   | { kind: "chatgptLogout" }
   | { kind: "stopRun" }
   | { kind: "suggest"; page: PageOutline; applied: string[]; friction?: FrictionCount[] }
+  | { kind: "classify"; match: string; items: string[] }
   | { kind: "dequeue"; runId: string }
   | { kind: "voiceStart"; lang: string; hold?: boolean }
   | { kind: "voiceStop" }

@@ -11,6 +11,7 @@ import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
 import { describeElement, uniqueSelector } from "./dom.js";
+import { setFilterClassifier } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
@@ -398,6 +399,7 @@ async function handle(request: ContentRequest): Promise<unknown> {
 const LOADED_FLAG = "__adaptiveAgentLoaded";
 
 function start() {
+  setFilterClassifier((match, items) => send({ kind: "classify", match, items }) as Promise<boolean[] | null>);
   // A reloaded extension leaves the previous instance's UI and styles behind; clear them before restoring.
   document.querySelectorAll('[data-ba="ui"], style[data-ba], svg[data-ba], label[data-ba]').forEach((node) => node.remove());
   onSpeechChange((on) => ensureOverlay().setSpeaking(on));

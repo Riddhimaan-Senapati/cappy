@@ -90,8 +90,11 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
   return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
 }
 
+// One-shot calls (suggestions, judging feed items) need speed more than depth; older non-reasoning models reject the field.
+const quickReasoning = (model: string) => (/^(gpt-[5-9]|o\d)/.test(model) ? { reasoning: { effort: "low" as const } } : {});
+
 async function completeText(client: OpenAI, model: string, system: string, user: string, reportUsage: UsageReporter): Promise<string> {
-  const stream = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: user }], store: false, stream: true });
+  const stream = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: user }], store: false, stream: true, ...quickReasoning(model) });
   let text = "";
   for await (const event of stream) {
     if (event.type === "response.completed") reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0 });

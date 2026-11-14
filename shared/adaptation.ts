@@ -56,6 +56,10 @@ export const BlockCall = z.discriminatedUnion("name", [
     name: z.literal("contentFilter"),
     keywords: z.array(z.string()).describe("Words that appear in the items to hide (text, aria-label or link URL); include singular and plural."),
     itemSelector: z.string().nullable().describe("Selector of the repeated item card from the page outline's itemGroups, or null to apply to every repeated item group on any site."),
+    match: z
+      .string()
+      .nullish()
+      .describe("What makes an item match, in plain words, e.g. \"gaming videos\" or \"clickbait or sensational titles\". A model judges every item the keywords miss, including items that load later. null = keywords only."),
     action: z.enum(["hide", "dim"]),
   }),
 ]);

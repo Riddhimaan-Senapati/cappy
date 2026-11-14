@@ -10,6 +10,7 @@ import { defaultProviderId, describeProviders, forget, getProvider, keyFor, reso
 import type { AgentProvider } from "./agent/providers/types.js";
 import { recallForRun } from "./agent/memory.js";
 import { pickTier } from "./agent/router.js";
+import { classifyItems } from "./agent/classify.js";
 import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { setKey } from "./keys.js";
@@ -130,6 +131,14 @@ wss.on("connection", (socket, request) => {
         return void broadcastProviders();
       case "chatgptLogin":
         return void signIn(socket);
+      case "classify": {
+        const provider = resolveProvider(message.provider);
+        const started = Date.now();
+        const model = message.models?.fast || provider?.models.fast;
+        const verdicts = provider ? await classifyItems(provider, message, (usage) => sendTo(socket, { type: "usage", usage, requestId: message.requestId, model: model ?? "" })).catch(() => null) : null;
+        console.log(`[classify] ${message.items.length} items for "${message.match.slice(0, 60)}" in ${Date.now() - started}ms: ${verdicts ? verdicts.filter(Boolean).length : "failed"} matched`);
+        return sendTo(socket, { type: "classified", requestId: message.requestId, verdicts });
+      }
       case "suggest": {
         const provider = resolveProvider(message.provider);
         const suggestion = provider ? await suggestFor(provider, message, (usage) => sendTo(socket, { type: "usage", usage, requestId: message.requestId, model: message.models?.fast || provider.models.fast })).catch(() => null) : null;
