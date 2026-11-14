@@ -1,15 +1,9 @@
 import "fake-indexeddb/auto";
-import { AsyncLocalStorage } from "node:async_hooks";
 import { describe, expect, test } from "bun:test";
-import { AsyncLocalStorageProviderSingleton } from "@langchain/core/singletons";
 import { emptyCheckpoint, type CheckpointMetadata } from "@langchain/langgraph-checkpoint";
 import type { LlmRequest } from "@browser-agent/shared";
 import { createCompanion, type Llm } from "./index";
 import { IndexedDBSaver } from "./indexeddb-saver";
-
-// The web entry has no async context provider, so interrupt() needs one. Browsers lack
-// AsyncLocalStorage, so this is only wired up for the Bun test process.
-AsyncLocalStorageProviderSingleton.initializeGlobalInstance(new AsyncLocalStorage());
 
 const fakeLlm: Llm = async (req: LlmRequest) => {
   const last = req.messages.at(-1)?.content ?? "";

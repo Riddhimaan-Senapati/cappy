@@ -1,4 +1,4 @@
-import { Annotation, END, START, StateGraph, interrupt } from "@langchain/langgraph/web";
+import { Annotation, END, START, StateGraph } from "@langchain/langgraph/web";
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import { EMPTY_PROFILE, NeedId, NeedKind, type Profile } from "@browser-agent/shared";
 import { z } from "zod";
@@ -62,6 +62,7 @@ const State = Annotation.Root({
   }),
   profile: Annotation<Profile>({ value: (_left, right) => right, default: () => EMPTY_PROFILE }),
   pending: Annotation<Proposal | null>({ value: (_left, right) => right, default: () => null }),
+  decision: Annotation<boolean | null>({ value: (_left, right) => right, default: () => null }),
 });
 
 export function buildCompanionGraph(llm: Llm, checkpointer: BaseCheckpointSaver) {
@@ -90,11 +91,10 @@ export function buildCompanionGraph(llm: Llm, checkpointer: BaseCheckpointSaver)
     };
   };
 
-  const propose = (state: typeof State.State) => {
+  const applyDecision = (state: typeof State.State) => {
     const proposal = state.pending;
-    if (!proposal) throw new Error("propose reached without a pending proposal");
-    const accept = interrupt(proposal);
-    if (accept) {
+    if (!proposal) throw new Error("apply_decision reached without a pending proposal");
+    if (state.decision) {
       const { need } = proposal;
       return {
         profile: {
@@ -104,19 +104,24 @@ export function buildCompanionGraph(llm: Llm, checkpointer: BaseCheckpointSaver)
         },
         messages: [{ role: "assistant" as const, content: `Saved: ${need.detail}` }],
         pending: null,
+        decision: null,
       };
     }
     return {
       messages: [{ role: "assistant" as const, content: "Okay, I won't save that." }],
       pending: null,
+      decision: null,
     };
   };
 
+  const route = (state: typeof State.State) =>
+    state.decision !== null && state.pending !== null ? "apply_decision" : "chat";
+
   return new StateGraph(State)
     .addNode("chat", chat)
-    .addNode("propose", propose)
-    .addEdge(START, "chat")
-    .addConditionalEdges("chat", (state) => (state.pending ? "propose" : END))
-    .addEdge("propose", END)
+    .addNode("apply_decision", applyDecision)
+    .addConditionalEdges(START, route, ["apply_decision", "chat"])
+    .addEdge("chat", END)
+    .addEdge("apply_decision", END)
     .compile({ checkpointer });
 }

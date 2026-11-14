@@ -1,4 +1,3 @@
-import { Command } from "@langchain/langgraph/web";
 import { EMPTY_PROFILE, type LlmRequest, type LlmResponse, type Need, type Profile } from "@browser-agent/shared";
 import { buildCompanionGraph } from "./graph";
 import { IndexedDBSaver } from "./indexeddb-saver";
@@ -29,14 +28,11 @@ export async function createCompanion(opts: CompanionOptions): Promise<Companion
   const config = { configurable: { thread_id: opts.threadId } };
 
   const view = async (): Promise<CompanionView> => {
-    const snapshot = await graph.getState(config);
-    const values = snapshot.values ?? {};
-    const paused = snapshot.next.includes("propose");
-    const interrupt = paused ? snapshot.tasks.flatMap((task) => task.interrupts)[0] : undefined;
+    const { values } = await graph.getState(config);
     return {
       messages: values.messages ?? [],
       profile: values.profile ?? EMPTY_PROFILE,
-      pending: (interrupt?.value as Proposal | undefined) ?? null,
+      pending: values.pending ?? null,
     };
   };
 
@@ -49,7 +45,7 @@ export async function createCompanion(opts: CompanionOptions): Promise<Companion
     },
     async decide(accept) {
       if (!(await view()).pending) throw new Error("no pending proposal to decide");
-      await graph.invoke(new Command({ resume: accept }), config);
+      await graph.invoke({ decision: accept }, config);
       return view();
     },
   };
