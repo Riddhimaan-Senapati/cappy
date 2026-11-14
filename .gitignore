@@ -230,3 +230,6 @@ node_modules/
 
 # Fetched by scripts/fetch-mediapipe.ts
 apps/extension/public/mediapipe/
+
+# ChatGPT sign-in credentials (refresh token); written by bun run chatgpt:login
+apps/backend/.chatgpt-credentials.json
