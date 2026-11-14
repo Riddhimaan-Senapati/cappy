@@ -1,12 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addSeconds } from "date-fns";
+import { addHours, addSeconds } from "date-fns";
 import { describeSchedule, isScheduleActive } from "../shared/validate.js";
 import type { Change } from "../shared/adaptation.js";
 import { parseSpokenSchedule } from "../server/agent/schedule.js";
 
 type Schedule = NonNullable<Change["schedule"]>;
 const at = (y: number, mo: number, d: number, h: number, m = 0, s = 0) => new Date(y, mo - 1, d, h, m, s);
+const visibleSchedule = (schedule: Schedule | null | undefined) => ({
+  days: schedule?.days ?? null,
+  start: schedule?.start ?? null,
+  end: schedule?.end ?? null,
+  from: schedule?.from ?? null,
+  until: schedule?.until ?? null,
+  untilAt: schedule?.untilAt ?? null,
+});
 
 describe("isScheduleActive", () => {
   it("is always active without a schedule", () => {
@@ -92,5 +100,72 @@ describe("parseSpokenSchedule", () => {
 
   it("keeps weekends as Saturday and Sunday", () => {
     assert.deepEqual(parseSpokenSchedule("ignore podcasts on weekends", now), { days: ["sat", "sun"], start: null, end: null });
+  });
+
+  it("treats this weekend spoken on Saturday as that Saturday and Sunday", () => {
+    const schedule = parseSpokenSchedule("ignore podcasts this weekend", now);
+    assert.deepEqual(visibleSchedule(schedule), {
+      days: null,
+      start: null,
+      end: null,
+      from: "2026-11-14",
+      until: "2026-11-15",
+      untilAt: null,
+    });
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 14, 16, 33)), true, "Saturday afternoon");
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 15, 12, 0)), true, "Sunday");
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 16, 16, 33)), false, "Monday after");
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 21, 16, 33)), false, "the Saturday after");
+  });
+
+  it("treats this weekend spoken on Wednesday as the upcoming Saturday and Sunday", () => {
+    const schedule = parseSpokenSchedule("ignore podcasts this weekend", at(2026, 11, 11, 16, 33, 0));
+    assert.deepEqual(visibleSchedule(schedule), {
+      days: null,
+      start: null,
+      end: null,
+      from: "2026-11-14",
+      until: "2026-11-15",
+      untilAt: null,
+    });
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 11, 16, 33)), false, "Wednesday");
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 13, 16, 33)), false, "Friday");
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 14, 16, 33)), true, "Saturday afternoon");
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 16, 16, 33)), false, "Monday after");
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 21, 16, 33)), false, "the Saturday after");
+  });
+
+  it("keeps on weekends repeating with no dates on Saturday and Wednesday", () => {
+    const spoken = [
+      ["Saturday", now],
+      ["Wednesday", at(2026, 11, 11, 16, 33, 0)],
+    ] as const;
+    for (const [day, spokenAt] of spoken) {
+      const schedule = parseSpokenSchedule("ignore podcasts on weekends", spokenAt);
+      assert.deepEqual(schedule, { days: ["sat", "sun"], start: null, end: null }, day);
+      assert.equal(isScheduleActive(schedule, at(2026, 11, 14, 16, 33)), true, `${day} Saturday afternoon`);
+      assert.equal(isScheduleActive(schedule, at(2026, 11, 16, 16, 33)), false, `${day} Monday after`);
+      assert.equal(isScheduleActive(schedule, at(2026, 11, 21, 16, 33)), true, `${day} the Saturday after`);
+    }
+  });
+
+  it("keeps only the length when a clock window is in the same sentence", () => {
+    const end = addHours(now, 2);
+    const schedule = parseSpokenSchedule("for the next 2 hours between 09:00 and 17:00, don't show videos", now);
+    assert.equal(schedule?.untilAt, end.toISOString());
+    assert.equal(schedule?.start ?? null, null);
+    assert.equal(schedule?.end ?? null, null);
+    assert.equal(schedule?.days ?? null, null);
+    assert.equal(schedule?.from ?? null, null);
+    assert.equal(schedule?.until ?? null, null);
+    assert.equal(isScheduleActive(schedule, at(2026, 11, 14, 17, 30)), true, "17:30, after 17:00 and before the length ends");
+    assert.equal(isScheduleActive(schedule, new Date(end.getTime() - 1000)), true, "one second before the end");
+    assert.equal(isScheduleActive(schedule, end), false, "the end instant");
+  });
+
+  it("treats a unit with no count as no time", () => {
+    assert.equal(parseSpokenSchedule("for a minute", now), null);
+    assert.equal(parseSpokenSchedule("don't show videos for a minute", now), null);
+    assert.equal(parseSpokenSchedule("for an hour", now), null);
   });
 });

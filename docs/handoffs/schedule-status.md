@@ -1,5 +1,7 @@
 # Handoff: time-based rules and schedule status
 
+Superseded by `docs/handoffs/next.md` at `5207ee7`. This file describes the branch before spoken time spans, ghost suggestions, and the event-log toggle.
+
 Branch `feat/schedule-status`, PR #7 against `main`. Rebased on `main` at `5c8187f`. Not merged yet.
 
 ## What already existed on main
