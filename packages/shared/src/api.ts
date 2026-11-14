@@ -10,6 +10,7 @@ export const PageOutline = z
     images: z.number().int().nonnegative(),
     videos: z.number().int().nonnegative(),
     canvases: z.number().int().nonnegative(),
+    text: z.string().max(6000).optional(),
   })
   .strict();
 export type PageOutline = z.infer<typeof PageOutline>;
@@ -37,6 +38,45 @@ export type LlmRequest = z.infer<typeof LlmRequest>;
 export const LlmResponse = z.object({ text: z.string() }).strict();
 export type LlmResponse = z.infer<typeof LlmResponse>;
 
+export const RequestBody = z
+  .object({
+    url: z.url({ protocol: /^https?$/ }),
+    outline: PageOutline,
+    profile: Profile,
+    request: z.string().min(1).max(500),
+  })
+  .strict();
+export type RequestBody = z.infer<typeof RequestBody>;
+
+export const Screenshot = z.string().startsWith("data:image/").max(4_000_000);
+
+export const VerifyRequest = z
+  .object({
+    adaptation: Adaptation,
+    before: Screenshot,
+    after: Screenshot,
+    axeBefore: z.number().int().nonnegative(),
+    axeAfter: z.number().int().nonnegative(),
+  })
+  .strict();
+export type VerifyRequest = z.infer<typeof VerifyRequest>;
+
+export const Verdict = z.enum(["improved", "no_change", "worse"]);
+export type Verdict = z.infer<typeof Verdict>;
+export const VerifyResponse = z.object({ verdict: Verdict, notes: z.string().max(300) }).strict();
+export type VerifyResponse = z.infer<typeof VerifyResponse>;
+
+export const FrictionKind = z.enum(["zoom_in", "zoom_out", "misclick", "reread", "scroll_back"]);
+export type FrictionKind = z.infer<typeof FrictionKind>;
+export const FrictionEvent = z
+  .object({ kind: FrictionKind, host: z.string().max(253), at: z.number().int().nonnegative() })
+  .strict();
+export type FrictionEvent = z.infer<typeof FrictionEvent>;
+
+export const INJECTION_BLOCK_REASON = "This page tried to give the agent instructions, so no changes were made.";
+
 export const ADAPT_PATH = "/adapt";
+export const REQUEST_PATH = "/request";
+export const VERIFY_PATH = "/verify";
 export const LLM_PATH = "/llm";
 export const DEFAULT_BACKEND_URL = "http://localhost:8787";
