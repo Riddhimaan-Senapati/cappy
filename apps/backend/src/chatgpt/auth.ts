@@ -75,6 +75,11 @@ export function assertPlanScope(scopes: readonly string[]): void {
   );
 }
 
+// OpenAI rejects a bare UUID here (invalid_authorize_request on ext_agent_host_id); both teammate clients use the urn form.
+export function newHostId(): string {
+  return `urn:uuid:${randomUUID()}`;
+}
+
 export function buildAuthorizeUrl(options: {
   clientId?: string;
   hostId: string;
@@ -230,7 +235,7 @@ export async function login(): Promise<ChatGptCredentials> {
   const existing = readCredentials();
   const port = callbackPort();
   const redirectUri = `http://127.0.0.1:${port}${CALLBACK_PATH}`;
-  const hostId = existing?.ext_agent_host_id ?? randomUUID();
+  const hostId = existing?.ext_agent_host_id ?? newHostId();
   const { verifier, challenge } = pkcePair();
   const state = randomBytes(24).toString("base64url");
   const nonce = randomBytes(24).toString("base64url");

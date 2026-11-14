@@ -14,6 +14,7 @@ import {
   writeCredentials,
   type ChatGptCredentials,
 } from "./auth";
+import { newHostId } from "./auth";
 
 const sample: ChatGptCredentials = {
   issuer: "https://auth.openai.com",
@@ -133,4 +134,9 @@ describe("callback port", () => {
     expect(callbackPort({ CHATGPT_CALLBACK_PORT: "8123" })).toBe(8123);
     expect(callbackPort({ CHATGPT_CALLBACK_PORT: "nope" })).toBe(1455);
   });
+});
+
+test("host id uses the urn:uuid form OpenAI accepts", () => {
+  expect(newHostId()).toMatch(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  expect(newHostId()).not.toBe(newHostId());
 });
