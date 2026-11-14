@@ -214,16 +214,27 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         void save({ voiceProvider: "chrome" });
       }
     });
+    const voiceKey = h("input");
+    voiceKey.type = "password";
+    voiceKey.autocomplete = "off";
+    voiceKey.placeholder = "OpenAI API key";
+    voiceKey.setAttribute("aria-label", "OpenAI voice API key");
+    voiceKey.disabled = checkingVoice;
+    const inPopup = location.href === chrome.runtime.getURL("popup.html");
+    const keyHelp = h("small", "", "Enter a key here or leave blank to verify a key already saved.");
+    const voiceKeyField = inPopup ? h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "OpenAI API key"), keyHelp]), voiceKey]) : null;
     const verify = h("button", "s-btn", activeVoice === "openai" ? "Verify OpenAI audio again" : "Verify and enable OpenAI");
     verify.type = "button";
     verify.disabled = checkingVoice;
     verify.addEventListener("click", async () => {
       if (checkingVoice) return;
+      const key = inPopup ? voiceKey.value.trim() : "";
+      voiceKey.value = "";
       checkingVoice = true;
       voiceCheck = "Checking speech and transcription with a short sample…";
       queue();
       try {
-        await requestAudio("verify", "", "application/json", AbortSignal.timeout(28_000));
+        await requestAudio("verify", JSON.stringify(key ? { key } : {}), "application/json", AbortSignal.timeout(28_000));
         await save({ voiceProvider: "openai", openAIVoiceVerified: true });
         voiceCheck = "OpenAI audio verified.";
       } catch (error) {
@@ -249,7 +260,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
         toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
       ),
-      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, verify, verificationStatus),
+      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, ...(voiceKeyField ? [voiceKeyField] : []), verify, verificationStatus),
       memory.render(state, toggle),
       section(
         "Speech",

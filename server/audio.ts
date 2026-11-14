@@ -1,8 +1,10 @@
 import express from "express";
 import OpenAI from "openai";
-import { getKey } from "./keys.js";
+import { getKey, setKey } from "./keys.js";
 
 export const audio = express.Router();
+
+const audioKey = () => getKey("OPENAI_AUDIO_API_KEY") ?? getKey("OPENAI_API_KEY");
 
 audio.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -18,7 +20,7 @@ audio.use((req, res, next) => {
 });
 
 audio.post("/speech", express.json({ limit: "24kb" }), async (req, res) => {
-  const apiKey = getKey("OPENAI_API_KEY");
+  const apiKey = audioKey();
   if (!apiKey) { res.sendStatus(503); return; }
   const { text, rate } = req.body ?? {};
   if (typeof text !== "string" || !text.trim() || text.length > 4096) { res.sendStatus(400); return; }
@@ -34,7 +36,7 @@ audio.post("/speech", express.json({ limit: "24kb" }), async (req, res) => {
 });
 
 audio.post("/transcribe", express.raw({ type: "audio/webm", limit: "5mb" }), async (req, res) => {
-  const apiKey = getKey("OPENAI_API_KEY");
+  const apiKey = audioKey();
   if (!apiKey) { res.sendStatus(503); return; }
   if (!Buffer.isBuffer(req.body) || !req.body.length) { res.sendStatus(400); return; }
   try {
@@ -46,10 +48,16 @@ audio.post("/transcribe", express.raw({ type: "audio/webm", limit: "5mb" }), asy
   }
 });
 
-audio.post("/verify", async (_req, res) => {
-  const apiKey = getKey("OPENAI_API_KEY");
+audio.post("/verify", express.json({ limit: "8kb" }), async (req, res) => {
+  const previous = audioKey();
+  const candidate = req.body?.key;
+  if (candidate !== undefined && (typeof candidate !== "string" || !candidate || candidate.length > 4096 || /\s/.test(candidate))) {
+    res.status(400).json({ error: "Enter a valid OpenAI API key." });
+    return;
+  }
+  const apiKey = candidate ?? previous;
   if (!apiKey) {
-    res.status(503).json({ error: "Add an OpenAI API key in Model provider first." });
+    res.status(503).json({ error: "Enter an OpenAI API key in the extension popup under Model → Voice provider." });
     return;
   }
 
@@ -60,10 +68,11 @@ audio.post("/verify", async (_req, res) => {
     });
     const file = new File([await speech.arrayBuffer()], "voice-check.wav", { type: "audio/wav" });
     await client.audio.transcriptions.create({ file, model: "gpt-4o-mini-transcribe" });
-    if (apiKey !== getKey("OPENAI_API_KEY")) {
+    if (previous !== audioKey()) {
       res.status(409).json({ error: "The API key changed. Verify it again." });
       return;
     }
+    if (candidate) setKey("OPENAI_AUDIO_API_KEY", candidate);
     res.sendStatus(204);
   } catch {
     res.status(502).json({ error: "OpenAI audio verification failed. Check the key, billing, and access to both audio models." });
