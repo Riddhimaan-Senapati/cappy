@@ -1,0 +1,131 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { validateChange, type PageOutline } from "../shared/adaptation.js";
+import { planStubRun, type StubCall } from "../server/agent/providers/stub.js";
+import { createProvider } from "../server/agent/providers/index.js";
+
+const page = (extra: Partial<PageOutline & { itemGroups: { selector: string; samples: string[] }[] }> = {}): PageOutline => ({
+  url: "http://localhost:8787/demo/campus.html",
+  title: "Campus",
+  headings: [],
+  elements: [],
+  stats: { inputsWithoutLabel: 0, smallTargets: 0, smallText: 0, lowContrastText: 0, imagesWithoutAlt: 0, runningAnimations: 0, visibleAdsOrPopups: 0 },
+  styleHints: { background: "#fff", color: "#000", fontSizePx: 12, fontFamily: "serif" },
+  textSample: "",
+  ...extra,
+});
+
+const chat = (message: string, extra: Partial<Parameters<typeof planStubRun>[0]> = {}) =>
+  planStubRun({ trigger: "chat", message, profile: [], page: page(), ...extra });
+
+const applied = (calls: StubCall[]) => calls.flatMap((call) => (call.name === "apply_change" ? [call.input.change] : []));
+
+describe("stub provider routing", () => {
+  it("maps text size requests to a textScale block", () => {
+    for (const message of ["make the text bigger", "bigger text please", "larger text", "text larger"]) {
+      const [change] = applied(chat(message).calls);
+      assert.equal(change?.id, "bigger-text", message);
+      assert.deepEqual(change?.block, { name: "textScale", scale: 1.3 }, message);
+    }
+  });
+
+  it("maps dark mode to the darkMode block with site controls", () => {
+    const [change] = applied(chat("turn on dark mode").calls);
+    assert.deepEqual(change?.block, { name: "darkMode", allowSiteControls: true });
+  });
+
+  it("maps invert to a CSS filter", () => {
+    const [change] = applied(chat("invert this page").calls);
+    assert.equal(change?.css, "html { filter: invert(1) hue-rotate(180deg); }");
+    assert.equal(change?.block, null);
+  });
+
+  it("hides a word with singular and plural keywords and no item selector when the outline has no itemGroups", () => {
+    const [change] = applied(chat("remove all ads").calls);
+    assert.equal(change?.id, "hide-ads");
+    assert.deepEqual(change?.block, { name: "contentFilter", keywords: ["ads", "ad"], itemSelector: null, action: "hide" });
+  });
+
+  it("uses the first itemGroup whose samples mention the word", () => {
+    const outline = page({
+      itemGroups: [
+        { selector: ".story", samples: ["Local news"] },
+        { selector: ".promo-card", samples: ["Sponsored: Ad-free plan"] },
+      ],
+    });
+    const [change] = applied(planStubRun({ trigger: "chat", message: "hide ads", profile: [], page: outline }).calls);
+    assert.equal(change?.block && change.block.name === "contentFilter" ? change.block.itemSelector : undefined, ".promo-card");
+  });
+
+  it("hides popups with the singular and plural keyword forms", () => {
+    const [change] = applied(chat("hide popups").calls);
+    assert.deepEqual(change?.block, { name: "contentFilter", keywords: ["popups", "popup"], itemSelector: null, action: "hide" });
+  });
+
+  it("applies a deuteranopia filter and remembers red-green colorblindness", () => {
+    const plan = chat("I'm red-green colorblind");
+    const [change] = applied(plan.calls);
+    assert.deepEqual(change?.block, { name: "colorblind", type: "deuteranopia", scope: "media" });
+    assert.deepEqual(plan.calls.at(-1), { name: "remember", input: { lines: ["Red-green colorblind"] } });
+  });
+
+  it("remembers preference statements without applying a change", () => {
+    const plan = chat("I prefer high contrast menus");
+    assert.deepEqual(applied(plan.calls), []);
+    assert.deepEqual(plan.calls, [{ name: "remember", input: { lines: ["I prefer high contrast menus"] } }]);
+  });
+
+  it("applies larger text on page_load when the profile asks for it", () => {
+    const plan = planStubRun({ trigger: "page_load", message: "", profile: ["Prefers larger text"], page: page() });
+    assert.equal(applied(plan.calls)[0]?.block && applied(plan.calls)[0].block?.name, "textScale");
+    assert.equal(plan.reply, "Applied larger text from your profile.");
+  });
+
+  it("makes no change on page_load when the profile has nothing for this page", () => {
+    const plan = planStubRun({ trigger: "page_load", message: "", profile: ["Red-green colorblind"], page: page() });
+    assert.deepEqual(plan.calls, []);
+    assert.equal(plan.reply, "");
+  });
+
+  it("makes no change for an unmatched request and says what it understands", () => {
+    const plan = chat("write me a poem");
+    assert.deepEqual(plan.calls, []);
+    assert.match(plan.reply, /no scripted rule matched/);
+  });
+
+  it("only produces changes that pass the shared validator", () => {
+    const messages = ["make the text bigger", "dark mode", "invert", "hide ads", "colorblind", "remove all popups"];
+    for (const message of messages) {
+      for (const change of applied(chat(message).calls)) {
+        assert.equal(validateChange(change), null, `${message}: ${change.id}`);
+      }
+    }
+  });
+});
+
+describe("provider registry", () => {
+  it("selects the stub provider with LLM_PROVIDER=stub and needs no key", () => {
+    const previous = process.env.LLM_PROVIDER;
+    process.env.LLM_PROVIDER = "stub";
+    try {
+      const provider = createProvider();
+      assert.equal(provider.name, "stub");
+      assert.deepEqual(provider.models, { fast: "stub-fast", frontier: "stub-frontier" });
+    } finally {
+      if (previous === undefined) delete process.env.LLM_PROVIDER;
+      else process.env.LLM_PROVIDER = previous;
+    }
+  });
+
+  it("keeps gemini as the default and still requires its key", () => {
+    const saved = { provider: process.env.LLM_PROVIDER, key: process.env.GEMINI_API_KEY };
+    delete process.env.LLM_PROVIDER;
+    delete process.env.GEMINI_API_KEY;
+    try {
+      assert.throws(() => createProvider(), /needs GEMINI_API_KEY/);
+    } finally {
+      if (saved.provider !== undefined) process.env.LLM_PROVIDER = saved.provider;
+      if (saved.key !== undefined) process.env.GEMINI_API_KEY = saved.key;
+    }
+  });
+});

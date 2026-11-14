@@ -9,7 +9,12 @@
     "watch:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch",
     "dev": "npm run build:ext && concurrently -k -n server,ext \"npm run server\" \"npm run watch:ext\"",
     "typecheck": "tsc --noEmit",
-    "chatgpt:login": "tsx server/auth/chatgpt.ts"
+    "chatgpt:login": "tsx server/auth/chatgpt.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "e2e": "tsx scripts/e2e/run-all.ts",
+    "e2e:gate": "tsx scripts/e2e/gate.ts",
+    "e2e:injection": "tsx scripts/e2e/injection.ts",
+    "e2e:replay": "tsx scripts/e2e/replay.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
@@ -28,6 +33,7 @@
     "@types/ws": "^8.18.2",
     "concurrently": "^10.0.7",
     "esbuild": "^0.28.2",
+    "playwright": "^1.65.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   }
