@@ -3,6 +3,7 @@ import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, ToolCallMe
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
 import { rememberLines } from "../memory.js";
 import { load, recipeKey, save, saveRecipe } from "../storage.js";
+import { speakIfEnabled } from "./tts.js";
 
 interface Run {
   runId: string;
@@ -174,7 +175,9 @@ export class AgentClient {
         if (!outcome.ok) return false;
         run.applied.set(change.id, change);
       }
-      this.emit(run, { type: "done", runId: run.runId, trigger: run.trigger, reply: "Done, from your saved version. Hold Shift+Enter to ask the AI again.", applied: this.summaries(run), fromCache: true });
+      const reply = "Done, from your saved version. Hold Shift+Enter to ask the AI again.";
+      void speakIfEnabled(reply, run.tabId);
+      this.emit(run, { type: "done", runId: run.runId, trigger: run.trigger, reply, applied: this.summaries(run), fromCache: true });
       return true;
     } catch {
       return false;
@@ -223,8 +226,11 @@ export class AgentClient {
       await saveRecipe(recipeKey(run.origin, run.message), { message: run.message, changes: [...run.applied.values()], at: Date.now() });
     }
     const applied = this.summaries(run);
+    if (run.trigger === "chat") void speakIfEnabled(reply, run.tabId);
     if (run.trigger === "page_load" && applied.length) {
-      await sendToTab(run.tabId, { kind: "toast", text: `Adapted for you: ${applied.map((change) => change.summary).join(", ")}.`, undoIds: applied.map((change) => change.id) }).catch(() => undefined);
+      const announcement = `Adapted for you: ${applied.map((change) => change.summary).join(", ")}.`;
+      void speakIfEnabled(announcement, run.tabId);
+      await sendToTab(run.tabId, { kind: "toast", text: announcement, undoIds: applied.map((change) => change.id) }).catch(() => undefined);
     }
     this.finish(run);
     this.emit(run, { type: "done", runId: run.runId, trigger: run.trigger, reply, applied, fromCache: false });

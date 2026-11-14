@@ -22,7 +22,17 @@ export type ContentRequest =
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
-  | { kind: "ui"; event: UiEvent };
+  | { kind: "ui"; event: UiEvent }
+  | { kind: "readAloud" };
+
+export type TtsSource = "reply" | "announce" | "page" | "test";
+
+export type TtsRequest =
+  | { type: "tts-speak"; text: string; source: TtsSource }
+  | { type: "tts-stop" }
+  | { type: "tts-voices" };
+
+export type TtsStateMessage = { type: "tts-state"; speaking: boolean };
 
 export type ContentResponse = { ok: true; result: unknown } | { ok: false; error: string };
 

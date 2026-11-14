@@ -1,6 +1,9 @@
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
 import { load } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
+import { registerTts } from "./tts.js";
+
+registerTts();
 
 const debugPorts = new Set<chrome.runtime.Port>();
 

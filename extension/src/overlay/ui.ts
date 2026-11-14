@@ -17,6 +17,7 @@ export class OverlayUi {
   private toastTimer: number | undefined;
   private triggers = new Map<string, string>();
   private fabWanted = false;
+  private speakPill: HTMLElement | null = null;
 
   constructor(private deps: SpotlightDeps) {
     this.host.setAttribute("data-ba", "ui");
@@ -123,6 +124,24 @@ export class OverlayUi {
     this.bringToFront();
     requestAnimationFrame(() => toast.classList.add("show"));
     this.toastTimer = window.setTimeout(() => this.dismissToast(), TOAST_MS);
+  }
+
+  setSpeaking(on: boolean) {
+    if (!on) {
+      this.speakPill?.remove();
+      this.speakPill = null;
+      return;
+    }
+    if (this.speakPill) return;
+    const stop = h("button", "link", "Stop");
+    stop.type = "button";
+    stop.addEventListener("click", () => this.deps.stopSpeaking());
+    const pill = h("div", "toast speak", "", [icon("volume", 14), h("span", "msg", "Reading aloud"), stop]);
+    pill.setAttribute("role", "status");
+    this.speakPill = pill;
+    this.shadow.append(pill);
+    this.bringToFront();
+    requestAnimationFrame(() => pill.classList.add("show"));
   }
 
   dismissToast() {

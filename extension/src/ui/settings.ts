@@ -1,9 +1,23 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
-import { ROUTING_LABELS, type StatusInfo } from "../messages.js";
+import { ROUTING_LABELS, type StatusInfo, type TtsRequest } from "../messages.js";
 import { load, save, type StoredState } from "../storage.js";
 import { h, icon } from "./dom.js";
 import { createMemoryView } from "./memory.js";
+
+let voicesRequest: Promise<string[]> | null = null;
+
+function loadVoices(): Promise<string[]> {
+  voicesRequest ??= chrome.runtime
+    .sendMessage({ type: "tts-voices" } satisfies TtsRequest)
+    .then((response: { voices?: Array<{ voiceName: string }> } | undefined) => {
+      const names = (response?.voices ?? []).map((voice) => voice.voiceName);
+      if (!names.length) voicesRequest = null;
+      return names;
+    })
+    .catch(() => []);
+  return voicesRequest;
+}
 
 export interface SettingsContext {
   listChanges(): Promise<ActiveChange[]>;
@@ -63,7 +77,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let queued = false;
 
   const paint = async () => {
-    const [state, changes, status] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false }))]);
+    const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false })), loadVoices()]);
     if (disposed) return;
     const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
     const hadFocus = focused instanceof HTMLInputElement && root.contains(focused);
@@ -107,6 +121,39 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     const section = (title: string, ...children: Node[]) => h("section", "s-sec", "", [h("h3", "", title), ...children]);
     const set = <K extends keyof StoredState>(key: K) => (value: StoredState[K]) => save({ [key]: value } as Partial<StoredState>);
 
+    const voiceSelect = h("select", "s-select");
+    voiceSelect.setAttribute("aria-label", "Voice");
+    const defaultVoice = h("option", "", "Default voice");
+    defaultVoice.value = "";
+    voiceSelect.append(defaultVoice);
+    for (const name of new Set([state.ttsVoice, ...voices].filter(Boolean))) {
+      const option = h("option", "", name);
+      option.value = name;
+      voiceSelect.append(option);
+    }
+    voiceSelect.value = state.ttsVoice;
+    voiceSelect.addEventListener("change", () => void save({ ttsVoice: voiceSelect.value }));
+    const voiceRow = h("label", "s-row", "", [
+      h("div", "grow", "", [h("div", "", "Voice"), h("small", "", voices.length ? "Voices installed on this device" : "No voices found yet")]),
+      voiceSelect,
+    ]);
+
+    const rate = h("input");
+    rate.type = "range";
+    rate.min = "0.5";
+    rate.max = "2";
+    rate.step = "0.1";
+    rate.value = String(state.ttsRate);
+    rate.setAttribute("aria-label", "Speaking rate");
+    const rateValue = h("small", "", `${state.ttsRate.toFixed(1)}×`);
+    rate.addEventListener("input", () => (rateValue.textContent = `${Number(rate.value).toFixed(1)}×`));
+    rate.addEventListener("change", () => void save({ ttsRate: Number(rate.value) }));
+    const rateRow = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Speed"), rateValue]), rate]);
+
+    const testVoice = h("button", "s-btn", "Test voice");
+    testVoice.type = "button";
+    testVoice.addEventListener("click", () => void chrome.runtime.sendMessage({ type: "tts-speak", text: "This is how I sound.", source: "test" } satisfies TtsRequest).catch(() => undefined));
+
     root.replaceChildren(
       statusCard(status),
       section(
@@ -117,6 +164,13 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       ),
       section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status)),
       memory.render(state, toggle),
+      section(
+        "Speech",
+        toggle("Read replies aloud", "Speaks chat replies and page-load announcements.", state.speakReplies, set("speakReplies")),
+        voiceRow,
+        rateRow,
+        h("div", "s-foot", "", [testVoice]),
+      ),
       section("On this page", ...changeRows),
       h("div", "s-foot", "", [shortcuts, debug]),
     );
