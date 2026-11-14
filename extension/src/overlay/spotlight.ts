@@ -75,6 +75,7 @@ export class Spotlight {
   private view: View = "list";
   private items: Item[] = [];
   private selected = 0;
+  private queuedRequests: string[] = [];
   private run: RunState | null = null;
   private opened = false;
   private closeTimer: number | undefined;
@@ -206,7 +207,10 @@ export class Spotlight {
   private onInput() {
     window.clearTimeout(this.closeTimer);
     if (this.view === "run" && this.run?.result) this.setView("list");
-    if (this.view !== "list") return;
+    if (this.view !== "list") {
+      this.renderFoot();
+      return;
+    }
     this.selected = 0;
     this.renderList();
   }
@@ -378,12 +382,59 @@ export class Spotlight {
   }
 
   ask(message: string, fresh: boolean) {
-    if (!message) return;
+    if (!message || this.working) return;
     window.clearTimeout(this.closeTimer);
     this.run = { runId: null, message, steps: [{ text: "Sending to the agent", tone: "info" }], memory: [], shownSteps: 0, shownResult: false };
     this.input.value = "";
     this.setView("run");
     this.deps.ask(message, fresh);
+  }
+
+  private queueRequest() {
+    const message = this.input.value.trim();
+    if (!message) return;
+    this.queuedRequests.push(message);
+    this.input.value = "";
+    this.onInput();
+    this.input.focus({ preventScroll: true });
+    this.live.textContent = "Request queued for later.";
+  }
+
+  private queueControls(): Node[] {
+    const button = (label: string, action: () => void, disabled = false) => {
+      const control = h("button", "link", label);
+      control.type = "button";
+      control.disabled = disabled;
+      control.addEventListener("click", action);
+      return control;
+    };
+    const message = this.input.value.trim();
+    const controls: Node[] = [];
+    if (message) {
+      controls.push(h("div", "queue-actions", "", [
+        button("Send now", () => this.ask(this.input.value.trim(), false), this.working),
+        button("Queue for later", () => this.queueRequest()),
+      ]));
+    }
+    if (this.queuedRequests.length) {
+      const rows = this.queuedRequests.map((request, index) => h("div", "queue-actions", "", [
+        h("span", "queue-text", request),
+        button("Send now", () => {
+          this.queuedRequests.splice(index, 1);
+          const draft = this.input.value;
+          this.ask(request, false);
+          this.input.value = draft;
+          this.renderFoot();
+        }, this.working),
+        button("Remove", () => {
+          this.queuedRequests.splice(index, 1);
+          this.renderFoot();
+          this.input.focus({ preventScroll: true });
+        }),
+      ]));
+      controls.push(h("details", "request-queue", "", [h("summary", "", `Queued requests (${rows.length})`), ...rows]));
+    }
+    return controls;
   }
 
   private renderRun() {
@@ -462,7 +513,11 @@ export class Spotlight {
           : [hint(["↑", "↓"], "navigate"), hint(["↵"], "select"), ...(this.input.value.trim() ? [hint(["⇧", "↵"], "ask AI again")] : [])];
     const nodes: Node[] = [...left, h("span", "grow")];
     if (this.run?.tier && this.view === "run") nodes.push(h("span", `chip ${this.run.tier.tier}`, `${this.run.tier.tier} · ${this.run.tier.model}`));
-    this.foot.replaceChildren(...nodes);
+    const queueWasOpen = this.foot.querySelector("details")?.open;
+    const shortcuts = h("div", "queue-actions", "", nodes);
+    this.foot.replaceChildren(shortcuts, ...(this.view === "settings" ? [] : this.queueControls()));
+    const queue = this.foot.querySelector("details");
+    if (queue) queue.open = queueWasOpen ?? true;
   }
 
   handleEvent(event: UiEvent): boolean {
@@ -547,7 +602,10 @@ export class Spotlight {
     this.input.value = value;
     if (text && (this.cache?.voiceAutoSend ?? true)) {
       this.input.value = "";
-      this.ask(value, false);
+      if (this.working) {
+        this.input.value = value;
+        this.queueRequest();
+      } else this.ask(value, false);
       return;
     }
     this.input.focus({ preventScroll: true });
@@ -567,6 +625,10 @@ export class Spotlight {
       }
       if (this.view === "settings") this.setView("list");
       else this.hide();
+      return true;
+    }
+    if (this.view !== "settings" && key === "Enter" && (event.altKey || (this.working && this.input.value.trim()))) {
+      this.queueRequest();
       return true;
     }
     if (this.view === "list" && this.items.length) {

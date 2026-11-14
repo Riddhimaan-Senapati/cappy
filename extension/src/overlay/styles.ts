@@ -67,8 +67,11 @@ export const OVERLAY_CSS = `
 .link:hover { background: var(--raise2); }
 .link:focus-visible, .back:focus-visible, .item:focus-visible { outline: 2px solid var(--accent); }
 .settings { padding: 12px; }
-.foot { display: flex; align-items: center; gap: 16px; padding: 9px 18px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.2); color: var(--faint); font-size: 12px; }
+.foot { display: grid; gap: 6px; padding: 9px 18px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.2); color: var(--faint); font-size: 12px; }
 .foot .grow { flex: 1; }
+.queue-actions { display: flex; align-items: center; gap: 10px; }
+.queue-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.request-queue { max-height: 120px; overflow: auto; }
 .foot .k { display: inline-flex; gap: 6px; align-items: center; }
 .chip { padding: 2px 9px; border-radius: 999px; font-weight: 500; animation: pop 0.35s var(--spring); }
 .chip.fast { color: #bfe3ff; background: rgba(110, 168, 255, 0.2); }

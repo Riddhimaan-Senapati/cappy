@@ -221,8 +221,9 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     voiceKey.setAttribute("aria-label", "OpenAI voice API key");
     voiceKey.disabled = checkingVoice;
     const inPopup = location.href === chrome.runtime.getURL("popup.html");
-    const keyHelp = h("small", "", "Enter a key here or leave blank to verify a key already saved.");
-    const voiceKeyField = inPopup ? h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "OpenAI API key"), keyHelp]), voiceKey]) : null;
+    const keyHelp = h("small", "", "Add an OpenAI API key to enable OpenAI audio models. Leave blank if you already saved a key.");
+    const voiceKeyField = inPopup ? h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Add an OpenAI API key"), keyHelp]), voiceKey]) : null;
+    const voiceKeyPrompt = inPopup ? null : h("p", "s-note", "To enable OpenAI audio models, open the extension popup and add an OpenAI API key under Model → Voice provider.");
     const verify = h("button", "s-btn", activeVoice === "openai" ? "Verify OpenAI audio again" : "Verify and enable OpenAI");
     verify.type = "button";
     verify.disabled = checkingVoice;
@@ -260,7 +261,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
         toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
       ),
-      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, ...(voiceKeyField ? [voiceKeyField] : []), verify, verificationStatus),
+      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, ...(voiceKeyField ? [voiceKeyField] : []), ...(voiceKeyPrompt ? [voiceKeyPrompt] : []), verify, verificationStatus),
       memory.render(state, toggle),
       section(
         "Speech",
