@@ -10,11 +10,14 @@ const INJECTION_PATTERNS = [
   /document\.cookie/i,
 ];
 
-export function detectInjection(page: PageOutline): string | null {
-  const haystack = [page.title, ...page.headings, ...page.elements.map((element) => element.text ?? ""), page.textSample].join("\n");
+export function detectInjectionText(text: string): string | null {
   for (const pattern of INJECTION_PATTERNS) {
-    const match = haystack.match(pattern);
+    const match = text.match(pattern);
     if (match) return match[0];
   }
   return null;
+}
+
+export function detectInjection(page: PageOutline): string | null {
+  return detectInjectionText([page.title, ...page.headings, ...page.elements.map((element) => element.text ?? ""), page.textSample].join("\n"));
 }

@@ -9,14 +9,19 @@ export interface RunRequest {
   runId: string;
   trigger: Trigger;
   message: string;
+  provider?: string;
   routing: Routing;
   models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];
   profile: string[];
+  // Notes earlier sessions saved about navigating this hostname. Derived from page content, so untrusted.
+  siteSkill?: string[];
   active: ActiveChange[];
   page: PageOutline;
   clientTime?: { iso: string; timeZone: string };
 }
+
+export type MemoryScope = "site" | "everywhere";
 
 export interface InspectedElement {
   tag: string;
@@ -26,11 +31,21 @@ export interface InspectedElement {
   attributes: Record<string, string>;
 }
 
+export interface ContrastIssue {
+  selector: string;
+  text: string;
+  color: string;
+  background: string;
+  ratio: number;
+}
+
 export interface ApplyOutcome {
   ok: boolean;
   error?: string;
   matched: Record<string, number>;
   waitingForSchedule?: boolean;
+  lowContrast?: ContrastIssue[];
+  replaced?: string[];
   before: PageStats;
   after: PageStats;
   note?: string;
@@ -58,6 +73,7 @@ export interface TabTools {
   use_site_control: { input: SiteControlInput; output: SiteControlOutcome };
   read_page: { input: Record<string, never>; output: PageOutline };
   inspect: { input: { selector: string }; output: { count: number; samples: InspectedElement[] } };
+  list_items: { input: { selector: string; keySelector: string | null }; output: { count: number; items: Array<{ key: string; text: string }> } };
   apply_change: { input: { change: Change }; output: ApplyOutcome };
   revert_change: { input: { id: string }; output: { ok: boolean } };
   screenshot: { input: Record<string, never>; output: { dataUrl: string } };
@@ -84,7 +100,8 @@ export interface ToolResultMessage {
 export type AgentEvent =
   | { type: "progress"; runId: string; text: string }
   | { type: "tier"; runId: string; tier: Tier; model: string }
-  | { type: "profile"; runId: string; lines: string[] }
+  | { type: "profile"; runId: string; lines: string[]; scope: MemoryScope }
+  | { type: "siteSkill"; runId: string; notes: string[] }
   | { type: "warning"; runId: string; text: string }
   | { type: "blocked"; runId: string; reason: string }
   | { type: "done"; runId: string; reply: string }
@@ -94,9 +111,53 @@ export interface PingMessage {
   type: "ping";
 }
 
-export type ProviderSetup = { type: "providerSetup"; id: string; provider: string; action: "select" | "key" | "signin"; key?: string };
-export type ProviderOptions = Array<{ id: string; ready: boolean }>;
-export type ProviderSetupResult = { type: "providerSetupResult"; id: string; error?: string };
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  setup: "key" | "signin";
+  ready: boolean;
+  models?: Record<Tier, string>;
+  available?: string[];
+}
 
-export type ClientMessage = { type: "cancel"; runId: string } | ProviderSetup | RunRequest | ToolResultMessage | PingMessage;
-export type ServerMessage = ProviderSetupResult | ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models?: Record<Tier, string>; available: string[]; providers?: ProviderOptions };
+export interface SetKeyMessage {
+  type: "setKey";
+  provider: string;
+  key: string | null;
+}
+
+export interface ListModelsMessage {
+  type: "listModels";
+  provider: string;
+}
+
+export interface SignInMessage {
+  type: "chatgptLogin";
+}
+
+export interface SignOutMessage {
+  type: "chatgptLogout";
+}
+
+export interface SuggestMessage {
+  type: "suggest";
+  requestId: string;
+  provider?: string;
+  models?: Partial<Record<Tier, string>>;
+  profile: string[];
+  applied: string[];
+  page: PageOutline;
+}
+
+export interface CancelMessage {
+  type: "cancel";
+  runId: string;
+}
+
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage | SuggestMessage;
+export type ServerMessage =
+  | ToolCallMessage
+  | AgentEvent
+  | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
+  | { type: "notice"; level: "info" | "error"; text: string }
+  | { type: "suggestion"; requestId: string; text: string | null };

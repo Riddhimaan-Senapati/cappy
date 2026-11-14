@@ -1,6 +1,7 @@
-import { acceptProposal, addLine, clearAllMemory, editLine, forgetLine, rejectProposal } from "../memory.js";
-import { save, type StoredState } from "../storage.js";
+import { addLine, clearAllMemory, editLine, forgetLine, pendingSite } from "../memory.js";
+import { forgetSiteNotes, type StoredState } from "../storage.js";
 import { h } from "./dom.js";
+import { scopeChoices } from "./memory-choice.js";
 
 export type ToggleRow = (label: string, sub: string, checked: boolean, onChange: (value: boolean) => void) => Node;
 
@@ -62,15 +63,30 @@ export function createMemoryView(rerender: () => void): MemoryView {
     ]);
   };
 
-  const proposalRow = (line: string) =>
-    h("div", "s-row", "", [
-      h("div", "grow", line),
-      button("Accept", "s-link", () => void acceptProposal(line)),
-      button("Reject", "s-link", () => void rejectProposal(line)),
+  const proposalRow = (state: StoredState, line: string) => {
+    const origin = pendingSite(state, line);
+    return h("div", "s-row", "", [
+      h("div", "grow", "", [h("div", "", line), ...(origin ? [h("small", "", `From ${origin.host}`)] : [])]),
+      ...scopeChoices([line], origin?.host, origin?.scope).map((choice) => button(choice.label, "s-link", () => void choice.run())),
     ]);
+  };
+
+  const siteSkillRows = (state: StoredState): Node[] => {
+    const hosts = Object.entries(state.siteSkills).sort(([, a], [, b]) => b.updatedAt - a.updatedAt);
+    if (!hosts.length) return [];
+    return [
+      h("div", "s-note", "Site skills: notes the agent saved about how these websites are built, so later requests there go faster. They hold nothing about you."),
+      ...hosts.map(([host, skill]) =>
+        h("div", "s-row", "", [
+          h("div", "grow", "", [h("div", "", host), h("small", "", `${skill.notes.length} note${skill.notes.length === 1 ? "" : "s"}: ${skill.notes.slice(-2).join(" · ")}`)]),
+          button("Forget", "s-link", () => void forgetSiteNotes(host)),
+        ]),
+      ),
+    ];
+  };
 
   return {
-    render(state, toggleRow) {
+    render(state, _toggleRow) {
       editInput = null;
       const addForm = h("form", "s-add");
       const input = h("input");
@@ -112,9 +128,9 @@ export function createMemoryView(rerender: () => void): MemoryView {
 
       const nodes: Node[] = [h("h3", "", "Memory")];
       if (state.pendingMemory.length) {
-        nodes.push(h("div", "s-note", "Waiting for your approval"), ...state.pendingMemory.map(proposalRow));
+        nodes.push(h("div", "s-note", "Waiting for you to choose this site or all sites"), ...state.pendingMemory.map((line) => proposalRow(state, line)));
       }
-      nodes.push(...saved, addForm, toggleRow("Ask before remembering", "New memories wait for your approval instead of saving straight away.", state.askBeforeRemember, (value) => void save({ askBeforeRemember: value })), clearButton);
+      nodes.push(...saved, addForm, ...siteSkillRows(state), clearButton);
 
       const section = h("section", "s-sec", "", nodes);
       if (editing !== null) setTimeout(() => editInput?.focus(), 0);

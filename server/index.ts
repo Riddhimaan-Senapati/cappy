@@ -4,41 +4,43 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import type { ClientMessage, ProviderSetup, RunRequest, Tier } from "../shared/protocol.js";
-import { login } from "./auth/chatgpt.js";
+import type { ClientMessage, RunRequest, ServerMessage, Tier } from "../shared/protocol.js";
+import { login, signOut } from "./auth/chatgpt.js";
+import { defaultProviderId, describeProviders, forget, getProvider, keyFor, resolveProvider, wantModels } from "./agent/providers/index.js";
+import type { AgentProvider } from "./agent/providers/types.js";
+import { recallForRun } from "./agent/memory.js";
+import { pickTier } from "./agent/router.js";
+import { suggestFor } from "./agent/suggest.js";
+import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { setKey } from "./keys.js";
 import { audio } from "./audio.js";
-import { createProvider, providerKeys, providerOptions } from "./agent/providers/index.js";
-import { pickTier } from "./agent/router.js";
-import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { detectInjection } from "./safety.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-
-let provider = initialProvider();
+const sockets = new Set<WebSocket>();
 let signingIn = false;
 
-function initialProvider() {
-  try {
-    return createProvider();
-  } catch {
-    const ready = providerOptions().find((entry) => entry.ready);
-    return ready ? createProvider(ready.id) : undefined;
-  }
-}
 const app = express();
 app.use("/api/audio", audio);
-
 app.use("/demo", express.static(path.join(rootDir, "demo-sites")));
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, provider: provider?.name, models: provider?.models });
+app.get("/api/health", async (_req, res) => {
+  res.json({ ok: true, defaultProvider: defaultProviderId(), providers: (await describeProviders()).map(({ id, ready }) => ({ id, ready })) });
 });
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: "/agent" });
 
-async function execute(session: AgentSession, request: RunRequest, provider: ReturnType<typeof createProvider>) {
+const sendTo = (socket: WebSocket, message: ServerMessage) => {
+  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+};
+
+async function broadcastProviders() {
+  const message: ServerMessage = { type: "providers", providers: await describeProviders(), defaultProvider: defaultProviderId() };
+  for (const socket of sockets) sendTo(socket, message);
+}
+
+async function execute(session: AgentSession, request: RunRequest, provider: AgentProvider) {
   const injection = detectInjection(request.page);
   if (injection) {
     console.warn(`[safety] injection blocked before any model call: "${injection}"`);
@@ -48,15 +50,19 @@ async function execute(session: AgentSession, request: RunRequest, provider: Ret
   }
 
   let tier: Tier = pickTier(request);
+  session.tier = tier;
   const modelFor = (which: Tier) => request.models?.[which] || provider.models[which];
   const announce = () => session.send({ type: "tier", runId: request.runId, tier, model: modelFor(tier) });
   announce();
   let reply = await provider.run(session, tier, modelFor(tier));
 
-  if (tier === "fast" && request.routing === "auto" && !session.blockedReason && session.struggled()) {
-    session.progress("That didn't land. Trying a stronger model");
+  if (tier === "fast" && request.routing === "auto" && !session.blockedReason && (session.escalation || session.struggled())) {
+    session.progress(session.escalation ? `Switching to Pro: ${session.escalation}` : "That didn't land. Switching to Pro");
+    console.log(`[route] escalated to frontier: ${session.escalation ?? "fast model struggled"}`);
     await session.undoAppliedChanges();
+    session.escalation = null;
     tier = "frontier";
+    session.tier = tier;
     announce();
     reply = await provider.run(session, tier, modelFor(tier));
   }
@@ -69,64 +75,19 @@ async function execute(session: AgentSession, request: RunRequest, provider: Ret
   session.send({ type: "done", runId: request.runId, reply });
 }
 
-const clients = new Set<WebSocket>();
-const modelLists = new WeakMap<NonNullable<typeof provider>, Promise<string[]>>();
-
-function publishProviders(socket: WebSocket, available: string[] = []) {
-  if (socket.readyState !== WebSocket.OPEN) return;
-  socket.send(JSON.stringify({
-    type: "hello",
-    provider: provider?.name ?? "",
-    models: provider?.models,
-    available,
-    providers: providerOptions(),
-  }));
-  const selected = provider;
-  if (!selected || available.length) return;
-  let models = modelLists.get(selected);
-  if (!models) {
-    models = Promise.resolve().then(() => selected.listModels?.() ?? []).then((ids) => [...new Set(ids)].sort()).catch(() => []);
-    modelLists.set(selected, models);
-  }
-  void models.then((ids) => {
-    if (ids.length && selected === provider) publishProviders(socket, ids);
-  });
-}
-
-async function configureProvider(socket: WebSocket, message: ProviderSetup) {
-  const result = { type: "providerSetupResult", id: message.id, error: undefined as string | undefined };
+async function signIn(socket: WebSocket) {
+  if (signingIn) return sendTo(socket, { type: "notice", level: "info", text: "Sign-in already in progress. Finish it in your browser." });
+  signingIn = true;
+  sendTo(socket, { type: "notice", level: "info", text: "Finish signing in to ChatGPT in the browser tab that just opened." });
   try {
-    if (!providerOptions().some(({ id }) => id === message.provider)) throw new Error("Unknown provider.");
-    switch (message.action) {
-      case "key": {
-        const name = providerKeys.get(message.provider);
-        const key = typeof message.key === "string" ? message.key.trim() : "";
-        if (!name || !key || key.length > 4096 || /\s/.test(key)) throw new Error("Enter a valid API key.");
-        setKey(name, key);
-        break;
-      }
-      case "signin":
-        if (message.provider !== "chatgpt-signin" || signingIn) throw new Error("ChatGPT sign-in is unavailable or already in progress.");
-        signingIn = true;
-        try {
-          await login({ log: false });
-        } catch {
-          throw new Error("ChatGPT sign-in failed. Start it again from Settings.");
-        } finally {
-          signingIn = false;
-        }
-        break;
-      case "select":
-        break;
-      default:
-        throw new Error("Unknown setup action.");
-    }
-    provider = createProvider(message.provider);
-    for (const client of clients) publishProviders(client);
+    await login();
+    forget("chatgpt-signin");
+    await broadcastProviders();
   } catch (error) {
-    result.error = message.action === "key" ? "Could not save the API key. Check the key and try again." : error instanceof Error ? error.message : "Provider setup failed.";
+    sendTo(socket, { type: "notice", level: "error", text: `ChatGPT sign-in failed: ${error instanceof Error ? error.message : String(error)}` });
+  } finally {
+    signingIn = false;
   }
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(result));
 }
 
 function safeProviderError(error: unknown): string {
@@ -142,9 +103,9 @@ wss.on("connection", (socket, request) => {
     return;
   }
 
+  sockets.add(socket);
   const sessions = new Map<string, AgentSession>();
-  clients.add(socket);
-  publishProviders(socket);
+  void describeProviders().then((providers) => sendTo(socket, { type: "providers", providers, defaultProvider: defaultProviderId() }));
 
   socket.on("message", async (raw) => {
     let message: ClientMessage;
@@ -155,25 +116,63 @@ wss.on("connection", (socket, request) => {
     }
 
     if (!message || typeof message !== "object") return;
-    if (message.type === "providerSetup") return configureProvider(socket, message);
-    if (message.type === "cancel") {
-      sessions.get(message.runId)?.close();
-      return;
+    switch (message.type) {
+      case "toolResult":
+        for (const session of sessions.values()) session.handleToolResult(message);
+        return;
+      case "cancel":
+        sessions.get(message.runId)?.close();
+        sessions.delete(message.runId);
+        console.log("[run] cancelled, replaced by a newer request");
+        return;
+      case "listModels":
+        wantModels(message.provider);
+        return void broadcastProviders();
+      case "chatgptLogin":
+        return void signIn(socket);
+      case "suggest": {
+        const provider = resolveProvider(message.provider);
+        const text = provider ? await suggestFor(provider, message).catch(() => null) : null;
+        return sendTo(socket, { type: "suggestion", requestId: message.requestId, text });
+      }
+      case "chatgptLogout":
+        signOut();
+        forget("chatgpt-signin");
+        console.log("[auth] signed out of ChatGPT on this computer");
+        await broadcastProviders();
+        return sendTo(socket, { type: "notice", level: "info", text: "Signed out of ChatGPT on this computer. To fully revoke access, remove the app in your ChatGPT account settings." });
+      case "setKey": {
+        const name = keyFor(message.provider);
+        const key = message.key?.trim() || null;
+        if (!name) return sendTo(socket, { type: "notice", level: "error", text: "That provider does not use an API key." });
+        if (key && (key.length > 4096 || /\s/.test(key))) return sendTo(socket, { type: "notice", level: "error", text: "Enter a valid API key." });
+        if (key && key.length < 20) return sendTo(socket, { type: "notice", level: "error", text: "That doesn't look like a full API key." });
+        setKey(name, key);
+        forget(message.provider);
+        console.log(`[keys] ${key ? "saved" : "removed"} key for ${message.provider}`);
+        await broadcastProviders();
+        if (!key && getProvider(message.provider)) sendTo(socket, { type: "notice", level: "error", text: `That key also comes from .env, so it is still active. Remove ${name} from .env to turn it off.` });
+        return;
+      }
+      case "run":
+        break;
+      default:
+        return;
     }
-    if (message.type === "toolResult") {
-      for (const session of sessions.values()) session.handleToolResult(message);
-      return;
-    }
-    if (message.type !== "run") return;
 
-    const session = new AgentSession(socket, message);
+    const session = new AgentSession(socket, { ...message, profile: await recallForRun(message) });
+    const provider = resolveProvider(message.provider);
+    if (!provider) {
+      session.send({ type: "error", runId: message.runId, message: "No AI provider is set up yet. Open settings to sign in with ChatGPT or add an API key." });
+      return;
+    }
     sessions.set(message.runId, session);
     const started = Date.now();
     try {
-      if (!provider) throw new Error("Choose a model provider in extension settings.");
       await execute(session, message, provider);
-      console.log(`[run] ${message.trigger} done in ${Date.now() - started}ms`);
+      console.log(`[run] ${message.trigger} via ${provider.name} done in ${Date.now() - started}ms`);
     } catch (error) {
+      if (session.cancelled) return;
       if (!(error instanceof RunCancelledError)) console.error("[run] failed", error instanceof Error ? error.name : "Unknown error");
       session.send({ type: "error", runId: message.runId, message: safeProviderError(error) });
     } finally {
@@ -182,13 +181,15 @@ wss.on("connection", (socket, request) => {
   });
 
   socket.on("close", () => {
-    clients.delete(socket);
+    sockets.delete(socket);
     for (const session of sessions.values()) session.close();
     sessions.clear();
   });
 });
 
 server.listen(PORT, "localhost", () => {
-  console.log(`browser-agent server on http://localhost:${PORT} (${provider?.name ?? "setup required"})`);
+  const active = defaultProviderId();
+  console.log(`browser-agent server on http://localhost:${PORT}`);
+  console.log(active ? `default provider: ${active}` : "no AI provider set up yet: open the extension settings to sign in with ChatGPT or add an API key");
   console.log(`demo site: http://localhost:${PORT}/demo/campus.html`);
 });

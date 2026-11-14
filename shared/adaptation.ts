@@ -18,6 +18,16 @@ export const DomOp = z.discriminatedUnion("op", [
   z.object({ op: z.literal("setAttribute"), selector, name: z.enum(SAFE_ATTRIBUTES), value: z.string() }),
   z.object({ op: z.literal("removeAttribute"), selector, name: z.enum(REMOVABLE_ATTRIBUTES) }),
   z.object({ op: z.literal("pauseMedia"), selector }),
+  z.object({
+    op: z.literal("reorder"),
+    selector: z.string().describe("Selector for the items to sort, e.g. the video tiles. Items are sorted within their own parent."),
+    keySelector: z.string().nullable().describe("Selector inside each item whose text identifies it (e.g. the title). null = the item's own text."),
+    direction: z.enum(["asc", "desc"]).describe("Only for alphabetical sorting (ranking null). Ignored when ranking is given."),
+    ranking: z
+      .array(z.object({ key: z.string().describe("The item's key text exactly as list_items returned it."), rank: z.number().describe("Position in the final order: 1 is shown first.") }))
+      .nullable()
+      .describe("Your own ranking for any criterion (views, date, price, relevance), worked out from list_items. null = alphabetical by key text, which also keeps sorting items that load later."),
+  }),
 ]);
 
 export const BlockCall = z.discriminatedUnion("name", [

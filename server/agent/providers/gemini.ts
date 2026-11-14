@@ -1,7 +1,7 @@
-import { getKey } from "../../keys.js";
 import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import { z } from "zod";
 import type { Tier } from "../../../shared/protocol.js";
+import { getKey } from "../../keys.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
 import { tools } from "../tools.js";
@@ -22,6 +22,10 @@ export function createGeminiProvider(): AgentProvider {
   return {
     name: "gemini",
     models,
+    async complete(system: string, user: string, model: string) {
+      const response = await ai.models.generateContent({ model, contents: user, config: { systemInstruction: system } });
+      return (response.text ?? "").trim();
+    },
     async listModels() {
       const names: string[] = [];
       for await (const model of await ai.models.list()) if (model.name) names.push(model.name.replace(/^models\//, ""));
@@ -31,6 +35,7 @@ export function createGeminiProvider(): AgentProvider {
       const contents: Content[] = [{ role: "user", parts: [{ text: buildUserTurn(session.request) }] }];
 
       for (let step = 0; step < MAX_STEPS; step++) {
+        session.throwIfCancelled();
         const response = await ai.models.generateContent({
           model,
           contents,
@@ -57,6 +62,7 @@ export function createGeminiProvider(): AgentProvider {
           parts.unshift({ functionResponse: { id: call.id, name: call.name, response: { output } } });
         }
         contents.push({ role: "user", parts });
+        if (session.escalation) return "";
       }
       return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
     },

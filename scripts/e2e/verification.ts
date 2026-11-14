@@ -43,7 +43,6 @@ await runE2E("verification", async ({ browser }) => {
   assert.equal(active.find((change) => change.id === base.id)?.css, base.css);
 
   await demo.bringToFront();
-  await worker.evaluate(() => chrome.storage.local.set({ askBeforeRemember: true }));
   await worker.evaluate(async (id) => {
     await chrome.tabs.setZoom(id, 1.1);
     await chrome.tabs.setZoom(id, 1.25);
@@ -56,12 +55,14 @@ await runE2E("verification", async ({ browser }) => {
   }));
 
   await worker.evaluate(async (id) => {
-    await chrome.storage.local.set({ askBeforeRemember: false, profile: [] });
+    await chrome.storage.local.set({ profile: [] });
     await chrome.tabs.setZoom(id, 1);
     await chrome.tabs.setZoom(id, 1.1);
     await chrome.tabs.setZoom(id, 1.25);
   }, tabId);
-  await waitFor("automatic zoom memory", () => shadowTextVisible(demo, "Remembered that you prefer larger text on every site."));
+  await waitFor("the larger-text suggestion again", () => shadowTextVisible(demo, "Make text bigger on every site?"));
+  await clickShadowButton(demo, "Yes, remember");
+  await waitFor("the zoom memory confirmation", () => shadowTextVisible(demo, "Remembered that you prefer larger text on every site."));
   await waitFor("larger font after repeat zoom", async () => (await fontSizeOf(demo)) === 21.6);
 
   await clickShadowButton(demo, "Undo");

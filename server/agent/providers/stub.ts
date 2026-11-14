@@ -8,7 +8,7 @@ import type { AgentProvider } from "./types.js";
 // so validateChange, the CSS scan and the injection block all still run.
 export type StubCall =
   | { name: "apply_change"; input: { change: Change } }
-  | { name: "remember"; input: { lines: string[] } };
+  | { name: "remember"; input: { lines: string[]; scope: "site" | "everywhere" } };
 
 export interface StubPlan {
   calls: StubCall[];
@@ -30,7 +30,7 @@ const REMOVE = /\b(?:remove(?: all)?|hide)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30
 const COLORBLIND = /colou?r[- ]?blind/i;
 const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
 const SITE_ONLY = /\b(?:only (?:on |for )?this (?:site|website|page)|(?:on |for )?this (?:site|website|page) only|(?:on|for) this (?:site|website|page))\b/i;
-const SITE_SUFFIX = / on (https?:\/\/[^ ]+)$/i;
+const SITE_PREFIX = /^On ([^\s:]+(?::\d+)?): /i;
 
 const HELP = "Stub provider: no scripted rule matched. Try 'make the text bigger', 'dark mode', 'invert the colors', 'hide ads', 'I'm red-green colorblind', or 'I prefer ...'.";
 
@@ -69,8 +69,8 @@ export function planStubRun(input: StubInput): StubPlan {
 
   if (input.trigger === "page_load") {
     for (const line of input.profile) {
-      const restrictedTo = line.match(SITE_SUFFIX)?.[1];
-      if (restrictedTo && restrictedTo !== origin) continue;
+      const restrictedTo = line.match(SITE_PREFIX)?.[1];
+      if (restrictedTo && restrictedTo !== new URL(input.page.url).host) continue;
       const reason = `Profile: "${line}"`;
       const scope = restrictedTo ? "site" : "everywhere";
       const word = line.match(REMOVE)?.[1].toLowerCase();
@@ -97,7 +97,7 @@ export function planStubRun(input: StubInput): StubPlan {
   const preference = PREFERENCE.test(message);
   const scope = preference && !siteOnly ? "everywhere" : "site";
   const done: string[] = [];
-  const remember = (line: string) => calls.push({ name: "remember", input: { lines: [siteOnly ? `${line} on ${origin}` : line] } });
+  const remember = (line: string) => calls.push({ name: "remember", input: { lines: [line], scope: siteOnly ? "site" : "everywhere" } });
 
   if (BIGGER_TEXT.test(message)) {
     calls.push({ name: "apply_change", input: { change: change({ id: "bigger-text", summary: "Larger text (130%)", reason, scope, block: { name: "textScale", scale: 1.3 } }) } });
@@ -158,6 +158,9 @@ export function createStubProvider(): AgentProvider {
   return {
     name: "stub",
     models: { fast: "stub-fast", frontier: "stub-frontier" },
+    async complete() {
+      return "NONE";
+    },
     async run(session: AgentSession) {
       const { trigger, message, profile, page, active } = session.request;
 

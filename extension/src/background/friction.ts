@@ -45,16 +45,17 @@ async function recordZoomIn(tabId: number, now: number) {
   const then = typeof previous === "string" && previous.startsWith(prefix) ? Number(previous.slice(prefix.length)) : NaN;
   if (then <= now && now - then <= ZOOM_WINDOW_MS) {
     await chrome.storage.session.remove(key);
-    const { saved, proposed } = await rememberLines([LARGER_TEXT]);
-    if (saved.length) await sendToTab(tabId, { kind: "frictionSaved", origin });
+    const proposed = await rememberLines([LARGER_TEXT], { host: new URL(tab.url).host, scope: "everywhere" });
     if (proposed.length) await sendToTab(tabId, { kind: "frictionPrompt", origin });
   } else {
     await chrome.storage.session.set({ [key]: `${prefix}${now}` });
   }
 }
 
-export async function acceptFriction() {
+// The prompt asks about every site, so accepting saves it everywhere and confirms with an Undo.
+export async function acceptFriction(tab: chrome.tabs.Tab) {
   const { paused, pendingMemory } = await load();
   if (paused || !hasMemoryLine(pendingMemory, LARGER_TEXT)) return;
-  await acceptProposal(LARGER_TEXT);
+  await acceptProposal(LARGER_TEXT, "everywhere");
+  if (tab.id !== undefined && tab.url) await sendToTab(tab.id, { kind: "frictionSaved", origin: new URL(tab.url).origin }).catch(() => undefined);
 }

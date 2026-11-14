@@ -1,5 +1,5 @@
-import type { ProviderOptions, ProviderSetup } from "../../shared/protocol.js";
-import type { Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { PageOutline } from "../../shared/adaptation.js";
+import type { MemoryScope, ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
 
 export interface AppliedSummary {
@@ -11,10 +11,12 @@ export interface AppliedSummary {
 
 export type UiEvent =
   | { type: "start"; runId: string; trigger: Trigger; message: string; thread?: string }
+  | { type: "queued"; runId: string; message: string; thread?: string }
+  | { type: "cancelled"; runId: string; reason?: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
-  | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[] }
+  | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[]; host?: string; scope?: MemoryScope }
   | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
   | { type: "error"; runId: string; message: string };
 
@@ -46,15 +48,16 @@ export type ContentResponse = { ok: true; result: unknown } | { ok: false; error
 export interface StatusInfo {
   connected: boolean;
   busy: boolean;
+  providers?: ProviderInfo[];
+  activeProvider?: string | null;
   provider?: string;
   models?: Record<Tier, string>;
   available?: string[];
-  providers?: ProviderOptions;
+  notice?: { level: "info" | "error"; text: string };
   error?: string;
 }
 
 export type BackgroundRequest =
-  | { kind: "stopRequest" }
   | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string }
   | { kind: "deleteRequest"; message: string }
   | { kind: "frictionAccept" }
@@ -63,7 +66,12 @@ export type BackgroundRequest =
   | { kind: "openShortcuts" }
   | { kind: "verifyVoice"; key: string; provider?: "openai" | "gemini" }
   | { kind: "status" }
-  | ({ kind: "providerSetup" } & Omit<ProviderSetup, "id" | "type">)
+  | { kind: "setKey"; provider: string; key: string | null }
+  | { kind: "chatgptLogin" }
+  | { kind: "chatgptLogout" }
+  | { kind: "stopRun" }
+  | { kind: "suggest"; page: PageOutline; applied: string[] }
+  | { kind: "dequeue"; runId: string }
   | { kind: "voiceStart"; lang: string }
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }
@@ -77,4 +85,4 @@ export type DebugPortMessage =
 
 export type DebugPortRequest = { type: "chat"; message: string; thread?: string };
 
-export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Frontier" };
+export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Pro" };

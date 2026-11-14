@@ -1,7 +1,6 @@
 import type { ActiveChange } from "../../shared/adaptation.js";
 import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "./messages.js";
 import { adoptStyles, h, icon } from "./ui/dom.js";
-import { providerSetup } from "./ui/provider-setup.js";
 import { renderSettings } from "./ui/settings.js";
 import { POPUP_CSS, SETTINGS_CSS, TOKENS } from "./ui/theme.js";
 
@@ -23,7 +22,6 @@ adoptStyles(document, TOKENS + SETTINGS_CSS + POPUP_CSS);
 const root = h("div");
 document.body.append(
   h("div", "pop-head", "", [h("div", "pop-logo", "", [icon("sparkle", 16)]), h("div", "", "", [h("h1", "", "Adaptive Agent"), h("small", "", "Press the shortcut on any page, or use the button")])]),
-  h("div", "s", "", [providerSetup()]),
   root,
 );
 
@@ -36,5 +34,8 @@ renderSettings(root, {
     globalThis.close();
   },
   openShortcuts: () => void chrome.tabs.create({ url: "chrome://extensions/shortcuts" }),
+  setKey: (provider, key) => void chrome.runtime.sendMessage({ kind: "setKey", provider, key } satisfies BackgroundRequest),
+  signIn: () => void chrome.runtime.sendMessage({ kind: "chatgptLogin" } satisfies BackgroundRequest),
+  signOut: () => void chrome.runtime.sendMessage({ kind: "chatgptLogout" } satisfies BackgroundRequest),
   getStatus: async () => (await chrome.runtime.sendMessage({ kind: "status" } satisfies BackgroundRequest)) as StatusInfo,
 });

@@ -5,14 +5,57 @@ import { forgetLine, hasMemoryLine } from "../memory.js";
 import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
-import { activeChanges, applyChange, applySiteControl, revertAll, revertChange, setBusy } from "./engine.js";
-import { inspect, readPage } from "./outline.js";
+import { activeChanges, applyChange, applySiteControl, changeHistory, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { inspect, listItems, readPage } from "./outline.js";
 import { findSiteFeatures } from "./site-controls.js";
 import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
-onSpeechChange((on) => ensureOverlay().setSpeaking(on));
+const suggestionCache = new Map<string, Promise<string | null>>();
+
+let tornDown = false;
+
+function alive(): boolean {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+}
+
+// After the extension reloads, this copy is cut off from it; remove its UI and listeners so it stops throwing.
+function teardown() {
+  if (tornDown) return;
+  tornDown = true;
+  overlay?.destroy();
+  overlay = null;
+  stopEngine();
+  for (const type of KEY_EVENTS) window.removeEventListener(type, onKey, true);
+}
+
+const ensureAlive = () => alive() || (teardown(), false);
+
+function send(request: BackgroundRequest): Promise<unknown> {
+  if (!ensureAlive()) return Promise.resolve(undefined);
+  try {
+    return chrome.runtime.sendMessage(request).catch((error) => {
+      reportExtensionError(error);
+      return undefined;
+    });
+  } catch {
+    teardown();
+    return Promise.resolve(undefined);
+  }
+}
+
+const KEY_EVENTS = ["keydown", "keyup", "keypress"] as const;
+
+function onKey(event: KeyboardEvent) {
+  if (!overlay) return;
+  if (!alive()) return teardown();
+  overlay.captureKey(event);
+}
 
 let pendingMutation: Promise<unknown> = Promise.resolve();
 
@@ -22,14 +65,6 @@ function mutate<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
-async function send(request: BackgroundRequest) {
-  try {
-    await chrome.runtime.sendMessage(request);
-  } catch (error) {
-    reportExtensionError(error);
-  }
-}
-
 async function apply(change: Change) {
   if (change.block?.name === "textScale" && change.id !== learnedTextScale.id) {
     await revertChange(learnedTextScale.id, false);
@@ -37,6 +72,7 @@ async function apply(change: Change) {
   const outcome = await applyChange(change);
   const stored = activeChanges().find((active) => active.id === change.id);
   if (outcome.ok && stored) await recordApplied(origin, stored);
+  for (const id of outcome.replaced ?? []) await recordReverted(origin, id);
   if (change.block?.name === "textScale") await syncLearnedText();
   return outcome;
 }
@@ -80,9 +116,12 @@ async function restore(animate: boolean) {
 
 function ensureOverlay(): OverlayUi {
   overlay ??= new OverlayUi({
-    stopRequest: () => void send({ kind: "stopRequest" }),
     ask: (message, fresh, interrupt, thread) => void send({ kind: "runChat", message, fresh, interrupt, thread }),
+    stop: () => void send({ kind: "stopRun" }),
+    dequeue: (runId) => void send({ kind: "dequeue", runId }),
     listChanges: activeChanges,
+    history: changeHistory,
+    reapply: async (change) => void (await mutate(() => apply(change))),
     revert: async (id) => void (await revert(id)),
     revertAll: async () => {
       for (const change of activeChanges().reverse()) await revert(change.id);
@@ -94,12 +133,24 @@ function ensureOverlay(): OverlayUi {
     },
     stopSpeaking: stopSpeech,
     isSpeaking: speechActive,
+    ensureAlive,
+    suggest: () => {
+      const applied = activeChanges().map((change) => change.summary);
+      const key = `${location.href}|${applied.join("|")}`;
+      if (!suggestionCache.has(key)) {
+        suggestionCache.set(key, send({ kind: "suggest", page: readPage(), applied }).then((text) => (typeof text === "string" ? text : null)));
+      }
+      return suggestionCache.get(key)!;
+    },
     settings: {
       listChanges: async () => activeChanges(),
       revert: async (id) => void (await revert(id)),
       openDebug: () => void send({ kind: "openDebug" }),
       openShortcuts: () => void send({ kind: "openShortcuts" }),
-      getStatus: async () => ((await chrome.runtime.sendMessage({ kind: "status" } satisfies BackgroundRequest)) as StatusInfo) ?? { connected: false, busy: false },
+      setKey: (provider, key) => void send({ kind: "setKey", provider, key }),
+      signIn: () => void send({ kind: "chatgptLogin" }),
+      signOut: () => void send({ kind: "chatgptLogout" }),
+      getStatus: async () => ((await send({ kind: "status" })) as StatusInfo | undefined) ?? { connected: false, busy: false },
     },
   });
   return overlay;
@@ -113,6 +164,10 @@ async function handle(request: ContentRequest): Promise<unknown> {
           return readPage();
         case "inspect":
           return inspect((request.input as { selector: string }).selector);
+        case "list_items": {
+          const input = request.input as { selector: string; keySelector: string | null };
+          return listItems(input.selector, input.keySelector);
+        }
         case "find_site_features":
           return findSiteFeatures();
         case "apply_change":
@@ -154,46 +209,59 @@ async function handle(request: ContentRequest): Promise<unknown> {
   }
 }
 
-chrome.runtime.onMessage.addListener((request: ContentRequest, _sender, sendResponse: (response: ContentResponse) => void) => {
-  Promise.resolve(handle(request))
-    .then((result) => sendResponse({ ok: true, result }))
-    .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
-  return true;
-});
+const LOADED_FLAG = "__adaptiveAgentLoaded";
 
-for (const type of ["keydown", "keyup", "keypress"] as const) {
-  // Registered at document_start so these run before page scripts and keep page hotkeys from firing while the bar has focus.
-  window.addEventListener(type, (event) => overlay?.captureKey(event), true);
-}
+function start() {
+  // A reloaded extension leaves the previous instance's UI and styles behind; clear them before restoring.
+  document.querySelectorAll('[data-ba="ui"], style[data-ba], svg[data-ba], label[data-ba]').forEach((node) => node.remove());
+  onSpeechChange((on) => ensureOverlay().setSpeaking(on));
 
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local") return;
-  if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
-  if (changes.paused) {
-    void mutate(async () => {
-      if (changes.paused.newValue) await revertAll();
-      else await restore(true);
-    }).catch(() => undefined);
-  }
-  if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
-});
-
-function whenReady(callback: () => void) {
-  if (document.readyState !== "loading") callback();
-  else addEventListener("DOMContentLoaded", callback, { once: true });
-}
-
-(async () => {
-  const state = await load();
-  whenReady(() => {
-    if (state.floatingButton) ensureOverlay().setFab(true);
-    void mutate(async () => {
-      let restored = 0;
-      try {
-        if (!state.paused) restored = await restore(false);
-      } finally {
-        void send({ kind: "pageReady", origin, restored });
-      }
-    }).catch(reportExtensionError);
+  chrome.runtime.onMessage.addListener((request: ContentRequest, _sender, sendResponse: (response: ContentResponse) => void) => {
+    Promise.resolve(handle(request))
+      .then((result) => sendResponse({ ok: true, result }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
   });
-})().catch(reportExtensionError);
+
+  for (const type of KEY_EVENTS) {
+    // Registered at document_start so these run before page scripts and keep page hotkeys from firing while the bar has focus.
+    window.addEventListener(type, onKey, true);
+  }
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || tornDown) return;
+    if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
+    if (changes.paused) {
+      void mutate(async () => {
+        if (changes.paused.newValue) await revertAll();
+        else await restore(true);
+      }).catch(() => undefined);
+    }
+    if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
+  });
+
+  function whenReady(callback: () => void) {
+    if (document.readyState !== "loading") callback();
+    else addEventListener("DOMContentLoaded", callback, { once: true });
+  }
+
+  (async () => {
+    const state = await load();
+    whenReady(() => {
+      if (state.floatingButton) ensureOverlay().setFab(true);
+      void mutate(async () => {
+        let restored = 0;
+        try {
+          if (!state.paused) restored = await restore(false);
+        } finally {
+          void send({ kind: "pageReady", origin, restored });
+        }
+      }).catch(reportExtensionError);
+    });
+  })().catch(reportExtensionError);
+}
+
+if (!(globalThis as Record<string, unknown>)[LOADED_FLAG]) {
+  (globalThis as Record<string, unknown>)[LOADED_FLAG] = true;
+  start();
+}

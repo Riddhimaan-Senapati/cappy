@@ -39,6 +39,7 @@ await runE2E("preferences", async ({ browser }) => {
 
   await panel.getByText("Stub: made the text larger, saved that preference to your profile.", { exact: true }).waitFor();
   await sendChat(panel, firstSite, "remove clickbait");
+  await panel.locator(".memory-choice", { hasText: "Hide clickbait" }).getByRole("button", { name: "All sites" }).click();
   await waitFor("the clickbait preference to be saved", async () =>
     (await saved(firstOrigin)).profile.includes("Hide clickbait"),
   );

@@ -1,6 +1,7 @@
 import type { OutlineElement, PageOutline, PageStats } from "../../../shared/adaptation.js";
 import type { InspectedElement } from "../../../shared/protocol.js";
-import { accessibleName, AD_OR_POPUP, contrastRatio, cssPath, isOwn, isVisible, LABELLABLE, queryAll, textElements } from "./dom.js";
+import type { ContrastIssue } from "../../../shared/protocol.js";
+import { accessibleName, AD_OR_POPUP, contrastInfo, contrastRatio, cssPath, isOwn, isVisible, LABELLABLE, queryAll, textElements } from "./dom.js";
 import { findItemGroups } from "./item-groups.js";
 
 const TARGETS = 'a[href], button, [role="button"], input:not([type="hidden"]), select, textarea';
@@ -31,6 +32,19 @@ export function computeStats(): PageStats {
     runningAnimations: running.length + media.length,
     visibleAdsOrPopups: visible(AD_OR_POPUP).length,
   };
+}
+
+// Groups by selector so one broken card style is reported once, worst first.
+export function lowContrastSamples(limit = 8): ContrastIssue[] {
+  const worst = new Map<string, ContrastIssue>();
+  for (const element of textElements(2500).filter(isVisible)) {
+    const info = contrastInfo(element);
+    if (info.ratio >= 4.5) continue;
+    const selector = cssPath(element);
+    const existing = worst.get(selector);
+    if (!existing || info.ratio < existing.ratio) worst.set(selector, { selector, text: clip(element.textContent, 40), ...info });
+  }
+  return [...worst.values()].sort((a, b) => a.ratio - b.ratio).slice(0, limit);
 }
 
 function describe(element: Element): OutlineElement {
@@ -99,6 +113,17 @@ export function readPage(): PageOutline {
 
 const INSPECT_STYLES = ["display", "position", "color", "background-color", "font-size", "font-family", "line-height", "filter", "z-index", "opacity", "width", "height"];
 const INSPECT_ATTRS = /^(id|class|role|aria-.*|alt|placeholder|name|type|href|for|title|tabindex)$/;
+
+export function listItems(selector: string, keySelector: string | null, limit = 120) {
+  const items = queryAll(selector);
+  return {
+    count: items.length,
+    items: items.slice(0, limit).map((item) => {
+      const source = keySelector ? item.querySelector(keySelector) : item;
+      return { key: (source?.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 200), text: clip(item.textContent, 220) };
+    }),
+  };
+}
 
 export function inspect(selector: string): { count: number; samples: InspectedElement[] } {
   const matches = queryAll(selector);

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
-import type { RunRequest, ServerMessage, TabToolName, TabTools, ToolResultMessage } from "../../shared/protocol.js";
+import type { RunRequest, ServerMessage, TabToolName, TabTools, Tier, ToolResultMessage } from "../../shared/protocol.js";
 
 const TOOL_TIMEOUT_MS = 15_000;
 
@@ -10,16 +10,29 @@ export class AgentSession {
   readonly profileUpdates: string[] = [];
   readonly appliedIds = new Set<string>();
   blockedReason: string | null = null;
+  escalation: string | null = null;
+  tier: Tier = "fast";
   failures = 0;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private closed = false;
-  private cancellation = new AbortController();
-  readonly signal = this.cancellation.signal;
+  private controller = new AbortController();
 
   constructor(
     private socket: WebSocket,
     readonly request: RunRequest,
   ) {}
+
+  get signal() {
+    return this.controller.signal;
+  }
+
+  get cancelled() {
+    return this.closed;
+  }
+
+  throwIfCancelled() {
+    if (this.closed) throw new RunCancelledError("Run cancelled");
+  }
 
   send(message: ServerMessage) {
     if (!this.closed) this.socket.send(JSON.stringify(message));
@@ -70,7 +83,7 @@ export class AgentSession {
 
   close() {
     this.closed = true;
-    this.cancellation.abort(new RunCancelledError("Request interrupted"));
+    this.controller.abort(new RunCancelledError("Request interrupted"));
     for (const waiter of this.pending.values()) waiter.reject(new RunCancelledError("Extension disconnected"));
     this.pending.clear();
   }

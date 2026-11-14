@@ -6,6 +6,23 @@ import { VoiceController } from "./voice/controller.js";
 import { joinVoiceText, parseVoiceEvent, voiceStatusText, type VoiceState } from "./voice/core.js";
 import { VOICE_CSS } from "./voice/styles.js";
 import { deleteRequest, findRequestSessions, load, suggestRequests, type StoredState } from "./storage.js";
+import { outcomeText, scopeChoices } from "./ui/memory-choice.js";
+import type { MemoryScope } from "../../shared/protocol.js";
+
+function memoryChoice(line: string, host: string | undefined, scope: MemoryScope | undefined): HTMLElement {
+  const item = h("li", "info memory-choice", `Save "${line}"? `);
+  for (const choice of scopeChoices([line], host, scope)) {
+    const button = h("button", choice.suggested ? "suggested" : "", choice.label);
+    button.type = "button";
+    button.addEventListener("click", async () => {
+      const outcome = await choice.run();
+      item.className = outcome.saved ? "good" : "info";
+      item.textContent = `${outcomeText(outcome, host)}: ${line}`;
+    });
+    item.append(button);
+  }
+  return item;
+}
 
 const CSS = `
 html, body { margin: 0; height: 100%; background: #121217; }
@@ -16,6 +33,8 @@ h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
 .dot.on { background: var(--good); } .dot.off { background: var(--bad); }
 .tts { display: flex; gap: 8px; } .tts button[hidden] { display: none; }
+.memory-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.memory-choice button.suggested { font-weight: 600; }
 .timeline { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
 .run { padding: 12px; border-radius: 14px; background: var(--raise); border: 1px solid var(--line); animation: rise 0.3s var(--spring); }
 .run .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -230,7 +249,14 @@ function onEvent(event: UiEvent) {
       run.steps.append(h("li", "bad", `Blocked: ${event.reason}`));
       break;
     case "memory":
-      run.steps.append(h("li", event.status === "saved" ? "good" : "info", `${event.status === "saved" ? "Remembered" : "Proposed"}: ${event.lines.join("; ")}`));
+      if (event.status === "saved") run.steps.append(h("li", "good", `Remembered: ${event.lines.join("; ")}`));
+      else for (const line of event.lines) run.steps.append(memoryChoice(line, event.host, event.scope));
+      break;
+    case "queued":
+      run.tag.textContent = "queued";
+      break;
+    case "cancelled":
+      run.steps.append(h("li", "warn", "Stopped"));
       break;
     case "error":
       run.steps.append(h("li", "bad", `Error: ${event.message}`));

@@ -1,5 +1,7 @@
 import type { UiEvent } from "../messages.js";
+import type { MemoryScope } from "../../../shared/protocol.js";
 import { forgetLine } from "../memory.js";
+import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { adoptStyles, h, icon } from "../ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "../ui/theme.js";
 import { VOICE_CSS } from "../voice/styles.js";
@@ -36,7 +38,9 @@ export class OverlayUi {
     this.fab.type = "button";
     this.fab.setAttribute("aria-label", "Open adaptive agent");
     this.fab.append(this.fabOrb);
-    this.fab.addEventListener("click", () => this.spotlight.toggle());
+    this.fab.addEventListener("click", () => {
+      if (this.deps.ensureAlive()) this.spotlight.toggle();
+    });
     this.shadow.append(this.fab);
     document.documentElement.append(this.host);
     this.bringToFront();
@@ -49,6 +53,12 @@ export class OverlayUi {
     } catch {
       // popover unsupported: the fixed host still renders, just not in the top layer
     }
+  }
+
+  destroy() {
+    this.spotlight.destroy();
+    window.clearTimeout(this.toastTimer);
+    this.host.remove();
   }
 
   setFab(visible: boolean) {
@@ -66,7 +76,7 @@ export class OverlayUi {
     if (event.type === "start") this.triggers.set(event.runId, event.trigger);
     const handled = this.spotlight.handleEvent(event);
     if (event.type === "memory") {
-      if (!(handled && this.spotlight.isOpen())) this.announceMemory(event.status, event.lines);
+      if (!(handled && this.spotlight.isOpen())) this.announceMemory(event.status, event.lines, event.host, event.scope);
       return;
     }
     const working = event.type === "start" || event.type === "step" || event.type === "tier";
@@ -87,15 +97,25 @@ export class OverlayUi {
     }
   }
 
-  private announceMemory(status: "saved" | "proposed", lines: string[]) {
+  // Proposals stay on screen until answered; ignoring one leaves it waiting in settings.
+  private announceMemory(status: "saved" | "proposed", lines: string[], host?: string, scope?: MemoryScope) {
     const text = lines.join("; ");
-    if (status === "proposed") return this.showToast(`Suggested for your memory: ${text}. Accept it in the bar or settings.`, []);
-    this.showToast(`Remembered: ${text}`, [], false, async () => {
-      for (const line of lines) await forgetLine(line);
-    });
+    if (status === "saved") {
+      return this.showToast(`Remembered: ${text}`, [], false, async () => {
+        for (const line of lines) await forgetLine(line);
+      });
+    }
+    const actions = scopeChoices(lines, host, scope).map((choice) => ({
+      label: choice.label,
+      run: async () => {
+        const outcome = await choice.run();
+        this.showToast(`${outcomeText(outcome, host)}: ${text}`, []);
+      },
+    }));
+    this.showToast(`Save this preference? ${text}`, [], false, undefined, actions, true);
   }
 
-  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>, action?: ToastAction) {
+  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>, action?: ToastAction | ToastAction[], sticky = false) {
     window.clearTimeout(this.toastTimer);
     const previous = this.toast;
     if (previous) {
@@ -117,16 +137,16 @@ export class OverlayUi {
       });
       nodes.push(undo);
     }
-    if (action) {
-      const button = h("button", "link", action.label);
+    for (const each of action ? [action].flat() : []) {
+      const button = h("button", "link", each.label);
       button.type = "button";
       button.addEventListener("click", () => {
         this.dismissToast();
-        void action.run();
+        void each.run();
       });
       nodes.push(button);
     }
-    nodes.push(close, h("div", "life"));
+    nodes.push(close, ...(sticky ? [] : [h("div", "life")]));
 
     const toast = h("div", `toast${isError ? " error" : ""}`, "", nodes);
     toast.setAttribute("role", "status");
@@ -135,7 +155,7 @@ export class OverlayUi {
     this.shadow.append(toast);
     this.bringToFront();
     requestAnimationFrame(() => toast.classList.add("show"));
-    this.toastTimer = window.setTimeout(() => this.dismissToast(), TOAST_MS);
+    if (!sticky) this.toastTimer = window.setTimeout(() => this.dismissToast(), TOAST_MS);
   }
 
   setSpeaking(on: boolean) {
