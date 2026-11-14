@@ -76,6 +76,7 @@ export default defineBackground(() => {
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && "paused" in changes) void applyPause(changes.paused?.newValue === true);
     if (area !== "local" || !(RULES_KEY in changes)) return;
     const change = changes[RULES_KEY];
     void resendRules(parseRules(change?.oldValue), parseRules(change?.newValue));
@@ -87,6 +88,8 @@ export default defineBackground(() => {
 async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   await loadClock();
   await forgetApplied(tabId);
+  const { paused, proactive } = await chrome.storage.local.get(["paused", "proactive"]);
+  if (paused === true) return notifyDone(tabId);
   await applyRulesToTab(tabId, msg.url);
   const profile = await loadProfile();
   if (profile.needs.length === 0) return notifyDone(tabId);
@@ -101,6 +104,11 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
       restored: true,
     });
     if (restored) return;
+  }
+
+  if (proactive === false) {
+    await logForTab(tabId, "info", "Act on page load is off, so no model call");
+    return notifyDone(tabId);
   }
 
   const request = AdaptRequest.safeParse({ url: msg.url, outline: msg.outline, profile, clientTime: clientTime() });
@@ -312,6 +320,18 @@ async function applyRulesToTab(tabId: number, url: string): Promise<void> {
   if (!host) return;
   const rules = rulesForHost(await loadRules(), host);
   await sendToTab(tabId, { type: "apply-rules", rules }).catch(() => undefined);
+}
+
+// The kill switch clears every rule filter and page change in open tabs; turning it back on restores the rules.
+async function applyPause(paused: boolean): Promise<void> {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  const rules = paused ? [] : await loadRules();
+  for (const tab of tabs) {
+    const host = hostOf(tab.url);
+    if (tab.id === undefined || !host) continue;
+    await sendToTab(tab.id, { type: "apply-rules", rules: rulesForHost(rules, host) }).catch(() => undefined);
+    if (paused) await sendToTab(tab.id, { type: "remove-banner" }).catch(() => undefined);
+  }
 }
 
 // Tabs are re-sent their rules when rules change, including tabs whose host lost its last rule
