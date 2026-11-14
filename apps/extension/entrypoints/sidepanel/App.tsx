@@ -9,6 +9,7 @@ import { GesturePanel } from "./GesturePanel";
 import { Header } from "./Header";
 import { OnThisPage } from "./OnThisPage";
 import { ProfileEditor } from "./ProfileEditor";
+import { RulesCard } from "./RulesCard";
 
 export function App() {
   const [companion, setCompanion] = useState<Companion | null>(null);
@@ -110,6 +111,7 @@ export function App() {
       <div className="top-cards">
         <ProfileEditor />
         <OnThisPage />
+        <RulesCard />
         <GesturePanel />
       </div>
       <ChatLog entries={entries} proposal={view?.pending ?? null} busy={busy} onDecide={(accept) => void decide(accept)} />
