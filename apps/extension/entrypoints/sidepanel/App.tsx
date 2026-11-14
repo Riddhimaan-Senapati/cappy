@@ -3,6 +3,7 @@ import { EMPTY_PROFILE, NeedKind, Profile } from "@browser-agent/shared";
 import { createCompanion, type Companion, type CompanionView } from "@browser-agent/companion";
 import { Message } from "../../utils/messages";
 import { callLlm } from "../../utils/backend";
+import { GesturePanel } from "./GesturePanel";
 import {
   KEYS,
   LastResult,
@@ -103,6 +104,8 @@ export function App() {
       <Section title="Companion">
         <CompanionPanel />
       </Section>
+
+      <GesturePanel />
     </main>
   );
 }

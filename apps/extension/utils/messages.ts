@@ -16,8 +16,23 @@ export const InjectSvg = z.object({ type: z.literal("inject-svg"), svg: z.string
 
 export const RemoveBanner = z.object({ type: z.literal("remove-banner") }).strict();
 
-export const ToContentMessage = z.discriminatedUnion("type", [ShowBanner, InjectSvg, RemoveBanner]);
+export const GestureAction = z.enum(["scroll_down", "scroll_up", "back"]);
+export type GestureAction = z.infer<typeof GestureAction>;
+
+export const Gesture = z
+  .object({ type: z.literal("gesture"), action: GestureAction, stepPx: z.number().int().min(50).max(1000) })
+  .strict();
+export type Gesture = z.infer<typeof Gesture>;
+
+export const ToContentMessage = z.discriminatedUnion("type", [ShowBanner, InjectSvg, RemoveBanner, Gesture]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;
 
-export const Message = z.discriminatedUnion("type", [PageReady, Undo, ShowBanner, InjectSvg, RemoveBanner]);
+export const Message = z.discriminatedUnion("type", [
+  PageReady,
+  Undo,
+  ShowBanner,
+  InjectSvg,
+  RemoveBanner,
+  Gesture,
+]);
 export type Message = z.infer<typeof Message>;
