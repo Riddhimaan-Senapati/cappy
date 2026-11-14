@@ -1,3 +1,4 @@
+import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
 import type { Routing, Tier } from "../../shared/protocol.js";
 
@@ -11,6 +12,7 @@ export interface StoredState {
   profile: string[];
   pendingMemory: string[];
   history: ChatTurn[];
+  submittedRequests: string[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
   recipes: Record<string, Recipe>;
@@ -32,6 +34,7 @@ export const DEFAULTS: StoredState = {
   profile: [],
   pendingMemory: [],
   history: [],
+  submittedRequests: [],
   globalChanges: [],
   siteChanges: {},
   recipes: {},
@@ -58,6 +61,39 @@ export async function load(): Promise<StoredState> {
 
 export async function save(patch: Partial<StoredState>) {
   await chrome.storage.local.set(patch);
+}
+
+function requestHistory(state: Pick<StoredState, "history" | "submittedRequests">): string[] {
+  return state.submittedRequests.length
+    ? state.submittedRequests
+    : state.history.filter((turn) => turn.role === "user").map((turn) => turn.text);
+}
+
+let requestWrite: Promise<void> = Promise.resolve();
+
+export function recordSubmittedRequest(message: string): Promise<void> {
+  const write = requestWrite.then(async () => {
+    const state = await load();
+    await save({ submittedRequests: [...requestHistory(state), message] });
+  });
+  requestWrite = write.catch(() => undefined);
+  return write;
+}
+
+const normalizeRequest = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+
+export function suggestRequests(state: Pick<StoredState, "history" | "submittedRequests">, input: string): string[] {
+  const query = normalizeRequest(input);
+  if (!query) return [];
+  const seen = new Set([query]);
+  const requests = requestHistory(state).slice().reverse().filter((request) => {
+    const normalized = normalizeRequest(request);
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+  const search = new Fuse(requests, { threshold: 0.3, ignoreLocation: true });
+  return search.search(query, { limit: 5 }).map(({ item }) => item);
 }
 
 export async function savedChangesFor(origin: string): Promise<ActiveChange[]> {

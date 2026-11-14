@@ -1,7 +1,8 @@
+import { LARGER_TEXT } from "../zoom-preference.js";
+import { hasMemoryLine, rememberLines } from "../memory.js";
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
 import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, SiteControlOutcome, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
-import { rememberLines } from "../memory.js";
 import { load, recipeKey, save, saveRecipe } from "../storage.js";
 import { speakIfEnabled } from "./tts.js";
 
@@ -156,13 +157,14 @@ export class AgentClient {
         routing: state.routing,
         models: state.modelOverrides,
         history: state.history.slice(-8),
-        profile: state.profile,
+        profile: trigger === "page_load" ? state.profile.filter((line) => !hasMemoryLine([line], LARGER_TEXT)) : state.profile,
         active,
         page,
         clientTime: localClock(),
       };
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: message }].slice(-20) });
       this.send(request);
+      return true;
     } catch (error) {
       this.fail(run, error instanceof Error ? error.message : String(error));
     }

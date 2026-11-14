@@ -14,6 +14,10 @@
       "suggested_key": { "default": "Ctrl+Shift+Space", "mac": "Command+Shift+Space" },
       "description": "Open the adaptive agent bar"
     },
+    "start-voice": {
+      "suggested_key": { "default": "Alt+Shift+M" },
+      "description": "Open the adaptive agent bar and start voice input"
+    },
     "open-debug": {
       "suggested_key": { "default": "Ctrl+Shift+Y", "mac": "Command+Shift+Y" },
       "description": "Open the debug panel"

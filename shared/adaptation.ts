@@ -66,7 +66,7 @@ export const Change = z.object({
   css: z.string().nullable().describe("CSS you write to implement the change. No url(), @import, or content strings."),
   dom: z.array(DomOp).nullable().describe("Allowed DOM operations for what CSS cannot do."),
   block: BlockCall.nullable().describe("A pre-built capability for what neither CSS nor DOM ops can do."),
-  scope: z.enum(["site", "everywhere"]).describe("site = only this website; everywhere = every site the user visits (only when the user asks for it or the need is clearly universal)."),
+  scope: z.enum(["site", "everywhere"]).describe("site = only this website, including site-specific implementations of global preferences; everywhere = portable implementations of cross-site preferences."),
   schedule: Schedule.nullable().optional().describe("Only for time-limited requests (e.g. weekdays 9-5, until Dec 15); null means always."),
 });
 

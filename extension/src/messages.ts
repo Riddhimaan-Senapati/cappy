@@ -24,6 +24,8 @@ export type ContentRequest =
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
+  | { kind: "startVoice" }
+  | { kind: "frictionSaved"; origin: string }
   | { kind: "frictionPrompt"; origin: string }
   | { kind: "ui"; event: UiEvent }
   | { kind: "readAloud" }

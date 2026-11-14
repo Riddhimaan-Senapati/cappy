@@ -43,6 +43,7 @@ await runE2E("verification", async ({ browser }) => {
   assert.equal(active.find((change) => change.id === base.id)?.css, base.css);
 
   await demo.bringToFront();
+  await worker.evaluate(() => chrome.storage.local.set({ askBeforeRemember: true }));
   await worker.evaluate(async (id) => {
     await chrome.tabs.setZoom(id, 1.1);
     await chrome.tabs.setZoom(id, 1.25);
@@ -53,4 +54,17 @@ await runE2E("verification", async ({ browser }) => {
     const { profile } = await chrome.storage.local.get("profile");
     return Array.isArray(profile) && profile.includes("Prefers larger text");
   }));
+
+  await worker.evaluate(async (id) => {
+    await chrome.storage.local.set({ askBeforeRemember: false, profile: [] });
+    await chrome.tabs.setZoom(id, 1);
+    await chrome.tabs.setZoom(id, 1.1);
+    await chrome.tabs.setZoom(id, 1.25);
+  }, tabId);
+  await waitFor("automatic zoom memory", () => shadowTextVisible(demo, "Remembered that you prefer larger text on every site."));
+  await waitFor("larger font after repeat zoom", async () => (await fontSizeOf(demo)) === 21.6);
+
+  await clickShadowButton(demo, "Undo");
+  await waitFor("the original font size after undo", async () => (await fontSizeOf(demo)) === 18);
+  assert.equal(await worker.evaluate((id) => chrome.tabs.getZoom(id), tabId), 1.25);
 });

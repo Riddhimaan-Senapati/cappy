@@ -20,7 +20,7 @@ const title = document.createElement("h1");
 title.textContent = "Allow the microphone";
 const why = document.createElement("p");
 why.textContent =
-  "Voice input listens only after you press the mic button or Alt+M. Chrome turns your speech into text, which may happen on Google's servers. This page asks once so the extension is allowed to use the microphone, then closes the stream right away.";
+  "Voice input listens only after you press the mic button or the voice shortcut. Chrome turns your speech into text, which may happen on Google's servers. This page asks once so the extension is allowed to use the microphone, then closes the stream right away.";
 const button = document.createElement("button");
 button.type = "button";
 button.textContent = "Allow microphone";

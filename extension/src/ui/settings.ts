@@ -96,7 +96,7 @@ function voiceSection(state: StoredState): Node {
       toggle("Send after speaking", "Off leaves your words in the box to edit first.", state.voiceAutoSend, (on) => save({ voiceAutoSend: on })),
       voiceLanguage(state),
       h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Chrome asks once. Allow it in the tab that opens.")]), enable]),
-      h("div", "s-note", "Speech is processed by Chrome. Press the mic button or Alt+M in the bar to speak."),
+      h("div", "s-note", "Speech is processed by Chrome. Press Alt+Shift+M (Option+Shift+M on Mac) on a page to speak. Change the shortcut under Shortcuts."),
     ],
   );
 }

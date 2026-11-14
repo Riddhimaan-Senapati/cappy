@@ -84,6 +84,9 @@ export const tools: AgentTool[] = [
     schema: z.object({ change: Change }),
     async run({ change }, session) {
       if (session.blockedReason) return { text: "BLOCKED: no changes allowed on this page." };
+      if (change.scope === "everywhere" && change.block?.name === "contentFilter" && change.block.itemSelector !== null) {
+        return { text: "REJECTED: a content filter with a site-specific itemSelector requires site scope. For a cross-site preference, remember the general intent." };
+      }
       const problem = validateChange(change);
       if (problem) {
         session.failures++;
@@ -127,7 +130,7 @@ export const tools: AgentTool[] = [
   defineTool({
     name: "remember",
     description:
-      "Record durable lines about the user's needs or free-text preferences (e.g. 'Red-green colorblind', 'Prefers dark mode', 'No podcasts on weekdays 9-5', 'Likes long-form videos, not Shorts'). The user's settings decide whether they are saved now or proposed for approval. Not for one-off page requests.",
+      "Record durable lines about the user's needs or free-text preferences (e.g. 'Red-green colorblind', 'Prefers dark mode', 'No podcasts on weekdays 9-5', 'Likes long-form videos, not Shorts'). The user's settings decide whether they are saved now or proposed for approval. Include an explicitly requested site or schedule restriction. Store the general preference without selectors or incidental site details. Use only for lasting preferences.",
     schema: z.object({ lines: z.array(z.string()) }),
     async run({ lines }, session) {
       const known = new Set(session.request.profile.map((line) => line.toLowerCase()));

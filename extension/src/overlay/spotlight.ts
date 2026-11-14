@@ -3,7 +3,7 @@ import type { Routing } from "../../../shared/protocol.js";
 import { SUGGESTIONS } from "../defaults.js";
 import { ROUTING_LABELS, type AppliedSummary, type UiEvent } from "../messages.js";
 import { acceptProposal, forgetLine, rejectProposal } from "../memory.js";
-import { load, save, type StoredState } from "../storage.js";
+import { load, save, suggestRequests, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
 import { paintMic, liveRegion, micButton } from "../voice/button.js";
@@ -29,7 +29,7 @@ interface Item {
   icon: IconName;
   title: string;
   hint?: string;
-  kind: "ask" | "command" | "undo" | "try";
+  kind: "ask" | "command" | "undo" | "try" | "previous";
   section: string;
   keywords?: string;
   run(): void | Promise<void>;
@@ -280,17 +280,26 @@ export class Spotlight {
         run: async () => (await save({ floatingButton: state?.floatingButton === false }), this.hide()),
       },
       { id: "debug", icon: "bug", title: "Open debug panel", hint: "chat + tool log", kind: "command", section: "Commands", keywords: "developer console logs", run: () => (this.deps.openDebug(), this.hide()) },
-      { id: "clear-chat", icon: "text", title: "Clear chat", hint: "memory is kept", kind: "command", section: "Commands", keywords: "history reset conversation", run: async () => { await save({ history: [] }); this.run = null; } },
+      { id: "clear-chat", icon: "text", title: "Clear chat", hint: "memory is kept", kind: "command", section: "Commands", keywords: "history reset conversation", run: async () => { await save({ history: [], submittedRequests: [] }); this.run = null; } },
     ];
 
     const tries: Item[] = SUGGESTIONS.map((text) => ({ id: `try:${text}`, icon: "sparkle", title: text, kind: "try", section: "Try asking", run: () => this.ask(text, false) }));
 
     if (!q) return [...undo, ...commands, ...tries];
     const ask: Item = { id: "ask", icon: "sparkle", title: q, hint: "Ask AI", kind: "ask", section: "", run: () => this.ask(q, false) };
+    const previous: Item[] = state ? suggestRequests(state, q).map((text) => ({
+      id: `previous:${text}`,
+      icon: "text",
+      title: text,
+      hint: "Previous request",
+      kind: "previous",
+      section: "",
+      run: () => this.complete(text),
+    })) : [];
     const matched = [...undo, ...commands.filter((item) => item.id !== "model-cycle"), ...modelChoices].filter(matches);
     const lowered = q.toLowerCase();
     const strong = q.length >= 2 ? matched.find((item) => item.title.toLowerCase().startsWith(lowered) || item.title.toLowerCase().replace(/^(undo|model): /, "").startsWith(lowered)) : undefined;
-    return strong ? [strong, ask, ...matched.filter((item) => item !== strong)] : [ask, ...matched];
+    return strong ? [strong, ask, ...previous, ...matched.filter((item) => item !== strong)] : [ask, ...previous, ...matched];
   }
 
   private renderList() {
@@ -332,6 +341,12 @@ export class Spotlight {
   private async runItem(item: Item) {
     await item.run();
     if (this.opened && this.view === "list") this.renderList();
+  }
+
+  private complete(text: string) {
+    this.input.value = text;
+    this.input.focus({ preventScroll: true });
+    this.onInput();
   }
 
   ask(message: string, fresh: boolean) {
@@ -468,6 +483,14 @@ export class Spotlight {
       this.orb.classList.toggle("work", this.working);
     }
     return true;
+  }
+
+  async startVoice() {
+    if (!this.opened) await this.show();
+    if (this.view === "settings") this.setView("list");
+    window.clearTimeout(this.closeTimer);
+    this.input.focus({ preventScroll: true });
+    if (!this.voice.active) this.toggleVoice();
   }
 
   private toggleVoice() {

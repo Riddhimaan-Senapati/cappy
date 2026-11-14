@@ -1,9 +1,10 @@
-import { acceptProposal, hasMemoryLine } from "../memory.js";
+import { acceptProposal, hasMemoryLine, rememberLines } from "../memory.js";
 import { load } from "../storage.js";
-import { type AgentClient, sendToTab } from "./agent.js";
+import { sendToTab } from "./agent.js";
+
+import { LARGER_TEXT } from "../zoom-preference.js";
 
 const ZOOM_WINDOW_MS = 2 * 60 * 1000;
-const LARGER_TEXT = "Prefers larger text";
 
 function zoomKey(tabId: number) {
   return `frictionZoom:${tabId}`;
@@ -34,8 +35,8 @@ export function registerFriction() {
 async function recordZoomIn(tabId: number, now: number) {
   const tab = await chrome.tabs.get(tabId);
   if (!tab.active || !tab.url || !/^https?:\/\//.test(tab.url)) return;
-  const { paused, profile } = await load();
-  if (paused || hasMemoryLine(profile, LARGER_TEXT)) return;
+  const { paused, profile, pendingMemory } = await load();
+  if (paused || hasMemoryLine(profile, LARGER_TEXT) || hasMemoryLine(pendingMemory, LARGER_TEXT)) return;
 
   const origin = new URL(tab.url).origin;
   const key = zoomKey(tabId);
@@ -44,14 +45,16 @@ async function recordZoomIn(tabId: number, now: number) {
   const then = typeof previous === "string" && previous.startsWith(prefix) ? Number(previous.slice(prefix.length)) : NaN;
   if (then <= now && now - then <= ZOOM_WINDOW_MS) {
     await chrome.storage.session.remove(key);
-    await sendToTab(tabId, { kind: "frictionPrompt", origin });
+    const { saved, proposed } = await rememberLines([LARGER_TEXT]);
+    if (saved.length) await sendToTab(tabId, { kind: "frictionSaved", origin });
+    if (proposed.length) await sendToTab(tabId, { kind: "frictionPrompt", origin });
   } else {
     await chrome.storage.session.set({ [key]: `${prefix}${now}` });
   }
 }
 
-export async function acceptFriction(tab: chrome.tabs.Tab, agent: AgentClient) {
-  if ((await load()).paused) return;
+export async function acceptFriction() {
+  const { paused, pendingMemory } = await load();
+  if (paused || !hasMemoryLine(pendingMemory, LARGER_TEXT)) return;
   await acceptProposal(LARGER_TEXT);
-  await agent.startRun(tab, "page_load", "");
 }

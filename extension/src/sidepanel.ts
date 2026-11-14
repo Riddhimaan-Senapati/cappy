@@ -5,7 +5,7 @@ import { paintMic, liveRegion, micButton } from "./voice/button.js";
 import { VoiceController } from "./voice/controller.js";
 import { joinVoiceText, parseVoiceEvent, voiceStatusText, type VoiceState } from "./voice/core.js";
 import { VOICE_CSS } from "./voice/styles.js";
-import { load } from "./storage.js";
+import { load, suggestRequests, type StoredState } from "./storage.js";
 
 const CSS = `
 html, body { margin: 0; height: 100%; background: #121217; }
@@ -28,6 +28,9 @@ h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .tools { max-height: 24%; overflow: auto; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
 .tools div { display: flex; gap: 8px; } .tools .bad { color: var(--bad); } .tools .ms { color: var(--faint); min-width: 54px; }
 form { display: flex; gap: 8px; }
+.previous-requests { display: grid; gap: 4px; }
+.previous-requests[hidden] { display: none; }
+.previous-requests button { padding: 8px 12px; background: var(--raise); color: var(--text); text-align: left; }
 textarea { flex: 1; resize: none; padding: 10px 12px; border-radius: 12px; background: var(--raise); border: 1px solid var(--line); color: var(--text); font: inherit; outline: none; }
 textarea:focus { border-color: var(--accent); }
 button { padding: 0 16px; border: 0; border-radius: 12px; background: var(--grad); color: #0d0d12; font-weight: 650; cursor: pointer; }
@@ -46,6 +49,37 @@ input.placeholder = "Debug chat: runs on the active tab, always asks the AI fres
 const mic = micButton();
 const live = liveRegion();
 const form = h("form", "", "", [input, mic, h("button", "", "Send")]);
+const previousRequests = h("div", "previous-requests");
+previousRequests.setAttribute("role", "group");
+previousRequests.setAttribute("aria-label", "Previous requests");
+previousRequests.hidden = true;
+let requestState: StoredState | undefined;
+
+function renderPreviousRequests() {
+  const matches = requestState ? suggestRequests(requestState, input.value) : [];
+  previousRequests.replaceChildren(...matches.map((message) => {
+    const button = h("button", "", message);
+    button.type = "button";
+    button.addEventListener("click", () => {
+      input.value = message;
+      input.focus();
+      renderPreviousRequests();
+    });
+    return button;
+  }));
+  previousRequests.hidden = !matches.length;
+}
+
+async function refreshRequestState() {
+  requestState = await load();
+  renderPreviousRequests();
+}
+
+input.addEventListener("input", renderPreviousRequests);
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && (changes.submittedRequests || changes.history)) void refreshRequestState();
+});
+void refreshRequestState();
 const readButton = h("button", "", "Read page aloud");
 readButton.type = "button";
 const stopButton = h("button", "", "Stop");
@@ -71,6 +105,7 @@ document.body.append(
   timeline,
   tools,
   form,
+  previousRequests,
   live,
 );
 
@@ -82,13 +117,17 @@ const voice = new VoiceController({
   },
   onInterim(text) {
     input.value = joinVoiceText(voiceBase, text);
+    renderPreviousRequests();
   },
   async onFinal(text) {
     input.value = joinVoiceText(voiceBase, text);
     voiceBase = "";
     const { voiceAutoSend } = await load();
     if (text && voiceAutoSend) form.requestSubmit();
-    else input.focus();
+    else {
+      renderPreviousRequests();
+      input.focus();
+    }
   },
 });
 mic.addEventListener("click", () => {
@@ -169,6 +208,7 @@ form.addEventListener("submit", (event) => {
   if (!message) return;
   port.postMessage({ type: "chat", message } satisfies DebugPortRequest);
   input.value = "";
+  renderPreviousRequests();
 });
 input.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && voice.active) {

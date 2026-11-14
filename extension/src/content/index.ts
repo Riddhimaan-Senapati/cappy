@@ -1,5 +1,7 @@
 import type { ActiveChange, Change } from "../../../shared/adaptation.js";
 import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "../messages.js";
+import { forgetLine, hasMemoryLine } from "../memory.js";
+import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
 import { activeChanges, applyChange, applySiteControl, revertAll, revertChange, setBusy } from "./engine.js";
@@ -22,22 +24,42 @@ function mutate<T>(operation: () => Promise<T>): Promise<T> {
 const send = (request: BackgroundRequest) => chrome.runtime.sendMessage(request).catch(() => undefined);
 
 async function apply(change: Change) {
+  if (change.block?.name === "textScale" && change.id !== learnedTextScale.id) {
+    await revertChange(learnedTextScale.id, false);
+  }
   const outcome = await applyChange(change);
   const stored = activeChanges().find((active) => active.id === change.id);
   if (outcome.ok && stored) await recordApplied(origin, stored);
+  if (change.block?.name === "textScale") await syncLearnedText();
   return outcome;
 }
 
 function revert(id: string) {
   return mutate(async () => {
+    const wasTextScale = activeChanges().some((change) => change.id === id && change.block?.name === "textScale");
     const ok = await revertChange(id);
-    if (id.startsWith("site-control-")) {
+    if (id === learnedTextScale.id) {
+      await forgetLine(LARGER_TEXT);
+    } else if (id.startsWith("site-control-")) {
       if (!ok) ensureOverlay().showToast("The site control could not be restored.", [], true);
     } else {
       await recordReverted(origin, id);
+      if (wasTextScale) await syncLearnedText();
     }
     return { ok };
   });
+}
+
+async function syncLearnedText() {
+  const { paused, profile } = await load();
+  const changes = activeChanges();
+  const current = changes.some(({ id }) => id === learnedTextScale.id);
+  const hasExplicitScale = changes.some(({ id, block }) => id !== learnedTextScale.id && block?.name === "textScale");
+  if (!paused && !hasExplicitScale && hasMemoryLine(profile, LARGER_TEXT)) {
+    if (!current) await applyChange(learnedTextScale, false);
+  } else if (current) {
+    await revertChange(learnedTextScale.id, false);
+  }
 }
 
 async function restore(animate: boolean) {
@@ -45,6 +67,7 @@ async function restore(animate: boolean) {
   for (const change of await savedChangesFor(origin)) {
     if ((await applyChange(change, animate)).ok) restored++;
   }
+  await syncLearnedText();
   return restored;
 }
 
@@ -98,6 +121,9 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return activeChanges() satisfies ActiveChange[];
     case "busy":
       return setBusy(request.on);
+    case "frictionSaved":
+      if (request.origin !== origin) return;
+      return ensureOverlay().showToast("Remembered that you prefer larger text on every site.", [learnedTextScale.id]);
     case "frictionPrompt":
       if (request.origin !== origin) return;
       return ensureOverlay().showToast("Make text bigger on every site?", [], false, undefined, {
@@ -108,6 +134,8 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return ensureOverlay().showToast(request.text, request.undoIds);
     case "readAloud":
       return readPageAloud();
+    case "startVoice":
+      return ensureOverlay().spotlight.startVoice();
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
     case "ui":
@@ -131,6 +159,7 @@ for (const type of ["keydown", "keyup", "keypress"] as const) {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
+  if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
   if (changes.paused) {
     void mutate(async () => {
       if (changes.paused.newValue) await revertAll();

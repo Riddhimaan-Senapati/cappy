@@ -1,5 +1,5 @@
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
-import { load } from "../storage.js";
+import { load, recordSubmittedRequest } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
 import { acceptFriction, registerFriction } from "./friction.js";
@@ -32,6 +32,12 @@ async function activeTab() {
   return tab;
 }
 
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean) {
+  if (!message.trim()) return;
+  await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
+  if (tab) await agent.startRun(tab, "chat", message, fresh);
+}
+
 async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
   if (!tab?.id) return;
   try {
@@ -43,33 +49,39 @@ async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
 
 chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command === "toggle-spotlight") await toggleSpotlight(tab ?? (await activeTab()));
+  if (command === "start-voice") {
+    const target = tab ?? (await activeTab());
+    if (target?.id !== undefined) await sendToTab(target.id, { kind: "startVoice" }).catch(() => undefined);
+  }
   if (command === "open-debug") {
     const target = tab ?? (await activeTab());
     if (target?.windowId) await chrome.sidePanel.open({ windowId: target.windowId }).catch(() => undefined);
   }
 });
 
-async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restored: number) {
+async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string) {
   const state = await load();
-  if (!state.proactive || state.paused || !state.profile.length || restored > 0 || !tab.id) return;
-  const key = `${tab.id}|${origin}`;
+  if (!state.proactive || state.paused || !state.profile.length || !tab.id) return;
+  const key = JSON.stringify([tab.id, origin, state.profile]);
   const { proactiveSeen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
   if (proactiveSeen.includes(key)) return;
-  await chrome.storage.session.set({ proactiveSeen: [...proactiveSeen.slice(-100), key] });
-  await agent.startRun(tab, "page_load", "");
+  if (await agent.startRun(tab, "page_load", "")) {
+    const { proactiveSeen: seen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
+    await chrome.storage.session.set({ proactiveSeen: [...seen.filter((entry) => entry !== key).slice(-100), key] });
+  }
 }
 
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
   if (handleVoiceRequest(request, sender)) return false;
   switch (request.kind) {
     case "runChat":
-      if (sender.tab) void agent.startRun(sender.tab, "chat", request.message, request.fresh);
-      break;
+      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh).finally(() => sendResponse());
+      return !!sender.tab;
     case "frictionAccept":
-      if (sender.tab) void acceptFriction(sender.tab, agent).catch(() => undefined);
+      if (sender.tab) void acceptFriction().catch(() => undefined);
       break;
     case "pageReady":
-      if (sender.tab) void maybeRunProactively(sender.tab, request.origin, request.restored);
+      if (sender.tab) void maybeRunProactively(sender.tab, request.origin);
       break;
     case "openDebug":
       if (sender.tab?.id) void chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => undefined);
@@ -90,8 +102,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.postMessage({ type: "status", status: agent.status } satisfies DebugPortMessage);
   void agent.ensureConnected().catch(() => undefined);
   port.onMessage.addListener(async (request: DebugPortRequest) => {
-    const tab = await activeTab();
-    if (request.type === "chat" && tab) await agent.startRun(tab, "chat", request.message, true);
+    if (request.type === "chat") await submitChat(await activeTab(), request.message, true);
   });
   port.onDisconnect.addListener(() => debugPorts.delete(port));
 });
