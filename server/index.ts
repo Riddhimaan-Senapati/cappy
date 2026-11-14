@@ -5,9 +5,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { ClientMessage, RunRequest, ServerMessage, Tier } from "../shared/protocol.js";
-import { login } from "./auth/chatgpt.js";
-import { defaultProviderId, describeProviders, forget, keyFor, resolveProvider, wantModels } from "./agent/providers/index.js";
+import { login, signOut } from "./auth/chatgpt.js";
+import { defaultProviderId, describeProviders, forget, getProvider, keyFor, resolveProvider, wantModels } from "./agent/providers/index.js";
 import type { AgentProvider } from "./agent/providers/types.js";
+import { recallForRun } from "./agent/memory.js";
 import { pickTier } from "./agent/router.js";
 import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { setKey } from "./keys.js";
@@ -44,15 +45,19 @@ async function execute(session: AgentSession, request: RunRequest, provider: Age
   }
 
   let tier: Tier = pickTier(request);
+  session.tier = tier;
   const modelFor = (which: Tier) => request.models?.[which] || provider.models[which];
   const announce = () => session.send({ type: "tier", runId: request.runId, tier, model: modelFor(tier) });
   announce();
   let reply = await provider.run(session, tier, modelFor(tier));
 
-  if (tier === "fast" && request.routing === "auto" && !session.blockedReason && session.struggled()) {
-    session.progress("That didn't land. Trying a stronger model");
+  if (tier === "fast" && request.routing === "auto" && !session.blockedReason && (session.escalation || session.struggled())) {
+    session.progress(session.escalation ? `Switching to Pro: ${session.escalation}` : "That didn't land. Switching to Pro");
+    console.log(`[route] escalated to frontier: ${session.escalation ?? "fast model struggled"}`);
     await session.undoAppliedChanges();
+    session.escalation = null;
     tier = "frontier";
+    session.tier = tier;
     announce();
     reply = await provider.run(session, tier, modelFor(tier));
   }
@@ -112,6 +117,12 @@ wss.on("connection", (socket, request) => {
         return void broadcastProviders();
       case "chatgptLogin":
         return void signIn(socket);
+      case "chatgptLogout":
+        signOut();
+        forget("chatgpt-signin");
+        console.log("[auth] signed out of ChatGPT on this computer");
+        await broadcastProviders();
+        return sendTo(socket, { type: "notice", level: "info", text: "Signed out of ChatGPT on this computer. To fully revoke access, remove the app in your ChatGPT account settings." });
       case "setKey": {
         const name = keyFor(message.provider);
         const key = message.key?.trim() || null;
@@ -120,7 +131,9 @@ wss.on("connection", (socket, request) => {
         setKey(name, key);
         forget(message.provider);
         console.log(`[keys] ${key ? "saved" : "removed"} key for ${message.provider}`);
-        return void broadcastProviders();
+        await broadcastProviders();
+        if (!key && getProvider(message.provider)) sendTo(socket, { type: "notice", level: "error", text: `That key also comes from .env, so it is still active. Remove ${name} from .env to turn it off.` });
+        return;
       }
       case "run":
         break;
@@ -128,7 +141,7 @@ wss.on("connection", (socket, request) => {
         return;
     }
 
-    const session = new AgentSession(socket, message);
+    const session = new AgentSession(socket, { ...message, profile: await recallForRun(message) });
     const provider = resolveProvider(message.provider);
     if (!provider) {
       session.send({ type: "error", runId: message.runId, message: "No AI provider is set up yet. Open settings to sign in with ChatGPT or add an API key." });

@@ -58,8 +58,21 @@ Nothing is required in `.env`. The server starts with no provider; the settings 
 - Keys added from settings are saved by the server to `.agent-keys.json` (gitignored, 0600). Keys in `.env` also count. The extension never stores keys.
 - `chatgpt-signin` uses OpenAI's documented sign-in for local open-source apps; the Sign in button runs the same flow as `npm run chatgpt:login`. Claude subscription logins are not allowed in third-party tools, so Claude means an API key.
 - With no provider picked, the first ready one wins (ChatGPT, Claude, OpenAI, Gemini), or `LLM_PROVIDER` if set and ready.
-- Each provider has a Fast and a Pro model; picks are stored per provider. Routing defaults to Fast; Tab in the bar switches to Pro; `auto` picks per request and retries on Pro when Fast struggles. Model lists are fetched only for the selected provider, since listing costs an API call.
+- Each provider has a Fast and a Pro model; picks are stored per provider. Routing defaults to Fast; Tab in the bar switches to Pro. In `auto`, keywords give a first guess, and the fast model can call `escalate` when a request is beyond it; the server then undoes its changes and reruns on Pro (it also does this when Fast's changes fail). Model lists are fetched only for the selected provider, since listing costs an API call.
 - Adding a provider: implement `AgentProvider` in `server/agent/providers/` over the shared `tools` list, honour `session.signal` for cancellation, register it in `providers/index.ts`.
+
+## Memory (integration point)
+
+Long-term memory (learned preferences, friction signals, Sentient notes) plugs in through `server/agent/memory.ts`:
+
+- `recallForRun(request)` returns the lines the agent sees as `<profile>` for this run. Today it returns the profile lines the extension sends.
+- `rememberFacts(request, lines)` receives durable facts the agent learns through its `remember` tool. Today the extension stores them in its profile and this is a no-op.
+
+Keep what reaches the model short (a few lines), never raw notes or messages. Profile editing in settings keeps working either way.
+
+## Skills
+
+Playbooks for kinds of requests live in `server/skills/*.md` (front matter: `name`, `description`). The prompt lists names and descriptions; the model loads one with `load_skill` when a request matches, by meaning rather than keywords. Edit or add a file to change behavior; no restart needed.
 
 ## Repo layout
 

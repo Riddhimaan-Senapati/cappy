@@ -1,6 +1,5 @@
-import { existsSync } from "node:fs";
 import type { ProviderInfo } from "../../../shared/protocol.js";
-import { CREDENTIALS_PATH } from "../../auth/chatgpt.js";
+import { isSignedIn } from "../../auth/chatgpt.js";
 import { getKey, type KeyName } from "../../keys.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createGeminiProvider } from "./gemini.js";
@@ -19,7 +18,7 @@ const keyed = (label: string, key: KeyName, create: () => AgentProvider): Entry 
 
 // Order is the fallback preference when the user has not picked a provider.
 const REGISTRY: Record<string, Entry> = {
-  "chatgpt-signin": { label: "ChatGPT", setup: "signin", ready: () => existsSync(CREDENTIALS_PATH), create: createChatGptProvider },
+  "chatgpt-signin": { label: "ChatGPT", setup: "signin", ready: isSignedIn, create: createChatGptProvider },
   "anthropic-key": keyed("Claude", "ANTHROPIC_API_KEY", createAnthropicProvider),
   "openai-key": keyed("OpenAI API", "OPENAI_API_KEY", createOpenAIKeyProvider),
   gemini: keyed("Gemini", "GEMINI_API_KEY", createGeminiProvider),

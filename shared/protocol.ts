@@ -26,10 +26,20 @@ export interface InspectedElement {
   attributes: Record<string, string>;
 }
 
+export interface ContrastIssue {
+  selector: string;
+  text: string;
+  color: string;
+  background: string;
+  ratio: number;
+}
+
 export interface ApplyOutcome {
   ok: boolean;
   error?: string;
   matched: Record<string, number>;
+  lowContrast?: ContrastIssue[];
+  replaced?: string[];
   before: PageStats;
   after: PageStats;
 }
@@ -37,6 +47,7 @@ export interface ApplyOutcome {
 export interface TabTools {
   read_page: { input: Record<string, never>; output: PageOutline };
   inspect: { input: { selector: string }; output: { count: number; samples: InspectedElement[] } };
+  list_items: { input: { selector: string; keySelector: string | null }; output: { count: number; items: Array<{ key: string; text: string }> } };
   apply_change: { input: { change: Change }; output: ApplyOutcome };
   revert_change: { input: { id: string }; output: { ok: boolean } };
   screenshot: { input: Record<string, never>; output: { dataUrl: string } };
@@ -97,12 +108,16 @@ export interface SignInMessage {
   type: "chatgptLogin";
 }
 
+export interface SignOutMessage {
+  type: "chatgptLogout";
+}
+
 export interface CancelMessage {
   type: "cancel";
   runId: string;
 }
 
-export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | ListModelsMessage;
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage;
 export type ServerMessage =
   | ToolCallMessage
   | AgentEvent

@@ -1,4 +1,5 @@
 import type { RunRequest } from "../../shared/protocol.js";
+import { skillIndex } from "./skills.js";
 import { untrusted } from "./tools.js";
 
 export const SYSTEM_PROMPT = `You are the agent inside an accessibility browser extension. You adapt the web page the user is looking at to their personal needs, working directly on their live tab through tools.
@@ -11,10 +12,13 @@ How you work
    - colorblind: daltonizing color-matrix filter for protanopia, deuteranopia or tritanopia (scope media or page). Red-green colorblindness is usually deuteranopia.
    - textScale: scales every text element's real computed size; use when the site sets px sizes so CSS rem or % changes do nothing.
    - stopMotion: pauses all running CSS/Web animations and autoplaying media.
+   - dom op reorder: moves repeated items (tiles, rows, cards) into an order. Alphabetical by key text, or by a ranking you work out yourself after reading the items with list_items.
 3. Dom ops and text scaling are re-applied automatically to content the page loads later (infinite scroll, lazy loading, single-page navigation), and CSS keeps applying. You do not need to repeat a change when the page grows.
 4. Verify. Check apply_change's matched counts and before/after stats. If a selector matched 0 elements or stats did not improve, fix the change (same id) or revert it. Take a screenshot when the change is visual and you need to confirm it looks right (for example after inverting colors, check images are not inverted). At most two fix attempts per change, then revert and tell the user.
 5. Use remember for durable facts about the user's needs, never for one-off page requests.
-6. Finish with a short plain-text reply (one or two sentences, no markdown) saying what you changed and why.
+6. Skills: when a request matches one of the listed skills, call load_skill for it first and follow it.
+7. If you are the fast model and the request needs more reasoning than you can do well, or you cannot see how to do it, call escalate instead of giving up or doing something different. Judge by what the user means, not their exact words.
+8. Finish with a short plain-text reply (one or two sentences, no markdown) saying what you changed and why.
 
 CSS rules (enforced by a safety layer; violations are rejected)
 - No url(), @import, @font-face, image-set(), expression(), javascript:, backslash escapes, or content: values other than none/normal/"".
@@ -41,6 +45,7 @@ export function buildUserTurn(request: RunRequest): string {
 
   return [
     `<trigger>${request.trigger}</trigger>`,
+    `<skills>\n${skillIndex()}\n</skills>`,
     `<profile>\n${profile}\n</profile>`,
     `<active_changes_on_this_page>\n${active}\n</active_changes_on_this_page>`,
     `<recent_chat>\n${history || "(none)"}\n</recent_chat>`,

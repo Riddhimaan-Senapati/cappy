@@ -58,6 +58,7 @@ export function createGeminiProvider(): AgentProvider {
           parts.unshift({ functionResponse: { id: call.id, name: call.name, response: { output } } });
         }
         contents.push({ role: "user", parts });
+        if (session.escalation) return "";
       }
       return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
     },

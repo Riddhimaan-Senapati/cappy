@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
-import type { RunRequest, ServerMessage, TabToolName, TabTools, ToolResultMessage } from "../../shared/protocol.js";
+import type { RunRequest, ServerMessage, TabToolName, TabTools, Tier, ToolResultMessage } from "../../shared/protocol.js";
 
 const TOOL_TIMEOUT_MS = 15_000;
 
@@ -10,6 +10,8 @@ export class AgentSession {
   readonly profileUpdates: string[] = [];
   readonly appliedIds = new Set<string>();
   blockedReason: string | null = null;
+  escalation: string | null = null;
+  tier: Tier = "fast";
   failures = 0;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private closed = false;
