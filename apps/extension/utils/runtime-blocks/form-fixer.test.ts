@@ -102,3 +102,17 @@ describe("form fixer: one question at a time", () => {
     expect(document.querySelector(".ab-wizard-nav")).toBeNull();
   });
 });
+
+test("labels a select from its placeholder option and wraps a checkbox caption, undo restores both", () => {
+  document.body.innerHTML = `<form><select><option>Year</option><option>Senior</option></select><input type="checkbox" /> <span>Email me updates</span></form>`;
+  const before = document.body.innerHTML;
+  const undo = applyFormFixer({ block: "form_fixer", addLabels: true, clearErrors: false, minTargetPx: 44, oneQuestionMode: false });
+  const select = document.querySelector("select")!;
+  const box = document.querySelector("input[type=checkbox]")!;
+  expect(document.querySelector(`label[for="${select.id}"]`)?.textContent).toBe("Year");
+  const boxLabel = document.querySelector(`label[for="${box.id}"]`);
+  expect(boxLabel?.textContent).toBe("Email me updates");
+  expect(document.body.textContent?.match(/Email me updates/g)?.length).toBe(1);
+  undo();
+  expect(document.body.innerHTML).toBe(before);
+});

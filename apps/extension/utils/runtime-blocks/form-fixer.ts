@@ -79,15 +79,28 @@ function deriveLabelText(field: Field): string {
   if (placeholder) return placeholder;
   const title = field.getAttribute("title")?.trim();
   if (title) return title;
+  if (field instanceof HTMLSelectElement) {
+    const first = field.options[0];
+    if (first && (first.value === "" || first.value === first.text) && first.text.trim()) return first.text.trim();
+  }
   const source = field.getAttribute("name")?.trim() || field.id.trim();
   return source ? humanize(source) : "";
+}
+
+function adjacentCaption(field: Field): HTMLElement | null {
+  if (!(field instanceof HTMLInputElement) || !["checkbox", "radio"].includes(field.type)) return null;
+  const next = field.nextElementSibling;
+  if (!(next instanceof HTMLElement) || !["SPAN", "SMALL", "B", "STRONG", "EM"].includes(next.tagName)) return null;
+  const text = next.textContent?.trim() ?? "";
+  return text && text.length <= 120 && !next.querySelector("input, select, textarea, button") ? next : null;
 }
 
 function addMissingLabels(doc: Document, journal: Journal): void {
   for (const field of fieldsIn(doc)) {
     if (hasAccessibleName(field, doc)) continue;
-    const text = deriveLabelText(field);
-    if (!text) continue;
+    const caption = adjacentCaption(field);
+    const text = caption ? "" : deriveLabelText(field);
+    if (!caption && !text) continue;
 
     if (!field.id) {
       journal.touch(field);
@@ -95,6 +108,18 @@ function addMissingLabels(doc: Document, journal: Journal): void {
     }
     const label = doc.createElement("label");
     label.setAttribute("for", field.id);
+    if (caption) {
+      // Wrap the visible caption instead of duplicating its text; undo moves it back.
+      const parent = caption.parentNode;
+      const anchor = caption.nextSibling;
+      caption.before(label);
+      label.append(caption);
+      journal.add(() => {
+        parent?.insertBefore(caption, anchor);
+        label.remove();
+      });
+      continue;
+    }
     label.textContent = text;
     // Added labels must not inherit a page's low-contrast or tiny text, or the fix itself fails axe color-contrast.
     for (const [prop, value] of LABEL_STYLE) label.style.setProperty(prop, value, "important");
