@@ -1,5 +1,4 @@
 import type { ItemGroup } from "../../../shared/adaptation.js";
-import { adapterGroups, mergeGroups } from "./site-adapters.js";
 
 export const GROUP_CAP = 20;
 const SECTION_RESERVE = 6;
@@ -33,11 +32,6 @@ const DOCUMENT_POSITION_FOLLOWING = 4;
 
 type Found = { elements: Element[]; selector: string; count: number; heading?: string };
 type Candidate = { tier: number; depth: number; rank: number; size: number; build: () => Found | undefined };
-
-// Adapter groups for known sites first, then generic detection. Selectors (not element refs) are returned so they survive re-renders.
-export function detectItemGroups(doc: Document, host: string): ItemGroup[] {
-  return mergeGroups(adapterGroups(host, doc), findItemGroups(doc), GROUP_CAP);
-}
 
 export function findItemGroups(doc: Document): ItemGroup[] {
   const root = (doc.querySelector(MAIN_SELECTOR) ?? doc.body ?? doc.documentElement) as Element | null;

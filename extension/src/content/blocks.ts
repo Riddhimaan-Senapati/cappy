@@ -154,7 +154,7 @@ function stopMotion(): LiveBlock {
 }
 
 function contentFilter(block: Extract<BlockCall, { name: "contentFilter" }>): LiveBlock {
-  const handle = applyContentFilter(block, document, location.hostname);
+  const handle = applyContentFilter(block, document);
   return { undo: handle.undo, matched: handle.matched };
 }
 

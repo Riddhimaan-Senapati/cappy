@@ -5,7 +5,7 @@ import { installDom } from "./dom-setup.js";
 
 installDom();
 const { applyContentFilter, keywordPattern } = await import("../extension/src/content/content-filter.js");
-const { findItemGroups, detectItemGroups } = await import("../extension/src/content/item-groups.js");
+const { findItemGroups } = await import("../extension/src/content/item-groups.js");
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 320));
@@ -17,7 +17,7 @@ function filter(overrides: Partial<Filter>): Filter {
 }
 
 const hiddenTitles = () =>
-  [...document.querySelectorAll<HTMLElement>("ytd-rich-item-renderer")]
+  [...document.querySelectorAll<HTMLElement>("feed-card")]
     .filter((el) => el.style.display === "none")
     .map((el) => el.querySelector("h3")?.textContent);
 
@@ -45,14 +45,6 @@ describe("item group detection", () => {
     const groups = findItemGroups(document);
     assert.ok(groups.some((g) => g.selector === '[role="feed"] > div' && g.count === 5), JSON.stringify(groups));
   });
-
-  it("uses built-in adapters for known sites", () => {
-    document.body.innerHTML = `<main><ytd-rich-item-renderer>${card("A")}</ytd-rich-item-renderer><ytd-rich-item-renderer>${card("B")}</ytd-rich-item-renderer></main>`;
-    const groups = detectItemGroups(document, "www.youtube.com");
-    const adapter = groups.find((g) => g.selector === "ytd-rich-item-renderer");
-    assert.equal(adapter?.count, 2);
-    assert.equal(adapter?.label, "Video card");
-  });
 });
 
 describe("content filter", () => {
@@ -65,29 +57,29 @@ describe("content filter", () => {
     </main>`;
     const items = document.querySelectorAll(".card-x1");
     items.forEach((node) => {
-      const wrapper = document.createElement("ytd-rich-item-renderer");
+      const wrapper = document.createElement("feed-card");
       node.replaceWith(wrapper);
       wrapper.append(node);
     });
   });
 
   it("hides items whose text matches a whole keyword, plurals included", () => {
-    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document, "www.youtube.com");
+    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document);
     assert.deepEqual(hiddenTitles(), ["Acquired Podcast: Nvidia"]);
     assert.equal(handle.matched(), 1);
     handle.undo();
   });
 
   it("matches keywords in aria-label and link URLs", () => {
-    document.querySelector("ytd-rich-item-renderer")!.setAttribute("aria-label", "Podcast clip");
-    const handle = applyContentFilter(filter({ keywords: ["clip"] }), document, "www.youtube.com");
+    document.querySelector("feed-card")!.setAttribute("aria-label", "Podcast clip");
+    const handle = applyContentFilter(filter({ keywords: ["clip"] }), document);
     assert.equal(handle.matched(), 1);
     handle.undo();
   });
 
   it("filters items that load while scrolling", async () => {
-    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document, "www.youtube.com");
-    const late = document.createElement("ytd-rich-item-renderer");
+    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document);
+    const late = document.createElement("feed-card");
     late.innerHTML = card("Late podcast episode");
     document.querySelector("main")!.append(late);
     await settle();
@@ -97,11 +89,11 @@ describe("content filter", () => {
   });
 
   it("undo restores every style attribute exactly", async () => {
-    const items = [...document.querySelectorAll<HTMLElement>("ytd-rich-item-renderer")];
+    const items = [...document.querySelectorAll<HTMLElement>("feed-card")];
     items[1]!.setAttribute("style", "color: red;");
     const before = items.map((el) => el.getAttribute("style"));
-    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document, "www.youtube.com");
-    const late = document.createElement("ytd-rich-item-renderer");
+    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document);
+    const late = document.createElement("feed-card");
     late.innerHTML = card("Another podcast");
     document.querySelector("main")!.append(late);
     await settle();
@@ -112,8 +104,8 @@ describe("content filter", () => {
   });
 
   it("dim leaves items visible but faded", () => {
-    const handle = applyContentFilter(filter({ action: "dim" }), document, "www.youtube.com");
-    const dimmed = document.querySelector<HTMLElement>('ytd-rich-item-renderer[style*="opacity"]');
+    const handle = applyContentFilter(filter({ action: "dim" }), document);
+    const dimmed = document.querySelector<HTMLElement>('feed-card[style*="opacity"]');
     assert.ok(dimmed);
     assert.equal(dimmed.style.display, "");
     handle.undo();
@@ -121,9 +113,9 @@ describe("content filter", () => {
   });
 
   it("two filters holding the same item keep it hidden until both are undone", () => {
-    const first = applyContentFilter(filter({ keywords: ["podcast"] }), document, "www.youtube.com");
-    const second = applyContentFilter(filter({ keywords: ["acquired"] }), document, "www.youtube.com");
-    const target = [...document.querySelectorAll<HTMLElement>("ytd-rich-item-renderer")].find((el) => el.textContent!.includes("Acquired"))!;
+    const first = applyContentFilter(filter({ keywords: ["podcast"] }), document);
+    const second = applyContentFilter(filter({ keywords: ["acquired"], itemSelector: "feed-card" }), document);
+    const target = [...document.querySelectorAll<HTMLElement>("feed-card")].find((el) => el.textContent!.includes("Acquired"))!;
     first.undo();
     assert.equal(target.style.display, "none");
     second.undo();

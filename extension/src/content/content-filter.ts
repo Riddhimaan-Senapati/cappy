@@ -1,6 +1,6 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
 import { isOwn } from "./dom.js";
-import { detectItemGroups } from "./item-groups.js";
+import { findItemGroups } from "./item-groups.js";
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
 type Action = Filter["action"];
@@ -40,7 +40,7 @@ function release(el: HTMLElement, holder: object): void {
   for (const action of entry.holders.values()) apply(el, action);
 }
 
-export function applyContentFilter(filter: Filter, doc: Document, host: string): ContentFilterHandle {
+export function applyContentFilter(filter: Filter, doc: Document): ContentFilterHandle {
   const holder = {};
   const held = new Map<HTMLElement, Action>();
   const groupSelectors = new Set<string>();
@@ -55,7 +55,7 @@ export function applyContentFilter(filter: Filter, doc: Document, host: string):
     const now = Date.now();
     if (now - groupsAt >= GROUP_REFRESH_MS) {
       groupsAt = now;
-      for (const group of detectItemGroups(doc, host)) groupSelectors.add(group.selector);
+      for (const group of findItemGroups(doc)) groupSelectors.add(group.selector);
     }
     return [...groupSelectors];
   };
