@@ -24,8 +24,8 @@ try {
 
   const panel = await context.newPage();
   await panel.goto(panelUrl);
-  await panel.getByLabel("Message the agent").fill("I'm red-green colorblind");
-  await panel.getByRole("region", { name: "Companion" }).getByRole("button", { name: "Send" }).click();
+  await panel.getByLabel("Ask for a change").fill("I'm red-green colorblind");
+  await panel.getByRole("button", { name: "Send", exact: true }).click();
   await panel.getByRole("button", { name: "Accept" }).waitFor({ timeout: 15_000 });
   console.log("ok: companion proposed a change before restart");
 

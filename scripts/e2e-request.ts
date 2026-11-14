@@ -43,7 +43,7 @@ try {
   // The request targets the active tab, so the plain page must be frontmost before Send is clicked.
   await plain.bringToFront();
   await panel.evaluate(() => {
-    const send = document.querySelector<HTMLButtonElement>("section.request button[type=submit]");
+    const send = document.querySelector<HTMLButtonElement>('button[aria-label="Send"]');
     if (!send) throw new Error("FAIL: Send button not found in side panel");
     send.click();
   });
