@@ -1,4 +1,5 @@
 import type { Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { VoiceEvent } from "./voice/core.js";
 
 export interface AppliedSummary {
   id: string;
@@ -21,7 +22,8 @@ export type ContentRequest =
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
-  | { kind: "ui"; event: UiEvent };
+  | { kind: "ui"; event: UiEvent }
+  | { kind: "voiceEvent"; event: VoiceEvent };
 
 export type ContentResponse = { ok: true; result: unknown } | { ok: false; error: string };
 
@@ -39,7 +41,11 @@ export type BackgroundRequest =
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
-  | { kind: "status" };
+  | { kind: "status" }
+  | { kind: "voiceStart"; lang: string }
+  | { kind: "voiceStop" }
+  | { kind: "voiceOpenMic" }
+  | { kind: "recognitionEvent"; event: unknown };
 
 export type DebugPortMessage =
   | { type: "status"; status: StatusInfo }

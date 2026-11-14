@@ -1,6 +1,6 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
-import { ROUTING_LABELS, type StatusInfo } from "../messages.js";
+import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo } from "../messages.js";
 import { load, save, type StoredState } from "../storage.js";
 import { h, icon } from "./dom.js";
 
@@ -47,6 +47,43 @@ function modelPickers(state: StoredState, status: StatusInfo): Node[] {
     return h("label", "s-row", "", [h("div", "grow", "", [h("div", "", label), h("small", "", tier === "fast" ? "Used for simple requests and page-load checks" : "Used for harder requests and retries")]), select]);
   };
   return [field("fast", "Fast model"), field("frontier", "Frontier model")];
+}
+
+const VOICE_LANGUAGES = ["en-US", "en-GB", "es-ES", "fr-FR", "de-DE", "it-IT", "pt-BR", "nl-NL", "hi-IN", "ja-JP", "ko-KR", "zh-CN"];
+
+function voiceLanguage(state: StoredState): Node {
+  const select = h("select", "s-select");
+  select.setAttribute("aria-label", "Speech language");
+  const browser = h("option", "", `Browser (${navigator.language})`);
+  browser.value = "";
+  select.append(browser);
+  const options = [...new Set([state.voiceLang, ...VOICE_LANGUAGES].filter(Boolean))];
+  for (const lang of options) {
+    const option = h("option", "", lang);
+    option.value = lang;
+    select.append(option);
+  }
+  select.value = state.voiceLang;
+  select.addEventListener("change", () => void save({ voiceLang: select.value }));
+  return h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Language"), h("small", "", "The language you speak in")]), select]);
+}
+
+function voiceSection(state: StoredState): Node {
+  const enable = h("button", "s-btn", "Enable microphone");
+  enable.type = "button";
+  enable.addEventListener("click", () => void chrome.runtime.sendMessage({ kind: "voiceOpenMic" } satisfies BackgroundRequest).catch(() => undefined));
+  return h(
+    "section",
+    "s-sec",
+    "",
+    [
+      h("h3", "", "Voice"),
+      toggle("Send after speaking", "Off leaves your words in the box to edit first.", state.voiceAutoSend, (on) => save({ voiceAutoSend: on })),
+      voiceLanguage(state),
+      h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Chrome asks once. Allow it in the tab that opens.")]), enable]),
+      h("div", "s-note", "Speech is processed by Chrome. Press the mic button or Alt+M in the bar to speak."),
+    ],
+  );
 }
 
 function statusCard(status: StatusInfo) {
@@ -140,6 +177,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
       ),
       section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status)),
+      voiceSection(state),
       section("Your profile", h("div", "s-chips", "", chips), form),
       section("On this page", ...changeRows),
       h("div", "s-foot", "", [shortcuts, debug]),

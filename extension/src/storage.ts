@@ -24,6 +24,7 @@ export interface StoredState {
   ttsVoice: string;
   ttsRate: number;
   voiceAutoSend: boolean;
+  voiceLang: string;
 }
 
 export const DEFAULTS: StoredState = {
@@ -43,6 +44,7 @@ export const DEFAULTS: StoredState = {
   ttsVoice: "",
   ttsRate: 1,
   voiceAutoSend: true,
+  voiceLang: "",
 };
 
 const MAX_RECIPES = 60;

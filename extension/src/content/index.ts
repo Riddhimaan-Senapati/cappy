@@ -75,6 +75,8 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return ensureOverlay().spotlight.toggle();
     case "ui":
       return overlay ? overlay.handleEvent(request.event) : ensureOverlay().handleEvent(request.event);
+    case "voiceEvent":
+      return overlay?.spotlight.handleVoice(request.event);
   }
 }
 
