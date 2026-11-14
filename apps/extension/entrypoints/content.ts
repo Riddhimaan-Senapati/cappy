@@ -91,6 +91,10 @@ export default defineContentScript({
         case "remove-banner":
           removeAdaptationUi();
           break;
+        case "gesture":
+          if (msg.action === "back") history.back();
+          else window.scrollBy({ top: msg.action === "scroll_down" ? msg.stepPx : -msg.stepPx, behavior: "smooth" });
+          break;
       }
       return false;
     });

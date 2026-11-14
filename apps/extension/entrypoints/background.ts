@@ -7,7 +7,7 @@ import {
   type AdaptationId,
 } from "@browser-agent/shared";
 import { colorFilterSvg, compileAdaptationCss } from "@browser-agent/blocks";
-import { Message, PageReady, ToContentMessage } from "../utils/messages";
+import { Gesture, Message, PageReady, ToContentMessage } from "../utils/messages";
 import { Applied, AppliedMap, KEYS, LastResult, loadProfile, readParsed, setLast } from "../utils/state";
 
 const APPLIED_KEY = KEYS.applied;
@@ -25,6 +25,8 @@ export default defineBackground(() => {
       void handlePageReady(sender.tab.id, msg);
     } else if (msg.type === "undo") {
       void handleUndo(msg.adaptationId);
+    } else if (msg.type === "gesture") {
+      void handleGesture(msg);
     }
     return false;
   });
@@ -141,6 +143,12 @@ async function handleUndo(adaptationId: AdaptationId): Promise<void> {
   if (last?.status === "applied" && last.adaptationId === adaptationId) {
     await setLast({ status: "undone", url: last.url, adaptationId });
   }
+}
+
+async function handleGesture(msg: Gesture): Promise<void> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (tab?.id === undefined) return;
+  await sendToTab(tab.id, msg).catch(() => undefined);
 }
 
 async function sendToTab(tabId: number, msg: ToContentMessage): Promise<void> {
