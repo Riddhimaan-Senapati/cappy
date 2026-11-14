@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdaptationId, PageOutline } from "@browser-agent/shared";
+import { AdaptationId, BlockConfig, PageOutline } from "@browser-agent/shared";
 
 export const PageReady = z
   .object({ type: z.literal("page-ready"), url: z.string().max(2048), outline: PageOutline })
@@ -16,8 +16,30 @@ export const InjectSvg = z.object({ type: z.literal("inject-svg"), svg: z.string
 
 export const RemoveBanner = z.object({ type: z.literal("remove-banner") }).strict();
 
-export const ToContentMessage = z.discriminatedUnion("type", [ShowBanner, InjectSvg, RemoveBanner]);
+export const ApplyRuntime = z
+  .object({ type: z.literal("apply-runtime"), adaptationId: AdaptationId, blocks: z.array(BlockConfig).max(4) })
+  .strict();
+export const UndoRuntime = z.object({ type: z.literal("undo-runtime") }).strict();
+export const AxeCount = z.object({ type: z.literal("axe-count") }).strict();
+
+export const ToContentMessage = z.discriminatedUnion("type", [
+  ShowBanner,
+  InjectSvg,
+  RemoveBanner,
+  ApplyRuntime,
+  UndoRuntime,
+  AxeCount,
+]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;
 
-export const Message = z.discriminatedUnion("type", [PageReady, Undo, ShowBanner, InjectSvg, RemoveBanner]);
+export const Message = z.discriminatedUnion("type", [
+  PageReady,
+  Undo,
+  ShowBanner,
+  InjectSvg,
+  RemoveBanner,
+  ApplyRuntime,
+  UndoRuntime,
+  AxeCount,
+]);
 export type Message = z.infer<typeof Message>;

@@ -4,6 +4,8 @@ import {
   type ShadowRootContentScriptUi,
 } from "wxt/utils/content-script-ui/shadow-root";
 import { Message, ToContentMessage } from "../utils/messages";
+import { countViolations } from "../utils/axe";
+import { applyRuntimeBlocks } from "../utils/runtime-blocks";
 
 const FILTER_ID = "adaptive-agent-filters";
 
@@ -30,6 +32,12 @@ export default defineContentScript({
   runAt: "document_idle",
   main(ctx) {
     let banner: ShadowRootContentScriptUi<void> | undefined;
+    let undoRuntime: (() => void) | undefined;
+
+    const revertRuntime = () => {
+      undoRuntime?.();
+      undoRuntime = undefined;
+    };
 
     const removeAdaptationUi = () => {
       banner?.remove();
@@ -77,7 +85,7 @@ export default defineContentScript({
       document.body.append(holder);
     };
 
-    chrome.runtime.onMessage.addListener((raw) => {
+    chrome.runtime.onMessage.addListener((raw, _sender, sendResponse) => {
       const parsed = ToContentMessage.safeParse(raw);
       if (!parsed.success) return false;
       const msg = parsed.data;
@@ -90,7 +98,21 @@ export default defineContentScript({
           break;
         case "remove-banner":
           removeAdaptationUi();
+          revertRuntime();
           break;
+        case "apply-runtime":
+          revertRuntime();
+          undoRuntime = applyRuntimeBlocks(msg.blocks);
+          break;
+        case "undo-runtime":
+          revertRuntime();
+          break;
+        case "axe-count":
+          countViolations().then(
+            (count) => sendResponse({ count }),
+            () => sendResponse({ count: null }),
+          );
+          return true;
       }
       return false;
     });

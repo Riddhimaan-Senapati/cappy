@@ -114,6 +114,11 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   }
 
   await writeApplied(tabId, { adaptationId: adaptation.id, css });
+  if (adaptation.blocks.some((b) => b.block === "form_fixer")) {
+    await sendToTab(tabId, { type: "apply-runtime", adaptationId: adaptation.id, blocks: adaptation.blocks }).catch(
+      (err: unknown) => console.warn("runtime blocks failed to apply", err),
+    );
+  }
   await setLast({
     status: "applied",
     url: msg.url,
@@ -135,6 +140,7 @@ async function handleUndo(adaptationId: AdaptationId): Promise<void> {
     console.warn("removeCSS failed, tab may be gone", err);
   });
   await sendToTab(tabId, { type: "remove-banner" }).catch(() => undefined);
+  await sendToTab(tabId, { type: "undo-runtime" }).catch(() => undefined);
   await forgetApplied(tabId);
 
   const last = await readParsed("session", KEYS.last, LastResult);
