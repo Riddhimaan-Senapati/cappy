@@ -9,6 +9,8 @@ import {
 import { createApp, type AppDeps } from "./app";
 import { stubAdapter } from "./stub-adapter";
 import { stubLlm } from "./stub-llm";
+import { stubRequester } from "./requester";
+import { stubVerifier } from "./verifier";
 
 const outline = { title: "Survey", headings: ["Survey"], forms: 1, images: 0, videos: 0, canvases: 0 };
 const profile = Profile.parse({
@@ -18,7 +20,7 @@ const profile = Profile.parse({
 });
 const adaptRequest = AdaptRequest.parse({ url: "https://www.w3.org/survey", outline, profile });
 
-const deps: AppDeps = { adapter: stubAdapter, llm: stubLlm };
+const deps: AppDeps = { adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier };
 const app = createApp(deps);
 
 function post(path: string, body: unknown) {
@@ -33,6 +35,8 @@ function appWithAdapter(response: unknown) {
   return createApp({
     adapter: async () => response as AdaptResponse,
     llm: stubLlm,
+    requester: stubRequester,
+    verifier: stubVerifier,
   });
 }
 
@@ -116,6 +120,8 @@ describe("POST /adapt", () => {
         throw new Error("upstream down");
       },
       llm: stubLlm,
+      requester: stubRequester,
+      verifier: stubVerifier,
     });
     const res = await failing.request("/adapt", {
       method: "POST",
