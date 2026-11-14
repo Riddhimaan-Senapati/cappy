@@ -87,6 +87,16 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
   return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
 }
 
+async function completeText(client: OpenAI, model: string, system: string, user: string): Promise<string> {
+  const stream = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: user }], store: false, stream: true });
+  let text = "";
+  for await (const event of stream) {
+    if (event.type === "response.output_text.delta") text += event.delta;
+    if (event.type === "response.failed") throw new Error(event.response.error?.message ?? "Response failed");
+  }
+  return text.trim();
+}
+
 export function createOpenAIKeyProvider(): AgentProvider {
   const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
   const models: Record<Tier, string> = {
@@ -102,6 +112,7 @@ export function createOpenAIKeyProvider(): AgentProvider {
       return names.filter((name) => name.startsWith("gpt"));
     },
     run: (session, _tier, model) => runLoop(async () => client, model, session),
+    complete: (system, user, model) => completeText(client, model, system, user),
   };
 }
 
@@ -120,6 +131,9 @@ export function createChatGptProvider(): AgentProvider {
       const response = await fetch("https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${await getAccessToken()}` } });
       const json = (await response.json()) as { models?: Array<{ slug: string; visibility?: string }> };
       return (json.models ?? []).filter((model) => model.visibility === "list").map((model) => model.slug);
+    },
+    async complete(system, user, model) {
+      return completeText(await getClient(), model, system, user);
     },
     async run(session, _tier, model) {
       try {

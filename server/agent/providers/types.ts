@@ -7,4 +7,5 @@ export interface AgentProvider {
   models: Record<Tier, string>;
   run(session: AgentSession, tier: Tier, model: string): Promise<string>;
   listModels?(): Promise<string[]>;
+  complete(system: string, user: string, model: string): Promise<string>;
 }

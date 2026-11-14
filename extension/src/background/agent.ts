@@ -11,6 +11,7 @@ interface Run {
   trigger: Trigger;
   message: string;
   applied: Map<string, ActiveChange>;
+  commandId?: string;
 }
 
 export interface AgentHooks {
@@ -46,7 +47,8 @@ export class AgentClient {
   private defaultProvider: string | null = null;
   private notice: StatusInfo["notice"];
   private modelsRequested = new Set<string>();
-  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean }>>();
+  private suggestions = new Map<string, (text: string | null) => void>();
+  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string }>>();
 
   constructor(private hooks: AgentHooks) {}
 
@@ -78,6 +80,29 @@ export class AgentClient {
     if (!active?.ready || active.available || this.modelsRequested.has(active.id)) return;
     this.modelsRequested.add(active.id);
     this.send({ type: "listModels", provider: active.id });
+  }
+
+  async suggest(page: PageOutline, applied: string[]): Promise<string | null> {
+    try {
+      await this.ensureConnected();
+    } catch {
+      return null;
+    }
+    const state = await load();
+    const { activeProvider } = await this.getStatus();
+    if (!activeProvider) return null;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.suggestions.delete(requestId);
+        resolve(null);
+      }, 12_000);
+      this.suggestions.set(requestId, (text) => {
+        clearTimeout(timer);
+        resolve(text);
+      });
+      this.send({ type: "suggest", requestId, provider: activeProvider, models: state.modelChoices[activeProvider] ?? {}, profile: state.profile, applied, page });
+    });
   }
 
   async setKey(provider: string, key: string | null) {
@@ -177,20 +202,20 @@ export class AgentClient {
     if (!item) return;
     const tab = await chrome.tabs.get(tabId).catch(() => null);
     if (!tab) return void this.queues.delete(tabId);
-    await this.startRun(tab, "chat", item.message, item.fresh, item.runId);
+    await this.startRun(tab, "chat", item.message, item.fresh, item.runId, item.commandId);
   }
 
-  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, queuedId?: string) {
+  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, queuedId?: string, commandId?: string) {
     if (!tab.id || !tab.url?.startsWith("http")) return;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const runId = queuedId ?? crypto.randomUUID();
-    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map() };
+    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), commandId };
 
     const busy = [...this.runs.values()].some((existing) => existing.tabId === tabId);
     if (busy && trigger === "page_load") return;
     if (busy && !queuedId) {
-      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh }]);
+      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId }]);
       return this.emit(run, { type: "queued", runId, message });
     }
     this.emit(run, { type: "start", runId, trigger, message });
@@ -201,7 +226,10 @@ export class AgentClient {
       return void this.next(tabId);
     }
 
-    if (trigger === "chat" && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) return void this.next(tabId);
+    if (trigger === "chat" && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) {
+      await this.markCommandApplied(run);
+      return void this.next(tabId);
+    }
 
     try {
       await this.ensureConnected();
@@ -255,6 +283,21 @@ export class AgentClient {
     }
   }
 
+  private async markCommandApplied(run: Run) {
+    if (!run.commandId) return;
+    const { commands } = await load();
+    await save({ commands: commands.map((command) => (command.id === run.commandId && !command.appliedOrigins.includes(run.origin) ? { ...command, appliedOrigins: [...command.appliedOrigins, run.origin] } : command)) });
+  }
+
+  // Commands set to run on every site run once per new site; undoing one on a site keeps it from coming back there.
+  async runEverywhereCommands(tab: chrome.tabs.Tab, origin: string) {
+    const { commands, paused } = await load();
+    if (paused) return;
+    for (const command of commands.filter((candidate) => candidate.everywhere && !candidate.appliedOrigins.includes(origin))) {
+      await this.startRun(tab, "chat", command.prompt, false, undefined, command.id);
+    }
+  }
+
   private summaries(run: Run): AppliedSummary[] {
     return [...run.applied.values()].map(({ id, summary, reason, scope }) => ({ id, summary, reason, scope }));
   }
@@ -266,6 +309,11 @@ export class AgentClient {
       if (this.notice?.level === "info") this.notice = undefined;
       this.setStatus({ connected: true, error: undefined });
       void this.ensureModels();
+      return;
+    }
+    if (message.type === "suggestion") {
+      this.suggestions.get(message.requestId)?.(message.text);
+      this.suggestions.delete(message.requestId);
       return;
     }
     if (message.type === "notice") {
@@ -305,6 +353,7 @@ export class AgentClient {
       await saveRecipe(recipeKey(run.origin, run.message), { message: run.message, changes: [...run.applied.values()], at: Date.now() });
     }
     const applied = this.summaries(run);
+    if (applied.length) await this.markCommandApplied(run);
     if (run.trigger === "page_load" && applied.length) {
       await sendToTab(run.tabId, { kind: "toast", text: `Adapted for you: ${applied.map((change) => change.summary).join(", ")}.`, undoIds: applied.map((change) => change.id) }).catch(() => undefined);
     }

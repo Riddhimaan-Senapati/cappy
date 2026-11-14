@@ -112,14 +112,25 @@ export interface SignOutMessage {
   type: "chatgptLogout";
 }
 
+export interface SuggestMessage {
+  type: "suggest";
+  requestId: string;
+  provider?: string;
+  models?: Partial<Record<Tier, string>>;
+  profile: string[];
+  applied: string[];
+  page: PageOutline;
+}
+
 export interface CancelMessage {
   type: "cancel";
   runId: string;
 }
 
-export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage;
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage | SuggestMessage;
 export type ServerMessage =
   | ToolCallMessage
   | AgentEvent
   | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
-  | { type: "notice"; level: "info" | "error"; text: string };
+  | { type: "notice"; level: "info" | "error"; text: string }
+  | { type: "suggestion"; requestId: string; text: string | null };

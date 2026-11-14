@@ -73,6 +73,16 @@ export const OVERLAY_CSS = `
 .link { all: unset; flex: none; cursor: pointer; color: var(--accent); font-size: 12px; font-weight: 550; padding: 1px 4px; border-radius: 5px; }
 .link:hover { background: rgba(255, 255, 255, 0.08); }
 .settings { padding: 10px; }
+.card-foot { display: flex; align-items: center; gap: 4px; }
+.fold.saved { cursor: default; color: rgba(74, 222, 128, 0.7); }
+.fold .ico { display: inline-grid; vertical-align: -1px; }
+.save-form { display: flex; align-items: center; gap: 8px; margin-left: 20px; padding: 6px 8px; border-radius: 9px; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.07); animation: fade 0.22s var(--ease); }
+.save-form .ico { color: var(--accent); }
+.name-input { all: unset; flex: 1; min-width: 0; font-size: 13px; color: var(--text); caret-color: var(--accent); }
+.mini-toggle { all: unset; cursor: pointer; font-size: 11.5px; padding: 3px 8px; border-radius: 6px; color: rgba(255, 255, 255, 0.45); border: 1px solid rgba(255, 255, 255, 0.1); }
+.mini-toggle[aria-pressed="true"] { color: #e4d6ff; background: rgba(167, 139, 250, 0.18); border-color: rgba(167, 139, 250, 0.32); }
+.mini-toggle:focus-visible, .name-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.hrow .mini { cursor: pointer; }
 .thread { display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 8px; }
 .card { border-radius: 10px; }
 .card.enter { animation: rise 0.34s var(--spring) both; }

@@ -1,8 +1,7 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing } from "../../../shared/protocol.js";
-import { SUGGESTIONS } from "../defaults.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
-import { load, save, type StoredState } from "../storage.js";
+import { load, save, type SavedCommand, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
 
@@ -18,16 +17,17 @@ export interface SpotlightDeps {
   ensureAlive(): boolean;
   stop(): void;
   dequeue(runId: string): void;
+  suggest(): Promise<string | null>;
 }
 
-type View = "list" | "run" | "settings" | "history";
+type View = "list" | "run" | "settings" | "history" | "commands";
 
 interface Item {
   id: string;
   icon: IconName;
   title: string;
   hint?: string;
-  kind: "ask" | "command" | "undo" | "try";
+  kind: "ask" | "command" | "undo" | "try" | "saved";
   section: string;
   keywords?: string;
   run(): void | Promise<void>;
@@ -53,6 +53,7 @@ interface RunState {
   shownSteps: number;
   shownResult: boolean;
   seen: boolean;
+  saving: boolean;
 }
 
 const MAX_THREAD = 6;
@@ -103,7 +104,7 @@ export class Spotlight {
 
     this.scrim.addEventListener("click", () => this.hide());
     this.input.addEventListener("input", () => this.onInput());
-    this.pill.addEventListener("click", () => (this.view === "settings" || this.view === "history" ? this.setView("list") : void this.toggleModel()));
+    this.pill.addEventListener("click", () => (this.view === "settings" || this.view === "history" || this.view === "commands" ? this.setView("list") : void this.toggleModel()));
     this.bar.addEventListener("pointerenter", () => window.clearTimeout(this.closeTimer));
     this.input.addEventListener("blur", () => {
       setTimeout(() => {
@@ -152,7 +153,15 @@ export class Spotlight {
       this.renderPill();
     });
     this.opened = true;
-    this.suggestionSeed = Math.random();
+    this.smartSuggestion = null;
+    void this.deps.suggest().then((text) => {
+      this.smartSuggestion = text;
+      if (text && this.opened && this.view === "list" && !this.input.value) {
+        this.animateBody = true;
+        this.renderList();
+        this.animateBody = false;
+      }
+    });
     this.input.value = "";
     this.selected = 0;
     this.setView(view ?? (this.working ? "run" : "list"));
@@ -180,7 +189,8 @@ export class Spotlight {
       this.disposeSettings = null;
     }
     this.view = view;
-    if (view === "settings" || view === "history") this.input.value = "";
+    if (view === "settings" || view === "history" || view === "commands") this.input.value = "";
+    if (view === "commands") this.commandSelected = 0;
     if (view === "history") this.historySelected = 0;
     this.animateBody = true;
     this.render();
@@ -188,13 +198,14 @@ export class Spotlight {
 
   private render() {
     this.layer.classList.toggle("running", this.view === "run");
-    this.input.readOnly = this.view === "settings" || this.view === "history";
+    this.input.readOnly = this.view === "settings" || this.view === "history" || this.view === "commands";
     this.input.placeholder =
-      this.view === "settings" ? "Settings" : this.view === "history" ? "Changes on this page  ·  Space to turn on or off" : this.view === "run" ? (this.working ? "Add another request" : "Ask a follow-up") : this.placeholder;
+      this.view === "settings" ? "Settings" : this.view === "history" ? "Changes on this page  ·  Space to turn on or off" : this.view === "commands" ? "Saved commands  ·  Enter to run  ·  Space for every site" : this.view === "run" ? (this.working ? "Add another request" : "Ask a follow-up") : this.placeholder;
     this.orb.classList.toggle("work", this.working);
     this.renderPill();
     if (this.view === "settings") this.renderSettingsView();
     else if (this.view === "history") this.renderHistory();
+    else if (this.view === "commands") this.renderCommands();
     else if (this.view === "run") this.renderRun();
     else this.renderList();
     this.renderHints();
@@ -202,7 +213,7 @@ export class Spotlight {
   }
 
   private renderPill() {
-    if (this.view === "settings" || this.view === "history") {
+    if (this.view === "settings" || this.view === "history" || this.view === "commands") {
       this.pill.className = "pill";
       this.pill.replaceChildren(icon("back", 13), document.createTextNode("Back"));
       this.pill.title = "Back (Esc)";
@@ -233,14 +244,13 @@ export class Spotlight {
     this.hints.hidden = true;
   }
 
-  private suggestion(changes: ActiveChange[]): Item | null {
-    const open = SUGGESTIONS.filter((candidate) => !changes.some((change) => candidate.covers.test(`${change.summary} ${change.id}`)));
-    if (!open.length) return null;
-    const pick = open[Math.floor(this.suggestionSeed * open.length)];
-    return { id: `try:${pick.text}`, icon: "sparkle", title: pick.text, hint: "suggested", kind: "try", section: "", run: () => this.ask(pick.text, false) };
-  }
+  private smartSuggestion: string | null = null;
 
-  private suggestionSeed = Math.random();
+  private suggestion(): Item | null {
+    const text = this.smartSuggestion;
+    if (!text) return null;
+    return { id: `try:${text}`, icon: "sparkle", title: text, hint: "suggested", kind: "try", section: "", run: () => this.ask(text, false) };
+  }
 
   private onInput() {
     window.clearTimeout(this.closeTimer);
@@ -254,6 +264,7 @@ export class Spotlight {
   private commands(changes: ActiveChange[]): Item[] {
     const state = this.cache;
     return [
+      { id: "commands", icon: "bookmark", title: "Saved commands", hint: "→", kind: "command", section: "Commands", keywords: "shortcuts presets saved favorites", run: () => this.setView("commands") },
       { id: "history", icon: "history", title: "Change history", hint: "→", kind: "command", section: "Commands", keywords: "changes log toggle before after compare", run: () => this.setView("history") },
       { id: "settings", icon: "settings", title: "Settings", kind: "command", section: "Commands", keywords: "preferences profile model options", run: () => this.setView("settings") },
       ...(changes.length ? [{ id: "undo-all", icon: "undo" as IconName, title: "Undo all changes on this page", kind: "command" as const, section: "Commands", keywords: "revert reset", run: async () => (await this.deps.revertAll(), this.hide()) }] : []),
@@ -296,18 +307,28 @@ export class Spotlight {
 
     if (!raw) {
       const last = [...changes].sort((a, b) => b.appliedAt - a.appliedAt)[0];
-      if (last) {
-        return [{ id: "undo-last", icon: "undo", title: `Undo ${last.summary.charAt(0).toLowerCase()}${last.summary.slice(1)}`, hint: "→ history", kind: "undo", section: "", run: () => this.deps.revert(last.id) }];
-      }
-      const suggestion = this.suggestion(changes);
-      return suggestion ? [suggestion] : [];
+      const items: Item[] = [];
+      if (last) items.push({ id: "undo-last", icon: "undo", title: `Undo ${last.summary.charAt(0).toLowerCase()}${last.summary.slice(1)}`, hint: "→ history", kind: "undo", section: "", run: () => this.deps.revert(last.id) });
+      const suggestion = this.suggestion();
+      if (suggestion) items.push(suggestion);
+      return items;
     }
 
     const isCommand = raw.startsWith("/");
     const query = (isCommand ? raw.slice(1) : raw).trim().toLowerCase();
     const tokens = query.split(/\s+/).filter(Boolean);
     const matches = (item: Item) => tokens.every((token) => `${item.title} ${item.keywords ?? ""}`.toLowerCase().includes(token));
-    const pool = [...undo, ...this.commands(changes)];
+    const saved: Item[] = (this.cache?.commands ?? []).map((command) => ({
+      id: `saved:${command.id}`,
+      icon: "bookmark",
+      title: command.name,
+      hint: command.everywhere ? "every site" : "command",
+      kind: "saved",
+      section: "Saved",
+      keywords: command.prompt,
+      run: () => this.ask(command.prompt, false),
+    }));
+    const pool = [...saved, ...undo, ...this.commands(changes)];
     if (isCommand) return pool.filter(matches).slice(0, 8);
 
     const matched = pool.filter(matches);
@@ -360,7 +381,7 @@ export class Spotlight {
     if (!message) return;
     window.clearTimeout(this.closeTimer);
     for (const run of this.runs) if (run.status === "done") run.open = false;
-    this.runs.push({ runId: null, message, status: "pending", steps: [{ text: "Reading the page", tone: "info" }], startedAt: Date.now(), open: true, expanded: false, shownSteps: 0, shownResult: false, seen: false });
+    this.runs.push({ runId: null, message, status: "pending", steps: [{ text: "Reading the page", tone: "info" }], startedAt: Date.now(), open: true, expanded: false, shownSteps: 0, shownResult: false, seen: false, saving: false });
     while (this.runs.length > MAX_THREAD) {
       const oldest = this.runs.findIndex((run) => run.status === "done");
       if (oldest < 0) break;
@@ -393,6 +414,8 @@ export class Spotlight {
     (this.body.querySelector(".card.active") ?? this.body.querySelector(".card:last-child"))?.scrollIntoView({ block: "nearest" });
     if (this.runs.some((run) => run.status === "running" || run.status === "pending")) this.startTicker();
     else this.stopTicker();
+    // Re-rendering removes the focused button; keep keyboard focus inside the bar.
+    if (this.opened && !this.shadow.activeElement) this.input.focus({ preventScroll: true });
   }
 
   private renderCard(run: RunState, busy: boolean): HTMLElement {
@@ -476,9 +499,120 @@ export class Spotlight {
       run.shownSteps = run.expanded ? 0 : run.steps.length;
       this.renderRun();
     });
-    children.push(fold);
+    const footer = h("div", "card-foot", "", [fold]);
+    const alreadySaved = (this.cache?.commands ?? []).some((command) => command.prompt.toLowerCase() === run.message.toLowerCase());
+    if (kind === "done" && applied.length && !alreadySaved && !run.saving) {
+      const saveButton = h("button", "fold", "", [icon("bookmark", 11), document.createTextNode(" Save as command")]);
+      saveButton.type = "button";
+      saveButton.addEventListener("click", () => {
+        run.saving = true;
+        this.renderRun();
+      });
+      footer.append(saveButton);
+    } else if (alreadySaved) {
+      footer.append(h("span", "fold saved", "Saved as a command"));
+    }
+    children.push(footer);
+    if (run.saving) children.push(this.saveForm(run));
     if (run.expanded) children.push(h("ul", "steps done", "", this.stepNodes(run, false)));
     return h("div", `card open${enter}`, "", children);
+  }
+
+  private saveForm(run: RunState): HTMLElement {
+    const input = h("input", "name-input");
+    input.value = run.message.length > 40 ? `${run.message.slice(0, 37)}...` : run.message;
+    input.setAttribute("aria-label", "Command name");
+    input.spellcheck = false;
+    const everywhere = h("button", "mini-toggle", "Every site");
+    everywhere.type = "button";
+    everywhere.setAttribute("aria-pressed", "false");
+    everywhere.addEventListener("click", () => everywhere.setAttribute("aria-pressed", String(everywhere.getAttribute("aria-pressed") !== "true")));
+    const saveButton = h("button", "link", "Save");
+    saveButton.type = "button";
+    const cancel = h("button", "link quiet", "Cancel");
+    cancel.type = "button";
+    const commit = async () => {
+      const name = input.value.trim() || run.message;
+      const command: SavedCommand = { id: crypto.randomUUID(), name, prompt: run.message, everywhere: everywhere.getAttribute("aria-pressed") === "true", appliedOrigins: [location.origin], createdAt: Date.now() };
+      await save({ commands: [...((await load()).commands ?? []), command] });
+      run.saving = false;
+      this.cache = await load();
+      this.renderRun();
+    };
+    saveButton.addEventListener("click", () => void commit());
+    cancel.addEventListener("click", () => {
+      run.saving = false;
+      this.renderRun();
+    });
+    queueMicrotask(() => {
+      input.focus();
+      input.select();
+    });
+    const form = h("form", "save-form", "", [icon("bookmark", 13), input, everywhere, saveButton, cancel]);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void commit();
+    });
+    return form;
+  }
+
+  private commandSelected = 0;
+
+  private renderCommands() {
+    const commands = this.cache?.commands ?? [];
+    this.body.classList.toggle("enter", this.animateBody);
+    if (!commands.length) {
+      this.body.replaceChildren(h("div", "empty", "No saved commands yet. After a request works, choose Save as command."));
+      return;
+    }
+    this.commandSelected = Math.min(this.commandSelected, commands.length - 1);
+    const rows = commands.map((command, index) => {
+      const remove = h("button", "x", "", [icon("x", 12)]);
+      remove.type = "button";
+      remove.setAttribute("aria-label", `Delete command ${command.name}`);
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.deleteCommand(command.id);
+      });
+      const toggle = h("span", `mini${command.everywhere ? " on" : ""}`);
+      toggle.title = "Run on every site";
+      toggle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.toggleEverywhere(command.id);
+      });
+      const row = h("div", `hrow item${index === this.commandSelected ? " sel" : ""}`, "", [
+        icon("bookmark", 14),
+        h("div", "hmain", "", [h("span", "ht", command.name), h("span", "hr", command.prompt)]),
+        h("span", "hint", command.everywhere ? "every site" : ""),
+        toggle,
+        remove,
+      ]);
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-label", `${command.name}${command.everywhere ? ", runs on every site" : ""}`);
+      row.style.setProperty("--i", String(index));
+      row.addEventListener("pointermove", () => {
+        if (this.commandSelected === index) return;
+        this.commandSelected = index;
+        this.body.querySelectorAll(".hrow").forEach((other, i) => other.classList.toggle("sel", i === index));
+      });
+      row.addEventListener("click", () => this.ask(command.prompt, false));
+      return row;
+    });
+    this.body.replaceChildren(...rows);
+  }
+
+  private async toggleEverywhere(id: string) {
+    const { commands } = await load();
+    await save({ commands: commands.map((command) => (command.id === id ? { ...command, everywhere: !command.everywhere } : command)) });
+    this.cache = await load();
+    if (this.view === "commands") this.renderCommands();
+  }
+
+  private async deleteCommand(id: string) {
+    const { commands } = await load();
+    await save({ commands: commands.filter((command) => command.id !== id) });
+    this.cache = await load();
+    if (this.view === "commands") this.renderCommands();
   }
 
   private ticker: number | undefined;
@@ -629,8 +763,11 @@ export class Spotlight {
   handleKey(event: KeyboardEvent): boolean {
     if (!this.opened || event.isComposing) return false;
     const { key } = event;
+    const focused = this.shadow.activeElement;
+    // Buttons and fields inside the bar handle their own keys (Enter on Undo, typing a command name); only Escape still closes.
+    if (focused && focused !== this.input && key !== "Escape") return false;
     if (key === "Escape") {
-      if (this.view === "settings" || this.view === "history") this.setView("list");
+      if (this.view === "settings" || this.view === "history" || this.view === "commands") this.setView("list");
       else this.hide();
       return true;
     }
@@ -639,6 +776,23 @@ export class Spotlight {
       if (key === "ArrowDown") return this.moveHistory(1), true;
       if (key === "ArrowUp") return this.moveHistory(-1), true;
       if (key === " " || key === "Enter") return void this.toggleHistory(this.historySelected), true;
+      if (key === "Backspace" || key === "ArrowLeft") return this.setView("list"), true;
+    }
+    if (this.view === "commands") {
+      const commands = this.cache?.commands ?? [];
+      const move = (step: number) => {
+        if (!commands.length) return;
+        this.commandSelected = (this.commandSelected + step + commands.length) % commands.length;
+        this.body.querySelectorAll<HTMLElement>(".hrow").forEach((row, i) => {
+          row.classList.toggle("sel", i === this.commandSelected);
+          if (i === this.commandSelected) row.scrollIntoView({ block: "nearest" });
+        });
+      };
+      if (key === "ArrowDown") return move(1), true;
+      if (key === "ArrowUp") return move(-1), true;
+      if (key === " " && commands[this.commandSelected]) return void this.toggleEverywhere(commands[this.commandSelected].id), true;
+      if (key === "Enter" && commands[this.commandSelected]) return this.ask(commands[this.commandSelected].prompt, false), true;
+      if (key === "Delete" && commands[this.commandSelected]) return void this.deleteCommand(commands[this.commandSelected].id), true;
       if (key === "Backspace" || key === "ArrowLeft") return this.setView("list"), true;
     }
     if (this.view === "list" && !this.input.value) {
@@ -653,7 +807,9 @@ export class Spotlight {
       this.setView("list");
       return true;
     }
-    if (key === "Tab" && this.view !== "settings" && this.view !== "history") {
+    // Tab switches the model only while typing; otherwise it moves focus so keyboard users can reach Undo and Save.
+    const typing = inSearchField && (this.input.value.length > 0 || this.view === "list");
+    if (key === "Tab" && typing && this.view !== "settings" && this.view !== "history" && this.view !== "commands") {
       void this.toggleModel();
       this.renderHints();
       return true;

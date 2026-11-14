@@ -82,7 +82,10 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       if (sender.tab) void agent.startRun(sender.tab, "chat", request.message, request.fresh);
       break;
     case "pageReady":
-      if (sender.tab) void maybeRunProactively(sender.tab, request.origin, request.restored);
+      if (sender.tab) {
+        void agent.runEverywhereCommands(sender.tab, request.origin);
+        void maybeRunProactively(sender.tab, request.origin, request.restored);
+      }
       break;
     case "openDebug":
       if (sender.tab?.id) void chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => undefined);
@@ -99,6 +102,9 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "chatgptLogin":
       void agent.signIn().catch(() => undefined);
       break;
+    case "suggest":
+      void agent.suggest(request.page, request.applied).then(sendResponse);
+      return true;
     case "stopRun":
       if (sender.tab?.id) agent.stopRun(sender.tab.id);
       break;

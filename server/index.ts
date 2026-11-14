@@ -10,6 +10,7 @@ import { defaultProviderId, describeProviders, forget, getProvider, keyFor, reso
 import type { AgentProvider } from "./agent/providers/types.js";
 import { recallForRun } from "./agent/memory.js";
 import { pickTier } from "./agent/router.js";
+import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { setKey } from "./keys.js";
 import { detectInjection } from "./safety.js";
@@ -117,6 +118,11 @@ wss.on("connection", (socket, request) => {
         return void broadcastProviders();
       case "chatgptLogin":
         return void signIn(socket);
+      case "suggest": {
+        const provider = resolveProvider(message.provider);
+        const text = provider ? await suggestFor(provider, message).catch(() => null) : null;
+        return sendTo(socket, { type: "suggestion", requestId: message.requestId, text });
+      }
       case "chatgptLogout":
         signOut();
         forget("chatgpt-signin");

@@ -7,6 +7,7 @@ import { inspect, listItems, readPage } from "./outline.js";
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
+const suggestionCache = new Map<string, Promise<string | null>>();
 
 let tornDown = false;
 
@@ -82,6 +83,14 @@ function ensureOverlay(): OverlayUi {
     },
     openDebug: () => void send({ kind: "openDebug" }),
     ensureAlive,
+    suggest: () => {
+      const applied = activeChanges().map((change) => change.summary);
+      const key = `${location.href}|${applied.join("|")}`;
+      if (!suggestionCache.has(key)) {
+        suggestionCache.set(key, send({ kind: "suggest", page: readPage(), applied }).then((text) => (typeof text === "string" ? text : null)));
+      }
+      return suggestionCache.get(key)!;
+    },
     stop: () => void send({ kind: "stopRun" }),
     dequeue: (runId) => void send({ kind: "dequeue", runId }),
     settings: {

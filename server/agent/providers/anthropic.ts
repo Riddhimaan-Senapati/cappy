@@ -28,6 +28,10 @@ export function createAnthropicProvider(): AgentProvider {
   return {
     name: "anthropic-key",
     models,
+    async complete(system: string, user: string, model: string) {
+      const response = await client.messages.create({ model, max_tokens: 2000, output_config: { effort: "low" }, system, messages: [{ role: "user", content: user }] });
+      return response.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("").trim();
+    },
     async listModels() {
       const page = await client.models.list({ limit: 50 });
       return page.data.map((model) => model.id);

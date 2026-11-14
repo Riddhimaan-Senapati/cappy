@@ -1,3 +1,4 @@
+import type { PageOutline } from "../../shared/adaptation.js";
 import type { ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
 
 export interface AppliedSummary {
@@ -49,6 +50,7 @@ export type BackgroundRequest =
   | { kind: "chatgptLogin" }
   | { kind: "chatgptLogout" }
   | { kind: "stopRun" }
+  | { kind: "suggest"; page: PageOutline; applied: string[] }
   | { kind: "dequeue"; runId: string };
 
 export type DebugPortMessage =

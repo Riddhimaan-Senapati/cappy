@@ -22,6 +22,10 @@ export function createGeminiProvider(): AgentProvider {
   return {
     name: "gemini",
     models,
+    async complete(system: string, user: string, model: string) {
+      const response = await ai.models.generateContent({ model, contents: user, config: { systemInstruction: system } });
+      return (response.text ?? "").trim();
+    },
     async listModels() {
       const names: string[] = [];
       for await (const model of await ai.models.list()) if (model.name) names.push(model.name.replace(/^models\//, ""));

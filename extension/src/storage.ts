@@ -7,12 +7,22 @@ export interface Recipe {
   at: number;
 }
 
+export interface SavedCommand {
+  id: string;
+  name: string;
+  prompt: string;
+  everywhere: boolean;
+  appliedOrigins: string[];
+  createdAt: number;
+}
+
 export interface StoredState {
   profile: string[];
   history: ChatTurn[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
   recipes: Record<string, Recipe>;
+  commands: SavedCommand[];
   paused: boolean;
   proactive: boolean;
   floatingButton: boolean;
@@ -28,6 +38,7 @@ export const DEFAULTS: StoredState = {
   globalChanges: [],
   siteChanges: {},
   recipes: {},
+  commands: [],
   paused: false,
   proactive: true,
   floatingButton: true,
