@@ -44,11 +44,11 @@ export const BlockCall = z.discriminatedUnion("name", [
 ]);
 
 export const Schedule = z.object({
-  days: z.array(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])).nullable().describe("Days the change is active, or null for every day."),
-  start: z.string().nullable().describe("Local start time HH:MM (24h), or null."),
-  end: z.string().nullable().describe("Local end time HH:MM (24h), or null. Overnight ranges like 22:00-06:00 are allowed."),
-  from: z.string().nullable().describe("First active date YYYY-MM-DD, or null."),
-  until: z.string().nullable().describe("Last active date YYYY-MM-DD inclusive, or null."),
+  days: z.array(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])).nullish().describe("Days the change is active (weekdays = mon to fri). Omit when the user did not state days."),
+  start: z.string().nullish().describe("Local start time HH:MM (24h). Set together with end. Omit when no time of day was stated."),
+  end: z.string().nullish().describe("Local end time HH:MM (24h). Overnight ranges like 22:00 to 06:00 are allowed. Omit when no time of day was stated."),
+  from: z.string().nullish().describe("First active local date YYYY-MM-DD, inclusive. Omit when no start date was stated."),
+  until: z.string().nullish().describe("Last active local date YYYY-MM-DD, inclusive. Omit when no end date was stated."),
 });
 export type Schedule = z.infer<typeof Schedule>;
 
@@ -67,6 +67,13 @@ export type DomOp = z.infer<typeof DomOp>;
 export type BlockCall = z.infer<typeof BlockCall>;
 export type Change = z.infer<typeof Change>;
 
+export interface ItemGroup {
+  selector: string;
+  count: number;
+  samples: string[];
+  label?: string;
+}
+
 export interface OutlineElement {
   selector: string;
   tag: string;
@@ -80,6 +87,7 @@ export interface PageOutline {
   title: string;
   headings: string[];
   elements: OutlineElement[];
+  itemGroups: ItemGroup[];
   stats: PageStats;
   styleHints: { background: string; color: string; fontSizePx: number; fontFamily: string };
   textSample: string;

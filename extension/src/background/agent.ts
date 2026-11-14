@@ -158,6 +158,7 @@ export class AgentClient {
         profile: state.profile,
         active,
         page,
+        clientTime: localClock(),
       };
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: message }].slice(-20) });
       this.send(request);
@@ -286,4 +287,13 @@ async function captureScaled(windowId: number): Promise<string> {
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return `data:image/jpeg;base64,${btoa(binary)}`;
+}
+
+// Local wall clock with its UTC offset, so the model can resolve "until December 15" against the user's day.
+function localClock(now = new Date()): { iso: string; timeZone: string } {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offset = -now.getTimezoneOffset();
+  const abs = Math.abs(offset);
+  const iso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}${offset < 0 ? "-" : "+"}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+  return { iso, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone };
 }

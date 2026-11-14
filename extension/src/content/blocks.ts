@@ -1,4 +1,5 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
+import { applyContentFilter } from "./content-filter.js";
 import { OWN_ATTR, textElements } from "./dom.js";
 import { applyDarkMode } from "./dark-mode.js";
 
@@ -9,6 +10,7 @@ export interface LiveBlock {
   undo: Undo;
   reapply?: (roots: Element[]) => void;
   note?: Promise<string>;
+  matched?: () => number;
 }
 
 // Machado et al. 2009 simulation matrices at full severity.
@@ -151,6 +153,11 @@ function stopMotion(): LiveBlock {
   };
 }
 
+function contentFilter(block: Extract<BlockCall, { name: "contentFilter" }>): LiveBlock {
+  const handle = applyContentFilter(block, document, location.hostname);
+  return { undo: handle.undo, matched: handle.matched };
+}
+
 export function applyBlock(block: BlockCall): LiveBlock {
   switch (block.name) {
     case "colorblind":
@@ -164,6 +171,8 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return { undo: dark.undo, note: dark.note };
     }
     case "contentFilter":
+      return contentFilter(block);
+    case "darkMode":
       throw new Error(`block ${block.name} is not implemented yet`);
   }
 }

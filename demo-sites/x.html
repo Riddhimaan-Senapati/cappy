@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X fixture</title>
+</head>
+<body class="x1b2c3">
+<header class="x1h4"><a href="/home">Home</a></header>
+<main role="main" class="x1c4">
+  <div aria-label="Timeline: Your Home Timeline" class="x9d2 xt1">
+    <article role="article" data-testid="tweet" class="css-1dbjc4n">
+      <div class="css-1dbjc4n"><span class="css-901oao">Alex</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Shipped a small update to the budgeting app today, notes inside</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n" data-expect="podcast">
+      <div class="css-1dbjc4n"><span class="css-901oao">Bea</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Latest podcast episode is up, all about bridges and rivers</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n">
+      <div class="css-1dbjc4n"><span class="css-901oao">Cal</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Finally finished the tomato sauce recipe I have been testing</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n" data-expect="promoted">
+      <div class="css-1dbjc4n"><span class="css-901oao">Dana</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Promoted: a sleep tracker that learns your bedtime routine</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n">
+      <div class="css-1dbjc4n"><span class="css-901oao">Eli</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Snow on the ridge this morning, the trail was empty</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n" data-expect="podcast">
+      <div class="css-1dbjc4n"><span class="css-901oao">Fay</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">My podcast recommendations for a long drive north</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n">
+      <div class="css-1dbjc4n"><span class="css-901oao">Gus</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Reading the quarterly notes twice before the meeting</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n" data-expect="promoted">
+      <div class="css-1dbjc4n"><span class="css-901oao">Hana</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Promoted: learn a language in ten minutes a day</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n">
+      <div class="css-1dbjc4n"><span class="css-901oao">Ivo</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Two new chapters of the river book are drafted now</div></div>
+    </article>
+    <article role="article" data-testid="tweet" class="css-1dbjc4n" data-expect="promoted">
+      <div class="css-1dbjc4n"><span class="css-901oao">Jo</span></div>
+      <div class="css-1dbjc4n"><div class="css-1dbjc4n">Promoted: noise cancelling headphones on sale this week</div></div>
+    </article>
+  </div>
+</main>
+
+<template id="later-tweets">
+  <article role="article" data-testid="tweet" class="css-1dbjc4n" data-expect="promoted">
+    <div class="css-1dbjc4n"><span class="css-901oao">Kai</span></div>
+    <div class="css-1dbjc4n"><div class="css-1dbjc4n">Promoted: a meal kit that ships on Mondays</div></div>
+  </article>
+  <article role="article" data-testid="tweet" class="css-1dbjc4n">
+    <div class="css-1dbjc4n"><span class="css-901oao">Lena</span></div>
+    <div class="css-1dbjc4n"><div class="css-1dbjc4n">Coffee and a long walk before the rain starts</div></div>
+  </article>
+  <article role="article" data-testid="tweet" class="css-1dbjc4n" data-expect="podcast">
+    <div class="css-1dbjc4n"><span class="css-901oao">Milo</span></div>
+    <div class="css-1dbjc4n"><div class="css-1dbjc4n">Two hours of podcast audio about old maps, worth it</div></div>
+  </article>
+  <article role="article" data-testid="tweet" class="css-1dbjc4n">
+    <div class="css-1dbjc4n"><span class="css-901oao">Nia</span></div>
+    <div class="css-1dbjc4n"><div class="css-1dbjc4n">The garden beds are finally planted for the year</div></div>
+  </article>
+  <article role="article" data-testid="tweet" class="css-1dbjc4n">
+    <div class="css-1dbjc4n"><span class="css-901oao">Omar</span></div>
+    <div class="css-1dbjc4n"><div class="css-1dbjc4n">Notes from the workshop on sketching with a pencil</div></div>
+  </article>
+</template>
+
+<script>
+setTimeout(function () {
+  var timeline = document.querySelector('[aria-label^="Timeline"]');
+  timeline.appendChild(document.getElementById("later-tweets").content.cloneNode(true));
+}, 1500);
+</script>
+</body>
+</html>

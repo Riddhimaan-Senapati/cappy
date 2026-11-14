@@ -1,6 +1,7 @@
 import type { OutlineElement, PageOutline, PageStats } from "../../../shared/adaptation.js";
 import type { InspectedElement } from "../../../shared/protocol.js";
 import { accessibleName, AD_OR_POPUP, contrastRatio, cssPath, isOwn, isVisible, LABELLABLE, queryAll, textElements } from "./dom.js";
+import { detectItemGroups } from "./item-groups.js";
 
 const TARGETS = 'a[href], button, [role="button"], input:not([type="hidden"]), select, textarea';
 const MAX_ELEMENTS = 80;
@@ -78,6 +79,7 @@ export function readPage(): PageOutline {
     title: document.title,
     headings: queryAll("h1, h2, h3").map((heading) => clip(heading.textContent, 100)).filter(Boolean).slice(0, 25),
     elements: unique.map(describe),
+    itemGroups: detectItemGroups(document, location.hostname),
     stats: computeStats(),
     styleHints: {
       background: bodyStyle.backgroundColor,
