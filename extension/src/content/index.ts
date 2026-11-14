@@ -1,12 +1,14 @@
 import type { ActiveChange, Change } from "../../../shared/adaptation.js";
 import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "../messages.js";
 import { OverlayUi } from "../overlay/ui.js";
-import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
+import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
 import { activeChanges, applyChange, changeHistory, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { CameraController } from "./gestures/controller.js";
 import { inspect, listItems, readPage } from "./outline.js";
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
+let camera: CameraController | null = null;
 const suggestionCache = new Map<string, Promise<string | null>>();
 
 let tornDown = false;
@@ -25,11 +27,29 @@ function teardown() {
   tornDown = true;
   overlay?.destroy();
   overlay = null;
+  camera?.stop();
+  camera = null;
   stopEngine();
   for (const type of KEY_EVENTS) window.removeEventListener(type, onKey, true);
 }
 
 const ensureAlive = () => alive() || (teardown(), false);
+
+// Camera control is page-independent; settings turn it on and off in every open tab.
+function syncCamera(settings: StoredState["camera"], paused: boolean) {
+  const wanted = settings.enabled && !paused && window.top === window;
+  if (!wanted) {
+    camera?.stop();
+    camera = null;
+    return;
+  }
+  if (camera) return camera.update(settings);
+  camera = new CameraController(settings, {
+    notify: (text) => ensureOverlay().showToast(text, []),
+    turnOff: () => void load().then((state) => save({ camera: { ...state.camera, enabled: false } })),
+  });
+  camera.start();
+}
 
 function send(request: BackgroundRequest): Promise<unknown> {
   if (!ensureAlive()) return Promise.resolve(undefined);
@@ -163,6 +183,7 @@ function start() {
       else void restore(true);
     }
     if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
+    if (changes.camera || changes.paused) void load().then((state) => whenReady(() => syncCamera(state.camera, state.paused)));
   });
 
   function whenReady(callback: () => void) {
@@ -176,6 +197,7 @@ function start() {
     whenReady(() => {
       void send({ kind: "pageReady", origin, restored });
       if (state.floatingButton) ensureOverlay().setFab(true);
+      syncCamera(state.camera, state.paused);
     });
   })();
 }
