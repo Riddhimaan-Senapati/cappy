@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { validateChange, type PageOutline } from "../shared/adaptation.js";
-import { planStubRun, type StubCall } from "../server/agent/providers/stub.js";
+import { planStubRun, stubSchedule, type StubCall } from "../server/agent/providers/stub.js";
 import { describeProviders, resolveProvider } from "../server/agent/providers/index.js";
 
 const page = (extra: Partial<PageOutline> = {}): PageOutline => ({
@@ -68,6 +68,15 @@ describe("stub provider routing", () => {
     const [change] = applied(plan.calls);
     assert.deepEqual(change?.block, { name: "colorblind", type: "deuteranopia", scope: "media" });
     assert.deepEqual(plan.calls.at(-1), { name: "remember", input: { lines: ["Red-green colorblind"], scope: "everywhere" } });
+  });
+
+  it("reads time windows and day sets into a schedule on the filter", () => {
+    assert.deepEqual(stubSchedule("hide podcasts between 9am and 5pm"), { days: null, start: "09:00", end: "17:00" });
+    assert.deepEqual(stubSchedule("hide shorts from 22:30 to 6 on weekdays"), { days: ["mon", "tue", "wed", "thu", "fri"], start: "22:30", end: "06:00" });
+    assert.deepEqual(stubSchedule("hide podcasts on weekends"), { days: ["sat", "sun"], start: null, end: null });
+    assert.equal(stubSchedule("hide podcasts"), null);
+    const [call] = applied(chat("hide podcasts between 12am and 11pm").calls);
+    assert.deepEqual(call.schedule, { days: null, start: "00:00", end: "23:00" });
   });
 
   it("offers options instead of guessing on a vague request", () => {

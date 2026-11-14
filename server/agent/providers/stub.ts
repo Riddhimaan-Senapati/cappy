@@ -1,4 +1,4 @@
-import type { ActiveChange, Change, PageOutline } from "../../../shared/adaptation.js";
+import type { ActiveChange, Change, PageOutline, Schedule } from "../../../shared/adaptation.js";
 import type { TargetElement, Trigger } from "../../../shared/protocol.js";
 import type { AgentSession } from "../session.js";
 import { tools, type AgentTool } from "../tools.js";
@@ -51,11 +51,33 @@ function itemSelectorFor(page: PageOutline, forms: string[]): string | null {
   return hit?.selector ?? null;
 }
 
-function change(fields: Pick<Change, "id" | "summary" | "reason" | "scope"> & Partial<Pick<Change, "css" | "dom" | "block">>): Change {
+function change(fields: Pick<Change, "id" | "summary" | "reason" | "scope"> & Partial<Pick<Change, "css" | "dom" | "block" | "schedule">>): Change {
   return { css: null, dom: null, block: null, ...fields };
 }
 
-function filterChange(word: string, page: PageOutline, reason: string, siteOnly: boolean): Change {
+const TIME = String.raw`(\d{1,2})(?::(\d{2}))?\s*(am|pm)?`;
+const WINDOW = new RegExp(String.raw`\b(?:between|from)\s+${TIME}\s+(?:and|to)\s+${TIME}`, "i");
+
+const clock = (hour: string, minute: string | undefined, half: string | undefined) => {
+  let h = Number(hour) % 24;
+  if (half?.toLowerCase() === "pm" && h < 12) h += 12;
+  if (half?.toLowerCase() === "am" && h === 12) h = 0;
+  return `${String(h).padStart(2, "0")}:${minute ?? "00"}`;
+};
+
+// Deterministic reading of "between 9am and 5pm", "from 14:00 to 15:00", "on weekdays" and "on weekends".
+export function stubSchedule(message: string): Schedule | null {
+  const window = message.match(WINDOW);
+  const days = /\bweekdays?\b/i.test(message) ? (["mon", "tue", "wed", "thu", "fri"] as const) : /\bweekends?\b/i.test(message) ? (["sat", "sun"] as const) : null;
+  if (!window && !days) return null;
+  return {
+    days: days ? [...days] : null,
+    start: window ? clock(window[1], window[2], window[3]) : null,
+    end: window ? clock(window[4], window[5], window[6]) : null,
+  };
+}
+
+function filterChange(word: string, page: PageOutline, reason: string, siteOnly: boolean, schedule: Schedule | null = null): Change {
   const keywords = keywordForms(word);
   const itemSelector = itemSelectorFor(page, keywords);
   return change({
@@ -64,6 +86,7 @@ function filterChange(word: string, page: PageOutline, reason: string, siteOnly:
     reason,
     scope: siteOnly || itemSelector ? "site" : "everywhere",
     block: { name: "contentFilter", keywords, itemSelector, action: "hide" },
+    ...(schedule ? { schedule } : {}),
   });
 }
 
@@ -156,7 +179,7 @@ export function planStubRun(input: StubInput): StubPlan {
   const removal = message.match(REMOVE);
   if (removal) {
     const word = removal[1].toLowerCase();
-    calls.push({ name: "apply_change", input: { change: filterChange(word, input.page, reason, siteOnly) } });
+    calls.push({ name: "apply_change", input: { change: filterChange(word, input.page, reason, siteOnly, stubSchedule(message)) } });
     remember(`Hide ${word}`);
     done.push(`hid ${word}`);
   }

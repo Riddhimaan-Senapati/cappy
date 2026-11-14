@@ -1,6 +1,7 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { ChoiceOption, MemoryScope, Routing, Suggestion, TargetElement } from "../../../shared/protocol.js";
+import { scheduleStatus } from "../../../shared/validate.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
@@ -860,7 +861,7 @@ export class Spotlight {
             const undo = h("button", "link", "Undo");
             undo.type = "button";
             undo.setAttribute("aria-label", `Undo ${change.summary}`);
-            const row = h("div", "chg", "", [h("b", "", change.summary), h("span", "why", change.reason), undo]);
+            const row = h("div", "chg", "", [h("b", "", change.summary), h("span", "why", change.schedule ?? change.reason), undo]);
             row.title = `Because: ${change.reason}${change.scope === "everywhere" ? " (all sites)" : ""}`;
             undo.addEventListener("click", async () => {
               await this.deps.revert(change.id);
@@ -1159,7 +1160,7 @@ export class Spotlight {
       const row = h("div", `hrow item${index === this.historySelected ? " sel" : ""}${active ? "" : " off"}`, "", [
         h("span", `mini${active ? " on" : ""}`),
         h("div", "hmain", "", [h("span", "ht", change.summary), h("span", "hr", change.reason)]),
-        h("span", "hint", `${this.ago(change.appliedAt)}${change.scope === "everywhere" ? " · all sites" : ""}`),
+        h("span", "hint", scheduleStatus(change.schedule) ?? `${this.ago(change.appliedAt)}${change.scope === "everywhere" ? " · all sites" : ""}`),
       ]);
       row.setAttribute("role", "switch");
       row.setAttribute("aria-checked", String(active));

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { isScheduleActive } from "../shared/validate.js";
+import { describeSchedule, isScheduleActive } from "../shared/validate.js";
 import type { Change } from "../shared/adaptation.js";
 
 type Schedule = NonNullable<Change["schedule"]>;
@@ -50,5 +50,21 @@ describe("isScheduleActive", () => {
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 21, 3, 0)), true, "Saturday 03:00 is Friday night");
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 22, 3, 0)), false, "Sunday 03:00 is Saturday night");
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 19, 23, 0)), false, "Thursday 23:00");
+  });
+});
+
+describe("describeSchedule", () => {
+  it("names common day sets and keeps times readable", () => {
+    assert.equal(describeSchedule({ days: ["fri", "mon", "tue", "wed", "thu"], start: "09:00", end: "17:00" }), "Weekdays 9:00 to 17:00");
+    assert.equal(describeSchedule({ days: ["sat", "sun"], start: null, end: null }), "Weekends");
+    assert.equal(describeSchedule({ start: "22:00", end: "06:00" }), "Daily 22:00 to 6:00");
+    assert.equal(describeSchedule({ days: ["wed", "mon"], start: "18:30", end: "20:00" }), "Mon, Wed 18:30 to 20:00");
+  });
+
+  it("adds date ranges and returns null when there is no schedule", () => {
+    assert.equal(describeSchedule({ start: "09:00", end: "17:00", until: "2026-12-15" }), "Daily 9:00 to 17:00, until Dec 15");
+    assert.equal(describeSchedule({ until: "2026-12-15" }), "Until Dec 15");
+    assert.equal(describeSchedule({ from: "2026-11-20", until: "2026-12-01" }), "Nov 20 to Dec 1");
+    assert.equal(describeSchedule(null), null);
   });
 });

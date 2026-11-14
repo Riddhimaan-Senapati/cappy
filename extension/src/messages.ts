@@ -7,6 +7,8 @@ export interface AppliedSummary {
   summary: string;
   reason: string;
   scope: "site" | "everywhere";
+  // When a time-based rule is on, in plain words, with whether it is on right now.
+  schedule?: string;
 }
 
 export type UiEvent =
