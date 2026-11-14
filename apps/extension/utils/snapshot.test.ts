@@ -94,3 +94,21 @@ describe("buildSnapshot", () => {
     expect(elements.at(-1)!.id).toBe(`n${SNAPSHOT_MAX}`);
   });
 });
+
+describe("buildSnapshot main content", () => {
+  test("visits the main content before masthead and navigation", () => {
+    document.body.innerHTML = `
+      <header><button>Sign in</button></header>
+      <nav><a href="/x">Guide link</a></nav>
+      <main><h2>Feed card</h2></main>`;
+    const texts = buildSnapshot(document).elements.map((e) => e.text);
+    expect([...new Set(texts)]).toEqual(["Feed card", "Sign in", "Guide link"]);
+    expect(texts.indexOf("Feed card")).toBeLessThan(texts.indexOf("Sign in"));
+  });
+
+  test("a masthead cannot push the feed out of the element budget", () => {
+    const masthead = Array.from({ length: SNAPSHOT_MAX }, (_, i) => `<button>Menu ${i}</button>`).join("");
+    document.body.innerHTML = `${masthead}<div id="content"><h3>Podcast episode about cooking</h3></div>`;
+    expect(buildSnapshot(document).elements.map((e) => e.text)).toContain("Podcast episode about cooking");
+  });
+});

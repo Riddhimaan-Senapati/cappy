@@ -7,10 +7,18 @@ import {
   matchesHost,
   type Adaptation,
   type AdaptationId,
+  type ContentFilter,
   type Profile,
 } from "@browser-agent/shared";
 import { colorFilterSvg, compileAdaptationCss } from "@browser-agent/blocks";
-import { Gesture, Message, PageReady, ToContentMessage, type OutlineReply } from "../utils/messages";
+import {
+  ApplyFiltersReply,
+  Gesture,
+  Message,
+  PageReady,
+  ToContentMessage,
+  type OutlineReply,
+} from "../utils/messages";
 import {
   Applied,
   AppliedMap,
@@ -151,7 +159,8 @@ export async function applyResponse(
     await setLast({ status: "error", url, message: "Could not build this adaptation" });
     return false;
   }
-  if (!css.trim() && !svg && !adaptation.ops?.length && !hasRuntimeBlock(adaptation.blocks)) {
+  const hasFilters = (adaptation.filters?.length ?? 0) > 0;
+  if (!css.trim() && !svg && !adaptation.ops?.length && !hasFilters && !hasRuntimeBlock(adaptation.blocks)) {
     await logForTab(tabId, "warn", "Nothing to change: the model proposed no page edits");
     await setLast({ status: "none", url, reason: "Nothing to change on this page" });
     return false;
@@ -186,6 +195,7 @@ export async function applyResponse(
         (err: unknown) => console.warn("element ops failed to apply", err),
       );
     }
+    if (adaptation.filters?.length) await applyFilters(tabId, adaptation.id, adaptation.filters);
     await setLast({
       status: "applied",
       url,
@@ -349,6 +359,25 @@ async function clearTabCss(tabId: number): Promise<void> {
   const previous = applied[String(tabId)];
   if (!previous) return;
   await chrome.scripting.removeCSS({ target: { tabId }, css: previous.css }).catch(() => undefined);
+}
+
+async function applyFilters(tabId: number, adaptationId: AdaptationId, filters: ContentFilter[]): Promise<void> {
+  const raw: unknown = await chrome.tabs
+    .sendMessage(tabId, ToContentMessage.parse({ type: "apply-filters", adaptationId, filters }))
+    .catch((err: unknown) => {
+      console.warn("filters failed to apply", err);
+      return undefined;
+    });
+  const reply = ApplyFiltersReply.safeParse(raw);
+  if (!reply.success) return;
+  const matched = reply.data.matched;
+  if (matched === 0) {
+    await logForTab(tabId, "warn", "Filter matched nothing");
+    return;
+  }
+  const verb = filters.every((f) => f.action === "hide") ? "hid" : "changed";
+  const keywords = filters.flatMap((f) => f.keywords).slice(0, 3).join(", ");
+  await logForTab(tabId, "good", `Filter ${verb} ${matched} item${matched === 1 ? "" : "s"} matching ${keywords}`);
 }
 
 async function sendToTab(tabId: number, msg: ToContentMessage): Promise<void> {

@@ -48,6 +48,20 @@ test("strips snapshot ops before saving but keeps css and blocks", () => {
   expect(withOps.ops?.length).toBe(1);
 });
 
+test("keeps content filters when saving, since their selectors are stable across visits", () => {
+  const filtered = Adaptation.parse({
+    id: "a3",
+    sites: ["youtube.com"],
+    reason: { text: "Remove podcasts from the feed", needId: "n4" },
+    blocks: [],
+    ops: [{ op: "hide", ids: ["n9"] }],
+    filters: [{ itemSelector: "ytd-rich-item-renderer", keywords: ["podcast"], action: "hide" }],
+  });
+  const saved = remember({}, "youtube.com", filtered, 1, 1);
+  expect(saved["youtube.com"]!.adaptation.filters).toEqual(filtered.filters);
+  expect(saved["youtube.com"]!.adaptation.ops).toBeUndefined();
+});
+
 test("does not save an adaptation that is empty once ops are stripped", () => {
   const onlyOps = Adaptation.parse({
     id: "a3",

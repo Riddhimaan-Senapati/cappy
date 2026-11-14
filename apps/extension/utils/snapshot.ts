@@ -5,6 +5,7 @@ export const SNAPSHOT_TEXT_MAX = 120;
 
 export type Snapshot = { elements: OutlineElement[]; map: Map<string, Element> };
 
+const MAIN_SELECTOR = "main, [role=main], #content, #primary";
 const SKIP_TAGS = new Set(["script", "style", "svg", "noscript", "template", "iframe", "head", "meta", "link"]);
 const MEANINGFUL_TAGS = new Set([
   "h1", "h2", "h3", "h4", "h5", "h6", "a", "button", "input", "select", "textarea",
@@ -16,9 +17,13 @@ export function buildSnapshot(doc: Document): Snapshot {
   const elements: OutlineElement[] = [];
   const map = new Map<string, Element>();
   const root = doc.body ?? doc.documentElement;
+  const main = doc.querySelector(MAIN_SELECTOR);
+  // The main content goes first so the element budget is not spent on masthead and navigation.
+  const seen = new Set<Element>();
 
   const visit = (el: Element): void => {
-    if (elements.length >= SNAPSHOT_MAX) return;
+    if (elements.length >= SNAPSHOT_MAX || seen.has(el)) return;
+    seen.add(el);
     if (SKIP_TAGS.has(el.localName) || el.hasAttribute("data-ba")) return;
     const style = doc.defaultView?.getComputedStyle(el);
     if (el.hasAttribute("hidden") || style?.display === "none") return;
@@ -34,6 +39,7 @@ export function buildSnapshot(doc: Document): Snapshot {
     for (const child of Array.from(el.children)) visit(child);
   };
 
+  if (main) visit(main);
   for (const child of Array.from(root.children)) visit(child);
   return { elements, map };
 }

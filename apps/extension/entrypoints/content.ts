@@ -9,6 +9,8 @@ import { buildPageText } from "../utils/outline";
 import { countViolations } from "../utils/axe";
 import { applyRuntimeBlocks } from "../utils/runtime-blocks";
 import { applyOps } from "../utils/apply-ops";
+import { applyContentFilters, type ContentFilterHandle } from "../utils/content-filter";
+import { findItemGroups } from "../utils/item-groups";
 import { buildSnapshot } from "../utils/snapshot";
 import { computePageStats } from "../utils/page-stats";
 
@@ -60,6 +62,13 @@ export default defineContentScript({
     const revertOps = () => {
       undoOps?.();
       undoOps = undefined;
+    };
+
+    let undoFilters: ContentFilterHandle | undefined;
+
+    const revertFilters = () => {
+      undoFilters?.();
+      undoFilters = undefined;
     };
 
     const removeAdaptationUi = () => {
@@ -155,6 +164,7 @@ export default defineContentScript({
         case "show-banner":
           stopPreblur();
           revertOps();
+          revertFilters();
           void showBanner(msg.reason, msg.adaptationId);
           break;
         case "banner-note":
@@ -167,6 +177,7 @@ export default defineContentScript({
           removeAdaptationUi();
           revertRuntime();
           revertOps();
+          revertFilters();
           break;
         case "gesture":
           if (msg.action === "back") history.back();
@@ -191,6 +202,11 @@ export default defineContentScript({
         case "apply-ops":
           revertOps();
           undoOps = applyOps(msg.ops, snapshotMap);
+          break;
+        case "apply-filters":
+          revertFilters();
+          undoFilters = applyContentFilters(msg.filters, document);
+          sendResponse({ matched: undoFilters.matched });
           break;
         case "page-stats":
           sendResponse({ stats: computePageStats() });
@@ -239,6 +255,7 @@ function buildOutline(): PageOutline {
     videos: document.querySelectorAll("video").length,
     canvases: document.querySelectorAll("canvas").length,
     elements: snapshot.elements,
+    groups: findItemGroups(document),
     stats: computePageStats(),
     text: buildPageText(document.body?.innerText ?? "", document.body?.textContent ?? ""),
   };
