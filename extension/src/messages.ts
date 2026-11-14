@@ -1,5 +1,5 @@
-import type { PageOutline } from "../../shared/adaptation.js";
-import type { ChoiceOption, FrictionCount, FrictionKind, MemoryScope, ProviderInfo, Routing, TabToolName, TargetElement, Tier, Trigger } from "../../shared/protocol.js";
+import type { ActiveChange, PageOutline } from "../../shared/adaptation.js";
+import type { ChoiceOption, FrictionCount, FrictionKind, MemoryScope, ProviderInfo, Routing, TabToolName, TargetElement, Tier, TokenUsage, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
 
 export interface AppliedSummary {
@@ -21,10 +21,22 @@ export type UiEvent =
   | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
   | { type: "error"; runId: string; message: string };
 
+export interface PageInspection {
+  url: string;
+  loadedAt: number;
+  engine: { observing: boolean; liveChanges: number };
+  usage: TokenUsage;
+  changes: Array<{ change: ActiveChange; source: string }>;
+  activity: Array<{ at: number; text: string }>;
+}
+
 export type ContentRequest =
-  | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown }
+  | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown; source?: "llm" | "recipe" }
   | { kind: "useSiteControl"; input: unknown; userMessage: string }
   | { kind: "list" }
+  | { kind: "inspectPage" }
+  | { kind: "activity"; text: string }
+  | { kind: "usage"; usage: TokenUsage; model: string; purpose: string }
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
@@ -80,10 +92,11 @@ export type BackgroundRequest =
   | { kind: "recognitionEvent"; event: unknown };
 
 export type DebugPortMessage =
+  | { type: "inspection"; snapshot?: PageInspection; error?: string }
   | { type: "status"; status: StatusInfo }
   | { type: "event"; tabId: number; at: number; event: UiEvent }
   | { type: "tool"; tabId: number; at: number; name: string; ms: number; ok: boolean; detail: string };
 
-export type DebugPortRequest = { type: "chat"; message: string; thread?: string };
+export type DebugPortRequest = { type: "chat"; message: string; thread?: string } | { type: "inspect" };
 
 export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Pro" };

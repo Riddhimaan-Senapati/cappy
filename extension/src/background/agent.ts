@@ -56,6 +56,7 @@ interface StartOptions {
 
 export class AgentClient {
   status: StatusInfo = { connected: false, busy: false };
+  private usageUpdates = Promise.resolve();
   private socket: WebSocket | null = null;
   private opening: Promise<void> | null = null;
   private keepAlive: ReturnType<typeof setInterval> | undefined;
@@ -64,6 +65,7 @@ export class AgentClient {
   private defaultProvider: string | null = null;
   private notice: StatusInfo["notice"];
   private modelsRequested = new Set<string>();
+  private suggestionTabs = new Map<string, number>();
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
   private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
 
@@ -99,7 +101,7 @@ export class AgentClient {
     this.send({ type: "listModels", provider: active.id });
   }
 
-  async suggest(page: PageOutline, applied: string[], friction?: FrictionCount[]): Promise<Suggestion | null> {
+  async suggest(page: PageOutline, applied: string[], friction?: FrictionCount[], tabId?: number): Promise<Suggestion | null> {
     try {
       await this.ensureConnected();
     } catch {
@@ -110,9 +112,11 @@ export class AgentClient {
     if (!activeProvider) return null;
     const requestId = crypto.randomUUID();
     const feedback = await recentFeedback();
+    if (tabId) this.suggestionTabs.set(requestId, tabId);
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.suggestions.delete(requestId);
+        this.suggestionTabs.delete(requestId);
         resolve(null);
       }, 12_000);
       this.suggestions.set(requestId, (suggestion) => {
@@ -312,7 +316,7 @@ export class AgentClient {
       this.step(run, "Using your saved version of this request", "info");
       for (const change of changes) {
         if (!this.runs.has(run.runId)) return true;
-        const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change } });
+        const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
         if (!outcome.ok) return false;
         run.applied.set(change.id, change);
       }
@@ -347,6 +351,20 @@ export class AgentClient {
   }
 
   private async onMessage(message: ServerMessage) {
+    if (message.type === "usage") {
+      const run = message.runId ? this.runs.get(message.runId) : undefined;
+      const tabId = run?.tabId ?? (message.requestId ? this.suggestionTabs.get(message.requestId) : undefined);
+      if (tabId) void sendToTab(tabId, { kind: "usage", usage: message.usage, model: message.model, purpose: run ? (run.trigger === "page_load" ? "Automatic page adaptation" : "Chat adaptation") : "Page suggestion" }).catch(() => undefined);
+      this.usageUpdates = this.usageUpdates.then(async () => {
+        const { usage } = await load();
+        await save({ usage: {
+          calls: usage.calls + message.usage.calls,
+          inputTokens: usage.inputTokens + message.usage.inputTokens,
+          outputTokens: usage.outputTokens + message.usage.outputTokens,
+        } });
+      });
+      return;
+    }
     if (message.type === "providers") {
       this.providers = message.providers;
       this.defaultProvider = message.defaultProvider;
@@ -358,6 +376,7 @@ export class AgentClient {
     if (message.type === "suggestion") {
       this.suggestions.get(message.requestId)?.(message.suggestion);
       this.suggestions.delete(message.requestId);
+      this.suggestionTabs.delete(message.requestId);
       return;
     }
     if (message.type === "notice") {
@@ -427,7 +446,7 @@ export class AgentClient {
         if (run.trigger !== "chat") throw new Error("Site controls require a chat request.");
         result = await sendToTab(run.tabId, { kind: "useSiteControl", input: message.input, userMessage: run.message });
       } else {
-        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input });
+        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input, source: "llm" });
       }
       if (!this.runs.has(run.runId)) return;
       if (message.name === "apply_change") this.afterApply(run, (message.input as { change: Change }).change, result as ApplyOutcome);

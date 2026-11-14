@@ -21,7 +21,7 @@ adoptStyles(document, TOKENS + SETTINGS_CSS + POPUP_CSS);
 
 const root = h("div");
 document.body.append(
-  h("div", "pop-head", "", [h("div", "pop-logo", "", [icon("sparkle", 16)]), h("div", "", "", [h("h1", "", "Adaptive Agent"), h("small", "", "Press the shortcut on any page, or use the button")])]),
+  h("div", "pop-head", "", [h("div", "pop-logo", "", [icon("sparkle", 16)]), h("div", "", "", [h("h1", "", "Adaptive Agent"), h("small", "", "Your browser, adapted to you")])]),
   root,
 );
 

@@ -1,6 +1,6 @@
 import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
-import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier } from "../../shared/protocol.js";
+import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier, TokenUsage } from "../../shared/protocol.js";
 
 export interface Recipe {
   message: string;
@@ -60,6 +60,7 @@ export interface CameraSettings {
 }
 
 export interface StoredState {
+  usage: TokenUsage;
   profile: string[];
   pendingMemory: string[];
   pendingSites: Record<string, PendingSite>;
@@ -94,6 +95,7 @@ export interface StoredState {
 }
 
 export const DEFAULTS: StoredState = {
+  usage: { calls: 0, inputTokens: 0, outputTokens: 0 },
   profile: [],
   pendingMemory: [],
   pendingSites: {},

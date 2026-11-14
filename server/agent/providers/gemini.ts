@@ -1,6 +1,6 @@
 import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import { z } from "zod";
-import type { Tier } from "../../../shared/protocol.js";
+import type { Tier, UsageReporter } from "../../../shared/protocol.js";
 import { getKey } from "../../keys.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
@@ -22,8 +22,9 @@ export function createGeminiProvider(): AgentProvider {
   return {
     name: "gemini",
     models,
-    async complete(system: string, user: string, model: string) {
+    async complete(system: string, user: string, model: string, reportUsage: UsageReporter) {
       const response = await ai.models.generateContent({ model, contents: user, config: { systemInstruction: system } });
+      reportUsage({ calls: 1, inputTokens: response.usageMetadata?.promptTokenCount ?? 0, outputTokens: (response.usageMetadata?.candidatesTokenCount ?? 0) + (response.usageMetadata?.thoughtsTokenCount ?? 0) });
       return (response.text ?? "").trim();
     },
     async listModels() {
@@ -31,7 +32,7 @@ export function createGeminiProvider(): AgentProvider {
       for await (const model of await ai.models.list()) if (model.name) names.push(model.name.replace(/^models\//, ""));
       return names.filter((name) => name.startsWith("gemini"));
     },
-    async run(session: AgentSession, _tier: Tier, model: string) {
+    async run(session: AgentSession, _tier: Tier, model: string, reportUsage: UsageReporter) {
       const contents: Content[] = [{ role: "user", parts: [{ text: buildUserTurn(session.request) }] }];
 
       for (let step = 0; step < MAX_STEPS; step++) {
@@ -42,6 +43,7 @@ export function createGeminiProvider(): AgentProvider {
           config: { abortSignal: session.signal, systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }] },
         });
 
+        reportUsage({ calls: 1, inputTokens: response.usageMetadata?.promptTokenCount ?? 0, outputTokens: (response.usageMetadata?.candidatesTokenCount ?? 0) + (response.usageMetadata?.thoughtsTokenCount ?? 0) });
         const calls = response.functionCalls ?? [];
         if (!calls.length) return (response.text ?? "").trim();
 

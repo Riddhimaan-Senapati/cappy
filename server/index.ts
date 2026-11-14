@@ -54,7 +54,7 @@ async function execute(session: AgentSession, request: RunRequest, provider: Age
   const modelFor = (which: Tier) => request.models?.[which] || provider.models[which];
   const announce = () => session.send({ type: "tier", runId: request.runId, tier, model: modelFor(tier) });
   announce();
-  let reply = await provider.run(session, tier, modelFor(tier));
+  let reply = await provider.run(session, tier, modelFor(tier), (usage) => session.reportUsage(usage, modelFor(tier)));
 
   if (tier === "fast" && request.routing === "auto" && !session.blockedReason && (session.escalation || session.struggled())) {
     session.progress(session.escalation ? `Switching to Pro: ${session.escalation}` : "That didn't land. Switching to Pro");
@@ -64,7 +64,7 @@ async function execute(session: AgentSession, request: RunRequest, provider: Age
     tier = "frontier";
     session.tier = tier;
     announce();
-    reply = await provider.run(session, tier, modelFor(tier));
+    reply = await provider.run(session, tier, modelFor(tier), (usage) => session.reportUsage(usage, modelFor(tier)));
   }
 
   if (session.blockedReason) {
@@ -132,7 +132,7 @@ wss.on("connection", (socket, request) => {
         return void signIn(socket);
       case "suggest": {
         const provider = resolveProvider(message.provider);
-        const suggestion = provider ? await suggestFor(provider, message).catch(() => null) : null;
+        const suggestion = provider ? await suggestFor(provider, message, (usage) => sendTo(socket, { type: "usage", usage, requestId: message.requestId, model: message.models?.fast || provider.models.fast })).catch(() => null) : null;
         return sendTo(socket, { type: "suggestion", requestId: message.requestId, suggestion });
       }
       case "chatgptLogout":

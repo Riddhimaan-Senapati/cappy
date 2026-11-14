@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import type { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
-import type { Tier } from "../../../shared/protocol.js";
+import type { Tier, UsageReporter } from "../../../shared/protocol.js";
 import { getKey } from "../../keys.js";
 import { getAccessToken, refreshCredentials } from "../../auth/chatgpt.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
@@ -24,7 +24,7 @@ const namespaceTool = {
   })),
 };
 
-async function runLoop(getClient: () => Promise<OpenAI>, model: string, session: AgentSession): Promise<string> {
+async function runLoop(getClient: () => Promise<OpenAI>, model: string, session: AgentSession, reportUsage: UsageReporter): Promise<string> {
   const input: ResponseInputItem[] = [{ role: "user", content: buildUserTurn(session.request) }];
 
   for (let step = 0; step < MAX_STEPS; step++) {
@@ -42,7 +42,10 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
 
     let output: ResponseOutputItem[] | null = null;
     for await (const event of stream) {
-      if (event.type === "response.completed") output = event.response.output;
+      if (event.type === "response.completed") {
+        output = event.response.output;
+        reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0 });
+      }
       if (event.type === "response.failed") throw new Error(event.response.error?.message ?? "Response failed");
       if (event.type === "error") throw new Error(event.message);
     }
@@ -87,10 +90,11 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
   return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
 }
 
-async function completeText(client: OpenAI, model: string, system: string, user: string): Promise<string> {
+async function completeText(client: OpenAI, model: string, system: string, user: string, reportUsage: UsageReporter): Promise<string> {
   const stream = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: user }], store: false, stream: true });
   let text = "";
   for await (const event of stream) {
+    if (event.type === "response.completed") reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0 });
     if (event.type === "response.output_text.delta") text += event.delta;
     if (event.type === "response.failed") throw new Error(event.response.error?.message ?? "Response failed");
   }
@@ -111,8 +115,8 @@ export function createOpenAIKeyProvider(): AgentProvider {
       for await (const model of client.models.list()) names.push(model.id);
       return names.filter((name) => name.startsWith("gpt"));
     },
-    run: (session, _tier, model) => runLoop(async () => client, model, session),
-    complete: (system, user, model) => completeText(client, model, system, user),
+    run: (session, _tier, model, reportUsage) => runLoop(async () => client, model, session, reportUsage),
+    complete: (system, user, model, reportUsage) => completeText(client, model, system, user, reportUsage),
   };
 }
 
@@ -132,17 +136,17 @@ export function createChatGptProvider(): AgentProvider {
       const json = (await response.json()) as { models?: Array<{ slug: string; visibility?: string }> };
       return (json.models ?? []).filter((model) => model.visibility === "list").map((model) => model.slug);
     },
-    async complete(system, user, model) {
-      return completeText(await getClient(), model, system, user);
+    async complete(system, user, model, reportUsage) {
+      return completeText(await getClient(), model, system, user, reportUsage);
     },
-    async run(session, _tier, model) {
+    async run(session, _tier, model, reportUsage) {
       try {
-        return await runLoop(getClient, model, session);
+        return await runLoop(getClient, model, session, reportUsage);
       } catch (error) {
         if (error instanceof OpenAI.AuthenticationError && !retriedAuth) {
           retriedAuth = true;
           await refreshCredentials();
-          return runLoop(getClient, model, session);
+          return runLoop(getClient, model, session, reportUsage);
         }
         const message = error instanceof Error ? error.message : String(error);
         if (/subscription_sharing_usage/.test(message)) throw new Error("ChatGPT plan limit reached. Switch LLM_PROVIDER or wait for the limit to reset.");

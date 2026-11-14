@@ -1,5 +1,7 @@
 import type { ContentRequest, DebugPortMessage, DebugPortRequest, StatusInfo, TtsRequest, TtsStateMessage, UiEvent } from "./messages.js";
 import { adoptStyles, h, icon } from "./ui/dom.js";
+import { usageCard, USAGE_CSS } from "./ui/usage.js";
+import { renderInspection, INSPECTION_CSS } from "./ui/inspection.js";
 import { TOKENS } from "./ui/theme.js";
 import { paintCountdown, paintMic, liveRegion, micButton } from "./voice/button.js";
 import { VoiceController } from "./voice/controller.js";
@@ -25,8 +27,10 @@ function memoryChoice(line: string, host: string | undefined, scope: MemoryScope
 }
 
 const CSS = `
-html, body { margin: 0; height: 100%; background: #121217; }
-body { display: flex; flex-direction: column; gap: 10px; padding: 14px; font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #121217; }
+body { box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 14px; font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
+[hidden] { display: none !important; }
+body > * { flex-shrink: 0; }
 h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
@@ -59,12 +63,45 @@ button { padding: 0 16px; border: 0; border-radius: 12px; background: var(--grad
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 `;
 
-adoptStyles(document, TOKENS + CSS + VOICE_CSS);
+adoptStyles(document, TOKENS + USAGE_CSS + CSS + VOICE_CSS + INSPECTION_CSS);
 
 const statusDot = h("span", "dot");
 const statusText = h("span", "", "Connecting");
+const usage = h("div");
+const refreshUsage = async () => usage.replaceChildren(usageCard((await load()).usage));
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.usage) void refreshUsage();
+});
+void refreshUsage();
 const timeline = h("div", "timeline");
 const tools = h("div", "tools");
+const inspector = h("div", "inspect");
+inspector.hidden = true;
+const inspectButton = h("button", "", "Inspect");
+inspectButton.type = "button";
+inspectButton.setAttribute("aria-pressed", "false");
+const backButton = h("button", "", "Activity");
+backButton.type = "button";
+backButton.hidden = true;
+function showInspection(on: boolean) {
+  inspector.hidden = !on;
+  usage.hidden = on;
+  form.hidden = on;
+  if (on) previousRequests.hidden = true;
+  else renderPreviousRequests();
+  playbackControls.hidden = on;
+  timeline.hidden = on;
+  tools.hidden = on;
+  backButton.hidden = !on;
+  inspectButton.textContent = on ? "Refresh inspect" : "Inspect";
+  inspectButton.setAttribute("aria-pressed", String(on));
+}
+inspectButton.addEventListener("click", () => {
+  showInspection(true);
+  inspector.replaceChildren(h("p", "", "Reading the active page…"));
+  port.postMessage({ type: "inspect" } satisfies DebugPortRequest);
+});
+backButton.addEventListener("click", () => showInspection(false));
 const input = h("textarea");
 input.rows = 2;
 input.placeholder = "Debug chat: runs on the active tab, always asks the AI fresh";
@@ -101,7 +138,7 @@ function renderPreviousRequests() {
     });
     return h("div", "previous-request", "", [button, remove]);
   }));
-  previousRequests.hidden = !matches.length;
+  previousRequests.hidden = !inspector.hidden || !matches.length;
 }
 
 async function refreshRequestState() {
@@ -133,9 +170,14 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
   return false;
 });
 
+const playbackControls = h("div", "tts", "", [readButton, stopButton]);
+
 document.body.append(
-  h("div", "head", "", [h("h1", "", "Debug"), h("div", "status", "", [statusDot, statusText])]),
-  h("div", "tts", "", [readButton, stopButton]),
+  h("div", "head", "", [h("h1", "", "Debug"), h("div", "head-actions", "", [backButton, inspectButton])]),
+  h("div", "status", "", [statusDot, statusText]),
+  usage,
+  inspector,
+  playbackControls,
   timeline,
   tools,
   form,
@@ -292,7 +334,11 @@ function onEvent(event: UiEvent) {
 
 const port = chrome.runtime.connect({ name: "debug" });
 port.onMessage.addListener((message: DebugPortMessage) => {
-  if (message.type === "status") setStatus(message.status);
+  if (message.type === "inspection") {
+    if (message.snapshot) renderInspection(inspector, message.snapshot);
+    else inspector.replaceChildren(h("p", "", message.error ?? "Could not inspect this page. Reload the tab and try again."));
+  }
+  else if (message.type === "status") setStatus(message.status);
   else if (message.type === "event") onEvent(message.event);
   else {
     tools.append(h("div", message.ok ? "" : "bad", "", [h("span", "ms", `${message.ms}ms`), h("span", "", `${message.name} ${message.detail}`.slice(0, 120))]));
