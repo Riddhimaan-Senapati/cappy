@@ -107,7 +107,7 @@ export function toGeminiSchema(node: unknown): unknown {
 // response schema. The model's answer is still checked against AdaptResponse by parseAdaptText.
 const GEMINI_DROPPED_KEYS = new Set(["minLength", "maxLength", "minItems", "maxItems", "minimum", "maximum", "pattern"]);
 
-function dropValidationKeys(node: unknown): unknown {
+export function dropValidationKeys(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(dropValidationKeys);
   if (node === null || typeof node !== "object") return node;
   return Object.fromEntries(
