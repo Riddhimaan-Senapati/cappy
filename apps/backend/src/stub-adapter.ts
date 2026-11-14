@@ -23,23 +23,28 @@ export function colorModeFor(detail: string): BlockOf<"color_fix">["mode"] {
   return "deuteranopia";
 }
 
-function textFocusFor(needs: Need[]): BlockOf<"text_focus"> | undefined {
+// Larger text scales the real computed px sizes; text_focus only handles focus and line spacing.
+function textBlocksFor(needs: Need[]): BlockConfig[] {
   const wantsLargerText = needs.some((n) => n.kind === "text_size");
   const wantsFocus = needs.some((n) => n.kind === "focus");
-  if (!wantsLargerText && !wantsFocus) return undefined;
-  return {
-    block: "text_focus",
-    fontScale: wantsLargerText ? 1.25 : 1,
-    lineHeight: wantsLargerText ? 1.6 : 1,
-    font: wantsLargerText ? "atkinson" : "system",
-    hide: wantsFocus ? [...HIDE_SIDEBARS] : [],
-  };
+  const blocks: BlockConfig[] = [];
+  if (wantsLargerText) blocks.push({ block: "text_scale", scale: 1.3 });
+  if (wantsFocus) {
+    blocks.push({
+      block: "text_focus",
+      fontScale: 1,
+      lineHeight: wantsLargerText ? 1.5 : 1,
+      font: "system",
+      hide: [...HIDE_SIDEBARS],
+    });
+  }
+  return blocks;
 }
 
 export function blocksFor(needs: Need[]): BlockConfig[] {
   const blocks: BlockConfig[] = [];
-  const text = textFocusFor(needs);
-  if (text) blocks.push(text);
+  blocks.push(...textBlocksFor(needs));
+  if (needs.some((n) => n.kind === "light_sensitivity")) blocks.push({ block: "stop_motion", pauseMedia: true });
   const color = needs.find((n) => n.kind === "color_vision");
   if (color) {
     blocks.push({ block: "color_fix", mode: colorModeFor(color.detail), targets: ALL_COLOR_TARGETS });

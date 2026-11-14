@@ -29,6 +29,7 @@ import { buildRequestBody, parseOutlineReply, postRequest } from "../utils/reque
 import { reasonBadge } from "../utils/badge";
 import { verifyAdaptation } from "../utils/verify";
 import { describeChoice, logForTab, startRun } from "../utils/steps";
+import { hasRuntimeBlock } from "../utils/runtime-blocks";
 
 const APPLIED_KEY = KEYS.applied;
 const FRICTION_PROMPT = "Make text bigger on every site?";
@@ -150,7 +151,7 @@ export async function applyResponse(
     await setLast({ status: "error", url, message: "Could not build this adaptation" });
     return false;
   }
-  if (!css.trim() && !svg && !adaptation.ops?.length) {
+  if (!css.trim() && !svg && !adaptation.ops?.length && !hasRuntimeBlock(adaptation.blocks)) {
     await logForTab(tabId, "warn", "Nothing to change: the model proposed no page edits");
     await setLast({ status: "none", url, reason: "Nothing to change on this page" });
     return false;
@@ -175,7 +176,7 @@ export async function applyResponse(
       return false;
     }
     await writeApplied(tabId, { adaptationId: adaptation.id, css });
-    if (adaptation.blocks.some((b) => b.block === "form_fixer")) {
+    if (hasRuntimeBlock(adaptation.blocks)) {
       await sendToTab(tabId, { type: "apply-runtime", adaptationId: adaptation.id, blocks: adaptation.blocks }).catch(
         (err: unknown) => console.warn("runtime blocks failed to apply", err),
       );

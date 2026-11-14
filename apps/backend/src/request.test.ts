@@ -86,7 +86,7 @@ describe("injection pre-pass", () => {
 });
 
 describe("POST /request", () => {
-  test("'make the text bigger' returns a text_focus adaptation", async () => {
+  test("'make the text bigger' returns a text_scale and a text_focus adaptation", async () => {
     const res = await post("/request", body("make the text bigger"));
     expect(res.status).toBe(200);
     const json = (await res.json()) as AdaptResponse;
@@ -95,7 +95,8 @@ describe("POST /request", () => {
     expect(() => Adaptation.parse(json.adaptation)).not.toThrow();
     expect<string[]>(json.adaptation.sites).toEqual(["www.w3.org"]);
     expect(json.adaptation.blocks).toEqual([
-      { block: "text_focus", fontScale: 1.4, lineHeight: 1.7, font: "atkinson", hide: [] },
+      { block: "text_scale", scale: 1.4 },
+      { block: "text_focus", fontScale: 1, lineHeight: 1.6, font: "atkinson", hide: [] },
     ]);
     expect<{ text: string; needId: string }>(json.adaptation.reason).toEqual({
       text: "make the text bigger",
@@ -109,6 +110,7 @@ describe("POST /request", () => {
       ["use hand gestures to scroll", "gesture_scroll"],
       ["the form labels are missing", "form_fixer"],
       ["remove the sidebar distractions", "text_focus"],
+      ["pause the animations and autoplay", "stop_motion"],
     ];
     for (const [request, block] of cases) {
       const json = (await (await post("/request", body(request))).json()) as AdaptResponse;

@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "bun test",
+    "test": "bun run --filter \"*\" test",
     "typecheck": "bun run --filter '*' typecheck",
     "e2e": "cd apps/extension && bunx wxt build && cd ../.. && bun scripts/e2e-gate.ts",
     "bench:gemini": "bun scripts/bench-gemini.ts",
