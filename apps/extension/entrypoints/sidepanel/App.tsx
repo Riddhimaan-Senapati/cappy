@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { EMPTY_PROFILE, NeedKind, Profile } from "@browser-agent/shared";
 import { createCompanion, type Companion, type CompanionView } from "@browser-agent/companion";
 import { Message } from "../../utils/messages";
+import { ProfileEditor, KIND_LABELS } from "./ProfileEditor";
+import { RequestBox } from "./RequestBox";
 import { callLlm } from "../../utils/backend";
 import { GesturePanel } from "./GesturePanel";
 import {
@@ -11,25 +12,6 @@ import {
   readParsed,
   saveProfile,
 } from "../../utils/state";
-
-const DEMO_PROFILE = Profile.parse({
-  version: 1,
-  summary:
-    "Maya is a student who is red-green colorblind, sensitive to flashing content, and prefers larger text.",
-  needs: [
-    { id: "n1", kind: "color_vision", detail: "red-green colorblind (deuteranopia)", source: "onboarding" },
-    { id: "n2", kind: "light_sensitivity", detail: "flashing content gives headaches", source: "onboarding" },
-    { id: "n3", kind: "text_size", detail: "prefers larger text", source: "onboarding" },
-  ],
-});
-
-const KIND_LABELS: Record<NeedKind, string> = {
-  color_vision: "Color vision",
-  light_sensitivity: "Light sensitivity",
-  text_size: "Text size",
-  motor: "Motor",
-  focus: "Focus",
-};
 
 function useStored<T>(
   area: "local" | "session",
@@ -57,19 +39,12 @@ function useStored<T>(
   return value;
 }
 
-const parseProfile = (raw: unknown) => {
-  const parsed = Profile.safeParse(raw);
-  return parsed.success ? parsed.data : undefined;
-};
-
 const parseLast = (raw: unknown) => {
   const parsed = LastResult.safeParse(raw);
   return parsed.success ? parsed.data : undefined;
 };
 
 export function App() {
-  const storedProfile = useStored("local", KEYS.profile, parseProfile);
-  const profile = storedProfile ?? EMPTY_PROFILE;
   const last = useStored("session", KEYS.last, parseLast);
 
   return (
@@ -77,25 +52,10 @@ export function App() {
       <h1>Adaptive Browser Agent</h1>
 
       <Section title="Your profile">
-        {profile.summary ? <p>{profile.summary}</p> : <p>No profile yet.</p>}
-        {profile.needs.length > 0 && (
-          <ul className="needs">
-            {profile.needs.map((need) => (
-              <li key={need.id}>
-                <strong>{KIND_LABELS[need.kind]}:</strong> {need.detail}
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="row">
-          <button type="button" onClick={() => void saveProfile(DEMO_PROFILE)}>
-            Load demo profile
-          </button>
-          <button type="button" className="secondary" onClick={() => void saveProfile(EMPTY_PROFILE)}>
-            Clear profile
-          </button>
-        </div>
+        <ProfileEditor />
       </Section>
+
+      <RequestBox />
 
       <Section title="Last change">
         <LastChange last={last} />
