@@ -3,21 +3,27 @@ import {
   AdaptResponse,
   ADAPT_PATH,
   DEFAULT_BACKEND_URL,
+  NeedId,
   matchesHost,
   type AdaptationId,
+  type Profile,
 } from "@browser-agent/shared";
 import { colorFilterSvg, compileAdaptationCss } from "@browser-agent/blocks";
-import { Message, PageReady, ToContentMessage } from "../utils/messages";
-import { Applied, AppliedMap, KEYS, LastResult, loadProfile, readParsed, setLast } from "../utils/state";
+import { Message, PageReady, ToContentMessage, type OutlineReply } from "../utils/messages";
+import { Applied, AppliedMap, KEYS, LastResult, loadProfile, readParsed, saveProfile, setLast } from "../utils/state";
+import { startFriction } from "../utils/friction";
+import { buildRequestBody, parseOutlineReply, postRequest } from "../utils/request";
+import { reasonBadge } from "../utils/badge";
 
 const APPLIED_KEY = KEYS.applied;
+const FRICTION_PROMPT = "Make text bigger on every site?";
 
 export default defineBackground(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch((err: unknown) => {
     console.error("setPanelBehavior failed", err);
   });
 
-  chrome.runtime.onMessage.addListener((raw, sender) => {
+  chrome.runtime.onMessage.addListener((raw, sender, sendResponse) => {
     const parsed = Message.safeParse(raw);
     if (!parsed.success) return false;
     const msg = parsed.data;
@@ -25,6 +31,11 @@ export default defineBackground(() => {
       void handlePageReady(sender.tab.id, msg);
     } else if (msg.type === "undo") {
       void handleUndo(msg.adaptationId);
+    } else if (msg.type === "user-request") {
+      void handleUserRequest(msg.text).finally(() => sendResponse({ ok: true }));
+      return true;
+    } else if (msg.type === "friction-accept" && sender.tab?.id !== undefined) {
+      void handleFrictionAccept(sender.tab.id);
     }
     return false;
   });
@@ -32,17 +43,19 @@ export default defineBackground(() => {
   chrome.tabs.onRemoved.addListener((tabId) => {
     void forgetApplied(tabId);
   });
+
+  startFriction(promptFriction);
 });
 
 async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   await forgetApplied(tabId);
   const profile = await loadProfile();
-  if (profile.needs.length === 0) return;
+  if (profile.needs.length === 0) return notifyDone(tabId);
 
   const request = AdaptRequest.safeParse({ url: msg.url, outline: msg.outline, profile });
   if (!request.success) {
     await setLast({ status: "error", url: msg.url, message: "Page details were not valid" });
-    return;
+    return notifyDone(tabId);
   }
 
   let raw: unknown;
@@ -57,29 +70,38 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   } catch (err) {
     console.warn("adapt request failed", err);
     await setLast({ status: "error", url: msg.url, message: "Backend unreachable" });
-    return;
+    return notifyDone(tabId);
   }
 
   const parsed = AdaptResponse.safeParse(raw);
   if (!parsed.success) {
     await setLast({ status: "error", url: msg.url, message: "Backend sent an unexpected response" });
-    return;
+    return notifyDone(tabId);
   }
-  const response = parsed.data;
+  const applied = await applyResponse(tabId, msg.url, parsed.data, profile);
+  if (!applied) await notifyDone(tabId);
+}
+
+export async function applyResponse(
+  tabId: number,
+  url: string,
+  response: AdaptResponse,
+  profile: Profile,
+): Promise<boolean> {
   if (response.kind === "none") {
-    await setLast({ status: "none", url: msg.url, reason: response.reason });
-    return;
+    await setLast({ status: "none", url, reason: response.reason });
+    return false;
   }
   if (response.kind === "blocked") {
-    await setLast({ status: "blocked", url: msg.url, reason: response.reason });
-    return;
+    await setLast({ status: "blocked", url, reason: response.reason });
+    return false;
   }
 
   const { adaptation } = response;
-  const hostname = new URL(msg.url).hostname;
+  const hostname = new URL(url).hostname;
   if (!adaptation.sites.some((pattern) => matchesHost(pattern, hostname))) {
-    await setLast({ status: "none", url: msg.url, reason: "Adaptation does not cover this site" });
-    return;
+    await setLast({ status: "none", url, reason: "Adaptation does not cover this site" });
+    return false;
   }
 
   let css: string;
@@ -90,38 +112,113 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
     svg = colorFix ? colorFilterSvg(colorFix.mode) : undefined;
   } catch (err) {
     console.error("could not compile adaptation", err);
-    await setLast({ status: "error", url: msg.url, message: "Could not build this adaptation" });
-    return;
+    await setLast({ status: "error", url, message: "Could not build this adaptation" });
+    return false;
   }
   if (!css.trim() && !svg) {
-    await setLast({ status: "none", url: msg.url, reason: "Nothing to change on this page" });
-    return;
+    await setLast({ status: "none", url, reason: "Nothing to change on this page" });
+    return false;
   }
 
+  const reason = reasonBadge(adaptation.reason.text, adaptation.reason.needId, profile);
+  await clearTabCss(tabId);
   try {
     if (css.trim()) await chrome.scripting.insertCSS({ target: { tabId }, css });
     if (svg) await sendToTab(tabId, { type: "inject-svg", svg });
-    await sendToTab(tabId, {
-      type: "show-banner",
-      reason: adaptation.reason.text,
-      adaptationId: adaptation.id,
-    });
+    await sendToTab(tabId, { type: "show-banner", reason, adaptationId: adaptation.id });
   } catch (err) {
     console.error("could not apply adaptation", err);
     if (css.trim()) await chrome.scripting.removeCSS({ target: { tabId }, css }).catch(() => undefined);
-    await setLast({ status: "error", url: msg.url, message: "Could not apply this adaptation to the page" });
-    return;
+    await setLast({ status: "error", url, message: "Could not apply this adaptation to the page" });
+    return false;
   }
 
   await writeApplied(tabId, { adaptationId: adaptation.id, css });
   await setLast({
     status: "applied",
-    url: msg.url,
+    url,
     tabId,
     adaptationId: adaptation.id,
-    reason: adaptation.reason.text,
+    reason,
     blocks: adaptation.blocks.map((b) => b.block),
   });
+  return true;
+}
+
+async function handleUserRequest(text: string): Promise<void> {
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (tab?.id === undefined) {
+    await setLast({ status: "error", url: "", message: "No active tab to change" });
+    return;
+  }
+  const tabId = tab.id;
+  const reply = await requestOutline(tabId);
+  if (!reply) {
+    await setLast({
+      status: "error",
+      url: tab.url ?? "",
+      message: "This page cannot be read. Open a normal web page and try again.",
+    });
+    return;
+  }
+
+  const profile = await loadProfile();
+  const body = buildRequestBody(reply, profile, text);
+  let raw: unknown;
+  try {
+    raw = await postRequest(body);
+  } catch (err) {
+    console.warn("request failed", err);
+    await setLast({ status: "error", url: reply.url, message: "Backend unreachable" });
+    return;
+  }
+  const parsed = AdaptResponse.safeParse(raw);
+  if (!parsed.success) {
+    await setLast({ status: "error", url: reply.url, message: "Backend sent an unexpected response" });
+    return;
+  }
+  await applyResponse(tabId, reply.url, parsed.data, profile);
+}
+
+async function handleFrictionAccept(tabId: number): Promise<void> {
+  const profile = await loadProfile();
+  if (!profile.needs.some((n) => n.kind === "text_size")) {
+    await saveProfile({
+      version: profile.version + 1,
+      summary: profile.summary,
+      needs: [
+        ...profile.needs,
+        {
+          id: NeedId.parse(`f-${crypto.randomUUID().slice(0, 8)}`),
+          kind: "text_size",
+          detail: "zoomed in repeatedly",
+          source: "friction",
+        },
+      ],
+    });
+  }
+  await chrome.tabs.setZoom(tabId, 1).catch((err: unknown) => {
+    console.warn("could not reset zoom", err);
+  });
+  const reply = await requestOutline(tabId);
+  if (reply) await handlePageReady(tabId, { type: "page-ready", url: reply.url, outline: reply.outline });
+}
+
+async function promptFriction(tabId: number): Promise<void> {
+  const profile = await loadProfile();
+  if (profile.needs.some((n) => n.kind === "text_size")) return;
+  await sendToTab(tabId, { type: "friction-prompt", text: FRICTION_PROMPT }).catch(() => undefined);
+}
+
+async function requestOutline(tabId: number): Promise<OutlineReply | undefined> {
+  const raw: unknown = await chrome.tabs
+    .sendMessage(tabId, ToContentMessage.parse({ type: "get-outline" }))
+    .catch(() => undefined);
+  return parseOutlineReply(raw);
+}
+
+async function notifyDone(tabId: number): Promise<void> {
+  await sendToTab(tabId, { type: "adapt-done" }).catch(() => undefined);
 }
 
 async function handleUndo(adaptationId: AdaptationId): Promise<void> {
@@ -141,6 +238,13 @@ async function handleUndo(adaptationId: AdaptationId): Promise<void> {
   if (last?.status === "applied" && last.adaptationId === adaptationId) {
     await setLast({ status: "undone", url: last.url, adaptationId });
   }
+}
+
+async function clearTabCss(tabId: number): Promise<void> {
+  const applied: AppliedMap = (await readParsed("session", APPLIED_KEY, AppliedMap)) ?? {};
+  const previous = applied[String(tabId)];
+  if (!previous) return;
+  await chrome.scripting.removeCSS({ target: { tabId }, css: previous.css }).catch(() => undefined);
 }
 
 async function sendToTab(tabId: number, msg: ToContentMessage): Promise<void> {

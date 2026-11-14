@@ -16,8 +16,41 @@ export const InjectSvg = z.object({ type: z.literal("inject-svg"), svg: z.string
 
 export const RemoveBanner = z.object({ type: z.literal("remove-banner") }).strict();
 
-export const ToContentMessage = z.discriminatedUnion("type", [ShowBanner, InjectSvg, RemoveBanner]);
+export const UserRequest = z
+  .object({ type: z.literal("user-request"), text: z.string().trim().min(1).max(500) })
+  .strict();
+export type UserRequest = z.infer<typeof UserRequest>;
+
+export const FrictionAccept = z.object({ type: z.literal("friction-accept") }).strict();
+
+export const AdaptDone = z.object({ type: z.literal("adapt-done") }).strict();
+
+export const FrictionPrompt = z
+  .object({ type: z.literal("friction-prompt"), text: z.string().max(200) })
+  .strict();
+
+export const GetOutline = z.object({ type: z.literal("get-outline") }).strict();
+
+export const OutlineReply = z.object({ url: z.string().max(2048), outline: PageOutline }).strict();
+export type OutlineReply = z.infer<typeof OutlineReply>;
+
+export const ToContentMessage = z.discriminatedUnion("type", [
+  ShowBanner,
+  InjectSvg,
+  RemoveBanner,
+  AdaptDone,
+  FrictionPrompt,
+  GetOutline,
+]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;
 
-export const Message = z.discriminatedUnion("type", [PageReady, Undo, ShowBanner, InjectSvg, RemoveBanner]);
+export const Message = z.discriminatedUnion("type", [
+  PageReady,
+  Undo,
+  ShowBanner,
+  InjectSvg,
+  RemoveBanner,
+  UserRequest,
+  FrictionAccept,
+]);
 export type Message = z.infer<typeof Message>;
