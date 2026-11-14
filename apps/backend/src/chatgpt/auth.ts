@@ -272,7 +272,7 @@ export async function login(): Promise<ChatGptCredentials> {
     throw new Error("ChatGPT token response is missing the ID token or refresh token (offline_access not granted).");
   }
   const identity = decodeIdToken(token.id_token, clientId, nonce);
-  const scopes = parseScopes(token.scope);
+  const scopes = token.scope ? parseScopes(token.scope) : parseScopes(callback.get("scope")?.replace(/\+/g, " ") ?? undefined);
   assertPlanScope(scopes);
   if (existing && existing.subject !== identity.sub) {
     console.warn("Signed in as a different ChatGPT account; replacing saved credentials.");
