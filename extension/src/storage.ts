@@ -92,6 +92,7 @@ export interface StoredState {
   voiceProvider: "chrome" | "openai" | "gemini";
   openAIVoiceVerified: boolean;
   geminiVoiceVerified: boolean;
+  onboarded: boolean;
 }
 
 export const DEFAULTS: StoredState = {
@@ -127,6 +128,7 @@ export const DEFAULTS: StoredState = {
   voiceProvider: "chrome",
   openAIVoiceVerified: false,
   geminiVoiceVerified: false,
+  onboarded: false,
 };
 
 const MAX_RECIPES = 60;

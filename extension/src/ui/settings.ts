@@ -278,6 +278,9 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     const debug = h("button", "s-btn", "", [icon("bug", 15), document.createTextNode("Debug panel")]);
     debug.type = "button";
     debug.addEventListener("click", () => ctx.openDebug());
+    const guide = h("button", "s-btn", "", [icon("sparkle", 15), document.createTextNode("Setup guide")]);
+    guide.type = "button";
+    guide.addEventListener("click", () => void chrome.runtime.sendMessage({ kind: "openWelcome" }));
 
     const section = (title: string, ...children: Node[]) => h("section", "s-sec", "", [h("h3", "", title), ...children]);
     const set = <K extends keyof StoredState>(key: K) => (value: StoredState[K]) => save({ [key]: value } as Partial<StoredState>);
@@ -398,7 +401,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       voiceSection(state),
       cameraSection(state),
       section("On this page", ...changeRows),
-      h("div", "s-foot", "", [shortcuts, debug]),
+      h("div", "s-foot", "", [shortcuts, debug, guide]),
     );
     if (hadFocus) root.querySelector<HTMLInputElement>(".s-add input")?.focus();
   };

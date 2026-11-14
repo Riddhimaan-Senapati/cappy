@@ -74,6 +74,7 @@ export interface StatusInfo {
 export type BackgroundRequest =
   | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement }
   | { kind: "deleteRequest"; message: string }
+  | { kind: "openWelcome" }
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }

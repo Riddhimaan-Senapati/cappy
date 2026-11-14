@@ -115,7 +115,7 @@ extension/src/
   camera/      MediaPipe tracking page
   offscreen/   microphone and speech
   ui/          shared settings view, memory, usage, inspector, theme, DOM helpers
-  popup.ts, sidepanel.ts
+  popup.ts, sidepanel.ts, welcome.ts (first-run setup: AI, needs into the base profile, basics)
 demo-sites/    campus, trap, YouTube, X, Instagram, form and dark-mode test pages
 scripts/e2e/   Playwright scenarios against the stub provider (one per file)
 tests/         unit tests (node:test via tsx)

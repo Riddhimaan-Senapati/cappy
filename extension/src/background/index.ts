@@ -85,7 +85,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "adapt-element" && tab?.id) void sendToTab(tab.id, { kind: "targetContextElement" }).catch(() => undefined);
 });
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason === "install" && !(await load()).onboarded) void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
   chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Adaptive Agent", contexts: ["all"] }, () => void chrome.runtime.lastError);
   for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {
     if (tab.id) void injectContent(tab.id).catch(() => undefined);
@@ -160,6 +161,9 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
           error: error instanceof TypeError ? "Could not reach the local audio server. Check that it is running." : error.message,
         }));
       return true;
+    case "openWelcome":
+      void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+      break;
     case "status":
       void agent.ensureConnected().catch(() => undefined).then(() => agent.getStatus()).then(sendResponse);
       return true;
