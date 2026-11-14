@@ -468,6 +468,7 @@ export class Spotlight {
     return [
       { id: "pick", icon: "target", title: "Select an element on the page", hint: "then say what to change", kind: "command", section: "Commands", keywords: "pick choose this element point target inspect", run: () => this.startPicking() },
       { id: "commands", icon: "bookmark", title: "Saved commands", hint: "→", kind: "command", section: "Commands", keywords: "shortcuts presets saved favorites", run: () => this.setView("commands") },
+      { id: "always", icon: "bookmark", title: "Do something on every site", hint: "/always …", kind: "command", section: "Commands", keywords: "global everywhere always all sites every site rule default new command", run: () => this.prefill("/always ") },
       { id: "profiles", icon: "circle", title: "Profiles", hint: state?.profiles[state.activeProfileId]?.name ?? "Default", kind: "command", section: "Commands", keywords: "profile switch select new create", run: () => this.showProfileCommands() },
       {
         id: "camera",
@@ -578,6 +579,38 @@ export class Spotlight {
     return items;
   }
 
+  private prefill(value: string) {
+    this.input.value = value;
+    this.selected = 0;
+    this.setView("list");
+    this.input.focus({ preventScroll: true });
+  }
+
+  private alwaysItems(request: string): Item[] {
+    const everywhere = (this.cache?.commands ?? []).filter((command) => command.everywhere);
+    if (!request) {
+      return [
+        { id: "always:hint", icon: "bookmark", title: "Type what to do on every site", hint: "/always dark mode", kind: "command", section: "Every site", run: () => this.prefill("/always ") },
+        ...everywhere.map((command): Item => ({ id: `saved:${command.id}`, icon: "bookmark", title: command.name, hint: "runs on every site", kind: "saved", section: "Every site", run: () => this.ask(command.prompt, false) })),
+      ];
+    }
+    return [{ id: "always:save", icon: "bookmark", title: `Do this on every site: ${request}`, hint: "saves it, runs it here", kind: "command", section: "Every site", run: () => this.saveEverywhere(request) }];
+  }
+
+  // Saved as a command so it runs once on each new site, the same way a command marked "every site" does.
+  private async saveEverywhere(request: string) {
+    const { commands } = await load();
+    const same = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ") === request.toLowerCase().replace(/\s+/g, " ");
+    const existing = commands.find((command) => same(command.prompt));
+    const name = request.length > 60 ? `${request.slice(0, 57)}...` : request.charAt(0).toUpperCase() + request.slice(1);
+    const next: SavedCommand[] = existing
+      ? commands.map((command) => (command === existing ? { ...command, everywhere: true, appliedOrigins: [...new Set([...command.appliedOrigins, location.origin])] } : command))
+      : [...commands, { id: crypto.randomUUID(), name, prompt: request, everywhere: true, appliedOrigins: [location.origin], createdAt: Date.now() }];
+    await save({ commands: next });
+    this.cache = await load();
+    this.ask(request, false);
+  }
+
   private showProfileCommands(value = "/profile") {
     this.deletingProfileId = null;
     this.input.value = value;
@@ -641,6 +674,8 @@ export class Spotlight {
 
   private buildItems(): Item[] {
     const raw = this.input.value.trim();
+    const always = raw.match(/^\/\s*always(?:\s+(.*))?$/i);
+    if (always) return this.alwaysItems(always[1]?.trim() ?? "");
     const profileCommand = raw.match(/^\/\s*profiles?(?:\s+(.*))?$/i);
     if (profileCommand) return this.profileItems(profileCommand[1] ?? "");
     const changes = this.deps.listChanges();
