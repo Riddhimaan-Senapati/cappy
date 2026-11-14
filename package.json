@@ -17,8 +17,9 @@
     "e2e:form": "bun scripts/e2e-form.ts",
     "e2e:request": "bun scripts/e2e-request.ts",
     "e2e:live": "bun scripts/e2e-live.ts",
-    "e2e:all": "bun run e2e:build && bun scripts/e2e-gate.ts && bun scripts/e2e-injection.ts && bun scripts/e2e-companion.ts && bun scripts/e2e-form.ts && bun scripts/e2e-request.ts && bun scripts/e2e-persist.ts",
-    "e2e:persist": "bun scripts/e2e-persist.ts"
+    "e2e:all": "bun run e2e:build && bun scripts/e2e-gate.ts && bun scripts/e2e-injection.ts && bun scripts/e2e-companion.ts && bun scripts/e2e-form.ts && bun scripts/e2e-request.ts && bun scripts/e2e-persist.ts && bun scripts/e2e-replay.ts",
+    "e2e:persist": "bun scripts/e2e-persist.ts",
+    "e2e:replay": "bun scripts/e2e-replay.ts"
   },
   "devDependencies": {
     "playwright": "1"

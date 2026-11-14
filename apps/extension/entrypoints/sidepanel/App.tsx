@@ -6,6 +6,7 @@ import { RequestBox } from "./RequestBox";
 import { callLlm } from "../../utils/backend";
 import { GesturePanel } from "./GesturePanel";
 import { VerifyPanel } from "./VerifyPanel";
+import { SavedChanges } from "./SavedChanges";
 import {
   KEYS,
   LastResult,
@@ -69,6 +70,10 @@ export function App() {
       </Section>
 
       <GesturePanel />
+
+      <Section title="Saved changes">
+        <SavedChanges />
+      </Section>
     </main>
   );
 }
@@ -96,6 +101,7 @@ function LastChange({ last }: { last: LastResult | undefined }) {
             <strong>Changes:</strong> {last.blocks.length > 0 ? last.blocks.join(", ") : "page styles"}
           </p>
           <p className="muted">{last.url}</p>
+          {last.restored && <p className="muted">Restored from a saved change.</p>}
           <button
             type="button"
             onClick={() => {

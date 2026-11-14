@@ -22,6 +22,7 @@ export const LastResult = z.discriminatedUnion("status", [
       adaptationId: AdaptationId,
       reason: z.string(),
       blocks: z.array(z.string()),
+      restored: z.boolean().optional(),
     })
     .strict(),
   z.object({ status: z.literal("undone"), url: z.string(), adaptationId: AdaptationId }).strict(),
