@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quarterly results</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 24px; }
+      .chart { display: flex; align-items: flex-end; gap: 16px; height: 240px; border-bottom: 1px solid #888; }
+      .bar { width: 64px; }
+      .up { background: #d32f2f; }
+      .down { background: #2e7d32; }
+      .legend { margin-top: 12px; }
+      img { width: 240px; height: 120px; margin-top: 16px; }
+    </style>
+  </head>
+  <body>
+    <h1>Quarterly results</h1>
+    <div class="chart" role="img" aria-label="Revenue by quarter">
+      <div class="bar up" style="height: 180px"></div>
+      <div class="bar down" style="height: 120px"></div>
+      <div class="bar up" style="height: 200px"></div>
+      <div class="bar down" style="height: 90px"></div>
+    </div>
+    <p class="legend">Red bars rose this quarter. Green bars fell.</p>
+    <img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='120'%3E%3Crect width='120' height='120' fill='%23d32f2f'/%3E%3Crect x='120' width='120' height='120' fill='%232e7d32'/%3E%3C/svg%3E" alt="Red and green status key" />
+  </body>
+</html>
