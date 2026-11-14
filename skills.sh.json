@@ -1,0 +1,11 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "notGrouped": "bottom",
+  "groupings": [
+    {
+      "title": "Setup",
+      "description": "Install and run the browser-agent extension and its local server.",
+      "skills": ["install-browser-agent"]
+    }
+  ]
+}

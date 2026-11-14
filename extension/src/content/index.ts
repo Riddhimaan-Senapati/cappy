@@ -11,7 +11,7 @@ import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
 import { describeElement, uniqueSelector } from "./dom.js";
-import { activeChanges, applyChange, applySiteControl, changeHistory, ensureBaseStyle, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
 import { inspectPage, recordActivity, recordChange, recordRun, recordUsage } from "./inspection.js";
@@ -330,6 +330,8 @@ function ensureOverlay(): OverlayUi {
 
 async function handle(request: ContentRequest): Promise<unknown> {
   switch (request.kind) {
+    case "prepareProfileSwitch":
+      return mutate(async () => undefined);
     case "tool":
       switch (request.name) {
         case "read_page":
@@ -418,7 +420,19 @@ function start() {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || tornDown) return;
-    if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
+    if (changes.activeProfileId) {
+      accepted = null;
+      suggestionCache.clear();
+      clearTarget();
+      setBusy(false);
+      void mutate(async () => {
+        await revertAll(false);
+        clearChangeHistory();
+        const state = await load();
+        const restored = state.paused ? 0 : await restore(true);
+        await send({ kind: "pageReady", origin, restored, profileChanged: true });
+      }).catch(reportExtensionError);
+    } else if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
     if (changes.paused) {
       recordActivity(changes.paused.newValue ? "Adaptations paused; reverting all active changes locally." : "Adaptations resumed; restoring saved changes locally.");
       void mutate(async () => {

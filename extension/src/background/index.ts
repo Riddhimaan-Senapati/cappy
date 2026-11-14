@@ -6,6 +6,7 @@ import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
 import { registerFriction } from "./friction.js";
 import { registerTts } from "./tts.js";
+import { applyProfileAction, type ProfileAction } from "../profiles.js";
 
 registerTts();
 registerFriction();
@@ -50,8 +51,27 @@ async function activeTab() {
 }
 
 const CONTENT_SCRIPT = "dist/content.js";
+let switchingProfile = false;
+
+async function changeProfile(action: ProfileAction) {
+  if (switchingProfile) throw new Error("A profile is already switching. Try again shortly.");
+  if (action.action === "rename") return applyProfileAction(action);
+  if (action.action === "delete" && action.id !== (await load()).activeProfileId) return applyProfileAction(action);
+  if (action.action === "switch" && action.id === (await load()).activeProfileId) return;
+  switchingProfile = true;
+  try {
+    agent.stopForProfileSwitch();
+    const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] });
+    // Let pending local changes finish before saving the outgoing layout.
+    await Promise.allSettled(tabs.filter((tab) => tab.id).map((tab) => sendToTab(tab.id!, { kind: "prepareProfileSwitch" })));
+    await applyProfileAction(action);
+  } finally {
+    switchingProfile = false;
+  }
+}
 
 async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement) {
+  if (switchingProfile) return;
   if (!message.trim()) return;
   await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
   if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target });
@@ -107,20 +127,20 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 
 // A site with its own saved changes was already adapted without a model call. Global changes alone do not count,
 // since cross-site preferences such as a content filter still need a site-specific implementation here.
-async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restored: number) {
+async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restored: number, profileChanged = false) {
   const state = await load();
   const adaptedHere = restored > 0 && (state.siteChanges[origin]?.length ?? 0) > 0;
   if (!tab.id) return;
   const tabId = tab.id;
   const note = (text: string) => sendToTab(tabId, { kind: "activity", text }).catch(() => undefined);
-  const skipReason = state.paused ? "adaptations are paused" : !state.proactive ? "Act on page load is off" : !state.profile.length ? "profile is empty" : adaptedHere ? "saved site changes were restored" : null;
+  const skipReason = state.paused ? "adaptations are paused" : !state.proactive && !profileChanged ? "Act on page load is off" : !state.profile.length ? "profile is empty" : adaptedHere ? "saved site changes were restored" : null;
   if (skipReason) {
     await note(`Automatic page adaptation skipped: ${skipReason}.`);
     return;
   }
-  const key = JSON.stringify([tab.id, origin, state.profile]);
+  const key = JSON.stringify([tab.id, origin, state.activeProfileId, state.profile]);
   const { proactiveSeen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
-  if (proactiveSeen.includes(key)) {
+  if (!profileChanged && proactiveSeen.includes(key)) {
     await note("Automatic page adaptation skipped: already checked this site and profile in this tab during this browser session.");
     return;
   }
@@ -134,6 +154,9 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
   if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
+    case "profileAction":
+      void changeProfile(request).then(() => sendResponse({ ok: true }), (error: Error) => sendResponse({ ok: false, error: error.message }));
+      return true;
     case "runChat":
       if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt, request.thread, request.target).finally(() => sendResponse());
       return !!sender.tab;
@@ -142,9 +165,10 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       void removeSubmittedRequest(request.message).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
       return true;
     case "pageReady":
+      if (switchingProfile && !request.profileChanged) break;
       if (sender.tab) {
         void agent.runEverywhereCommands(sender.tab, request.origin);
-        void maybeRunProactively(sender.tab, request.origin, request.restored);
+        void maybeRunProactively(sender.tab, request.origin, request.restored, request.profileChanged);
       }
       break;
     case "openDebug":

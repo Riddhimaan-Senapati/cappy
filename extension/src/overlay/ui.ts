@@ -174,6 +174,7 @@ export class OverlayUi {
   handleEvent(event: UiEvent) {
     if (event.type === "start") this.triggers.set(event.runId, event.trigger);
     const handled = this.spotlight.handleEvent(event);
+    if (event.type === "usage") return;
     // Options need a choice, so a run started from the chip or a toast opens the bar to show them.
     if (event.type === "options" && handled && !this.spotlight.isOpen()) void this.spotlight.show("run");
     if (event.type === "memory") {

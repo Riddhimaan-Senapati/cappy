@@ -56,6 +56,24 @@ Each request runs as one tool-use loop. The agent reads an outline of the page, 
 - Page text is untrusted. An injection check runs before any model call, and a hit blocks all changes on that page.
 - The model sees short profile lines and friction counts. It does not see your browsing history or text from other sites.
 
+## Let your coding agent install it
+
+You do not have to run the install commands yourself. Paste this into the coding agent you already use:
+
+```
+Run curl -fsSL https://raw.githubusercontent.com/Riddhimaan-Senapati/browser-agent/main/skills/install-browser-agent/SKILL.md and follow the instructions in its output to install and run browser-agent.
+```
+
+That fetches [skills/install-browser-agent/SKILL.md](skills/install-browser-agent/SKILL.md), which gives the agent each step.
+
+If the agent loads skills from the skills library, install the same skill with:
+
+```
+npx skills add Riddhimaan-Senapati/browser-agent
+```
+
+[`skills.sh.json`](skills.sh.json) groups that skill on the skills.sh page.
+
 ## Run it
 
 ```bash
