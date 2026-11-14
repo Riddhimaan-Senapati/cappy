@@ -3,7 +3,7 @@ export interface Point {
   y: number;
 }
 
-export type HandPose = "point" | "open" | "fist" | "pinch" | "other";
+export type HandPose = "point" | "open" | "fist" | "pinch" | "thumbs_down" | "other";
 
 export interface HandFrame {
   pose: HandPose;
@@ -39,8 +39,14 @@ export function readHand(landmarks: Point[], aspect = 1): HandFrame | null {
   const palmIds = [0, 5, 9, 13, 17];
   const palm = { x: palmIds.reduce((sum, id) => sum + landmarks[id].x, 0) / 5, y: palmIds.reduce((sum, id) => sum + landmarks[id].y, 0) / 5 };
 
+  const thumbExtended = distance(landmarks[4], landmarks[17], aspect) > distance(landmarks[3], landmarks[17], aspect) * 1.05;
+  const lowest = Math.max(wrist.y, landmarks[5].y, landmarks[9].y, landmarks[13].y, landmarks[17].y);
+  const thumbDown = thumbExtended && landmarks[4].y > lowest + 0.25 * handSize;
+
   let pose: HandPose = "other";
-  if (pinch < 0.3 && !extended[2] && !extended[3]) pose = "pinch";
+  if (!extended.some(Boolean) && thumbDown) pose = "thumbs_down";
+  // In a real pinch the index still reaches out from the palm; in a fist with the thumb tucked it is curled in.
+  else if (pinch < 0.3 && !extended[2] && !extended[3] && distance(landmarks[8], wrist, aspect) > 1.1 * handSize) pose = "pinch";
   else if (extended.every(Boolean)) pose = "open";
   else if (extended[0] && !extended[1] && !extended[2] && !extended[3]) pose = "point";
   else if (!extended.some(Boolean)) pose = "fist";
