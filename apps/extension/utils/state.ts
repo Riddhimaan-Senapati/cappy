@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdaptationId, EMPTY_PROFILE, Profile, Screenshot, Verdict } from "@browser-agent/shared";
+import { AdaptationId, EMPTY_PROFILE, PageStats, Profile, Screenshot, Verdict } from "@browser-agent/shared";
 
 export const KEYS = {
   profile: "profile",
@@ -87,6 +87,8 @@ export const Verification = z
     notes: z.string().max(300).optional(),
     axeBefore: z.number().int().nonnegative(),
     axeAfter: z.number().int().nonnegative().optional(),
+    statsBefore: PageStats.optional(),
+    statsAfter: PageStats.optional(),
     before: Screenshot.optional(),
     after: Screenshot.optional(),
   })

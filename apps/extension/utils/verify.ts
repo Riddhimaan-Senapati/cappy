@@ -5,8 +5,10 @@ import {
   VerifyRequest,
   VerifyResponse,
   type Adaptation,
+  type PageStats,
 } from "@browser-agent/shared";
-import { AxeCount, AxeCountReply, ToContentMessage } from "./messages";
+import { AxeCount, AxeCountReply, PageStatsReply, PageStatsRequest, ToContentMessage } from "./messages";
+import { problemTotal } from "./page-stats";
 import { VERIFICATION_KEY, Verification } from "./state";
 import { next, type Verdict, type VerifyState } from "./verify-machine";
 
@@ -15,12 +17,22 @@ const AXE_TIMEOUT_MS = 3000;
 const SCREENSHOT_QUALITY = 60;
 const ROLLBACK_NOTE = "This change did not help, so the page was restored.";
 
-type Check = { verdict: Verdict; notes: string; axeAfter: number; after: string | undefined };
+type Check = {
+  verdict: Verdict;
+  notes: string;
+  axeAfter: number;
+  after: string | undefined;
+  statsAfter: PageStats | undefined;
+};
 
 export function judgeByIssues(axeBefore: number, axeAfter: number): Verdict {
   if (axeAfter < axeBefore) return "improved";
   if (axeAfter > axeBefore) return "worse";
   return "no_change";
+}
+
+export function judgeByStats(before: PageStats, after: PageStats): Verdict {
+  return judgeByIssues(problemTotal(before), problemTotal(after));
 }
 
 /**
@@ -36,9 +48,14 @@ export async function verifyAdaptation(
 ): Promise<void> {
   // Must be captured before the change lands, or the "before" shot shows the change.
   const before = await captureShot(tabId);
-  const axeBefore = (await axeCount(tabId)) ?? 0;
-
-  const record: Verification = { adaptationId: adaptation.id, state: "proposed", axeBefore, before };
+  const [axeBefore, statsBefore] = await Promise.all([axeCount(tabId), pageStats(tabId)]);
+  const record: Verification = {
+    adaptationId: adaptation.id,
+    state: "proposed",
+    axeBefore: axeBefore ?? 0,
+    before,
+    statsBefore,
+  };
   const commit = async (s: VerifyState, patch: Partial<Verification> = {}) => {
     Object.assign(record, patch);
     record.state = s.tag;
@@ -53,17 +70,23 @@ export async function verifyAdaptation(
   s = next(s, { type: "verify_started" });
   await commit(s);
 
-  let result = await check(tabId, adaptation, before, axeBefore);
+  let result = await check(tabId, adaptation, before, axeBefore ?? 0, statsBefore);
   for (;;) {
     s = next(s, { type: "verdict", verdict: result.verdict });
-    await commit(s, { verdict: result.verdict, notes: result.notes, axeAfter: result.axeAfter, after: result.after });
+    await commit(s, {
+      verdict: result.verdict,
+      notes: result.notes,
+      axeAfter: result.axeAfter,
+      after: result.after,
+      statsAfter: result.statsAfter,
+    });
     if (s.tag === "verified") return;
 
     await undoFn();
     if (s.tag === "retrying" && (await applyFn())) {
       s = next(next(s, { type: "retry_done" }), { type: "verify_started" });
       await commit(s);
-      result = await check(tabId, adaptation, before, axeBefore);
+      result = await check(tabId, adaptation, before, axeBefore ?? 0, statsBefore);
       continue;
     }
 
@@ -81,24 +104,61 @@ async function check(
   adaptation: Adaptation,
   before: string | undefined,
   axeBefore: number,
+  statsBefore: PageStats | undefined,
 ): Promise<Check> {
   await sleep(SETTLE_MS);
   const after = await captureShot(tabId);
   const axeAfter = (await axeCount(tabId)) ?? 0;
+  const statsAfter = await pageStats(tabId);
 
   if (before && after) {
-    const req = VerifyRequest.safeParse({ adaptation, before, after, axeBefore, axeAfter });
+    const req = VerifyRequest.safeParse({ adaptation, before, after, axeBefore, axeAfter, statsBefore, statsAfter });
     if (req.success) {
       const remote = await judgeRemote(req.data);
-      if (remote) return { verdict: remote.verdict, notes: remote.notes, axeAfter, after };
+      if (remote) return { verdict: remote.verdict, notes: remote.notes, axeAfter, after, statsAfter };
     }
+  }
+  if (statsBefore && statsAfter && problemTotal(statsBefore) !== problemTotal(statsAfter)) {
+    const from = problemTotal(statsBefore);
+    const to = problemTotal(statsAfter);
+    return {
+      verdict: judgeByStats(statsBefore, statsAfter),
+      notes: `Judged by measured problems (${from} to ${to}); the visual check was unavailable.`,
+      axeAfter,
+      after,
+      statsAfter,
+    };
   }
   return {
     verdict: judgeByIssues(axeBefore, axeAfter),
     notes: `Judged by issue count (${axeBefore} to ${axeAfter}); the visual check was unavailable.`,
     axeAfter,
     after,
+    statsAfter,
   };
+}
+
+async function pageStats(tabId: number): Promise<PageStats | undefined> {
+  const reply = chrome.tabs
+    .sendMessage(tabId, PageStatsRequest.parse({ type: "page-stats" }))
+    .then((raw: unknown) => {
+      const parsed = PageStatsReply.safeParse(raw);
+      return parsed.success ? parsed.data.stats : undefined;
+    })
+    .catch(() => undefined);
+  return withTimeout(reply, AXE_TIMEOUT_MS);
+}
+
+async function withTimeout<T>(work: Promise<T | undefined>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), ms);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function judgeRemote(req: VerifyRequest): Promise<VerifyResponse | undefined> {

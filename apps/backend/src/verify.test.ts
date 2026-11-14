@@ -89,3 +89,31 @@ describe("verifier helpers", () => {
     expect(VerifyRequest.safeParse(verifyBody(1, 0)).success).toBe(true);
   });
 });
+
+describe("stub verifier with measured page stats", () => {
+  const zero = {
+    inputsWithoutLabel: 0,
+    smallTargets: 0,
+    smallText: 0,
+    lowContrastText: 0,
+    imagesWithoutAlt: 0,
+    runningAnimations: 0,
+    visibleAdsOrPopups: 0,
+  };
+  const request = (extra: Record<string, unknown>) => VerifyRequest.parse({ ...verifyBody(3, 3), ...extra });
+
+  test("a falling problem total is improved even when axe is unchanged", async () => {
+    const res = await stubVerifier(request({ statsBefore: { ...zero, smallText: 12 }, statsAfter: zero }));
+    expect(res.verdict).toBe("improved");
+  });
+
+  test("a rising problem total is worse even when axe is unchanged", async () => {
+    const res = await stubVerifier(request({ statsBefore: zero, statsAfter: { ...zero, smallTargets: 2 } }));
+    expect(res.verdict).toBe("worse");
+  });
+
+  test("equal totals fall back to axe", async () => {
+    const res = await stubVerifier(request({ axeAfter: 1, statsBefore: zero, statsAfter: zero }));
+    expect(res.verdict).toBe("improved");
+  });
+});

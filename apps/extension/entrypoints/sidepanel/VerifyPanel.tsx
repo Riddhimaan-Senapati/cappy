@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { statChanges } from "../../utils/page-stats";
 import { Verification, VERIFICATION_KEY } from "../../utils/state";
 
 const STATE_LABELS: Record<Verification["state"], string> = {
@@ -58,6 +59,7 @@ export function VerifyPanel() {
 
   const v = verification;
   const shot = showBefore ? v.before : v.after;
+  const changes = v.statsBefore && v.statsAfter ? statChanges(v.statsBefore, v.statsAfter) : [];
 
   return (
     <section className="card" aria-labelledby="h-did-it-help">
@@ -75,6 +77,15 @@ export function VerifyPanel() {
       <p>
         <strong>Issues:</strong> {v.axeBefore} -&gt; {v.axeAfter ?? "pending"}
       </p>
+      {changes.length > 0 && (
+        <ul>
+          {changes.map((change) => (
+            <li key={change.label}>
+              {change.label} {change.before} → {change.after}
+            </li>
+          ))}
+        </ul>
+      )}
 
       <div className="row">
         <button

@@ -10,6 +10,7 @@ import { countViolations } from "../utils/axe";
 import { applyRuntimeBlocks } from "../utils/runtime-blocks";
 import { applyOps } from "../utils/apply-ops";
 import { buildSnapshot } from "../utils/snapshot";
+import { computePageStats } from "../utils/page-stats";
 
 const FILTER_ID = "adaptive-agent-filters";
 
@@ -191,6 +192,9 @@ export default defineContentScript({
           revertOps();
           undoOps = applyOps(msg.ops, snapshotMap);
           break;
+        case "page-stats":
+          sendResponse({ stats: computePageStats() });
+          break;
         case "axe-count":
           countViolations().then(
             (count) => sendResponse({ count }),
@@ -235,6 +239,7 @@ function buildOutline(): PageOutline {
     videos: document.querySelectorAll("video").length,
     canvases: document.querySelectorAll("canvas").length,
     elements: snapshot.elements,
+    stats: computePageStats(),
     text: buildPageText(document.body?.innerText ?? "", document.body?.textContent ?? ""),
   };
 }
