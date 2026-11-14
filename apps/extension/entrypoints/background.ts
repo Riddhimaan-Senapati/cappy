@@ -5,12 +5,25 @@ import {
   DEFAULT_BACKEND_URL,
   NeedId,
   matchesHost,
+  type Adaptation,
   type AdaptationId,
   type Profile,
 } from "@browser-agent/shared";
 import { colorFilterSvg, compileAdaptationCss } from "@browser-agent/blocks";
 import { Gesture, Message, PageReady, ToContentMessage, type OutlineReply } from "../utils/messages";
-import { Applied, AppliedMap, KEYS, LastResult, loadProfile, readParsed, saveProfile, setLast } from "../utils/state";
+import {
+  Applied,
+  AppliedMap,
+  KEYS,
+  LastResult,
+  Verification,
+  VERIFICATION_KEY,
+  loadProfile,
+  readParsed,
+  saveProfile,
+  setLast,
+} from "../utils/state";
+import { forget, lookup, readSaved, remember, updateSaved } from "../utils/saved-changes";
 import { startFriction } from "../utils/friction";
 import { buildRequestBody, parseOutlineReply, postRequest } from "../utils/request";
 import { reasonBadge } from "../utils/badge";
@@ -55,6 +68,15 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
   const profile = await loadProfile();
   if (profile.needs.length === 0) return notifyDone(tabId);
 
+  const host = hostOf(msg.url);
+  const saved = host ? lookup(await readSaved(), host, profile.version) : undefined;
+  if (saved) {
+    const restored = await applyResponse(tabId, msg.url, { kind: "adaptation", adaptation: saved }, profile, {
+      restored: true,
+    });
+    if (restored) return;
+  }
+
   const request = AdaptRequest.safeParse({ url: msg.url, outline: msg.outline, profile });
   if (!request.success) {
     await setLast({ status: "error", url: msg.url, message: "Page details were not valid" });
@@ -90,7 +112,9 @@ export async function applyResponse(
   url: string,
   response: AdaptResponse,
   profile: Profile,
+  options: { restored?: boolean } = {},
 ): Promise<boolean> {
+  const restored = options.restored === true;
   if (response.kind === "none") {
     await setLast({ status: "none", url, reason: response.reason });
     return false;
@@ -123,9 +147,11 @@ export async function applyResponse(
     return false;
   }
 
-  const reason = reasonBadge(adaptation.reason.text, adaptation.reason.needId, profile);
+  const badged = reasonBadge(adaptation.reason.text, adaptation.reason.needId, profile);
+  const reason = restored ? `Restored: ${badged}`.slice(0, 200) : badged;
 
   // Verification captures the "before" screenshot, so it has to own the apply call.
+  // A restored change was verified when it was first saved, so it skips the loop and the backend.
   const applyFn = async (): Promise<boolean> => {
     await clearTabCss(tabId);
     try {
@@ -151,6 +177,7 @@ export async function applyResponse(
       adaptationId: adaptation.id,
       reason,
       blocks: adaptation.blocks.map((b) => b.block),
+      restored,
     });
     return true;
   };
@@ -162,10 +189,31 @@ export async function applyResponse(
     await setLast({ status: "undone", url, adaptationId: adaptation.id });
   };
 
-  void verifyAdaptation(tabId, adaptation, applyFn, undoFn).catch((err: unknown) => {
-    console.error("verification failed", err);
-  });
+  if (restored) return applyFn();
+
+  void verifyAdaptation(tabId, adaptation, applyFn, undoFn)
+    .then(() => rememberIfVerified(url, adaptation, profile.version))
+    .catch((err: unknown) => {
+      console.error("verification failed", err);
+    });
   return true;
+}
+
+async function rememberIfVerified(url: string, adaptation: Adaptation, profileVersion: number): Promise<void> {
+  const record = await readParsed("session", VERIFICATION_KEY, Verification);
+  if (!record || record.adaptationId !== adaptation.id || record.state !== "verified") return;
+  const host = hostOf(url);
+  if (!host) return;
+  await updateSaved((saved) => remember(saved, host, adaptation, profileVersion));
+}
+
+function hostOf(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return undefined;
+  }
 }
 
 async function handleUserRequest(text: string): Promise<void> {
@@ -250,6 +298,9 @@ async function handleUndo(adaptationId: AdaptationId): Promise<void> {
   if (!entry) return;
   const [tabKey, { css }] = entry;
   const tabId = Number(tabKey);
+
+  const host = hostOf((await chrome.tabs.get(tabId).catch(() => undefined))?.url);
+  if (host) await updateSaved((saved) => forget(saved, host)).catch((err: unknown) => console.warn("forget failed", err));
 
   await chrome.scripting.removeCSS({ target: { tabId }, css }).catch((err: unknown) => {
     console.warn("removeCSS failed, tab may be gone", err);
