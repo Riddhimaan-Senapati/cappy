@@ -1,0 +1,62 @@
+import { randomUUID } from "node:crypto";
+import type { WebSocket } from "ws";
+import type { RunRequest, ServerMessage, TabToolName, TabTools, ToolResultMessage } from "../../shared/protocol.js";
+
+const TOOL_TIMEOUT_MS = 15_000;
+
+export class RunCancelledError extends Error {}
+
+export class AgentSession {
+  readonly profileUpdates: string[] = [];
+  blockedReason: string | null = null;
+  private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  private closed = false;
+
+  constructor(
+    private socket: WebSocket,
+    readonly request: RunRequest,
+  ) {}
+
+  send(message: ServerMessage) {
+    if (!this.closed) this.socket.send(JSON.stringify(message));
+  }
+
+  progress(text: string) {
+    this.send({ type: "progress", runId: this.request.runId, text });
+  }
+
+  warn(text: string) {
+    this.send({ type: "warning", runId: this.request.runId, text });
+  }
+
+  callTab<Name extends TabToolName>(name: Name, input: TabTools[Name]["input"]): Promise<TabTools[Name]["output"]> {
+    if (this.closed) return Promise.reject(new RunCancelledError("Extension disconnected"));
+    const callId = randomUUID();
+    this.send({ type: "tool", runId: this.request.runId, callId, name, input });
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(callId);
+        reject(new Error(`Tab tool ${name} timed out`));
+      }, TOOL_TIMEOUT_MS);
+      this.pending.set(callId, {
+        resolve: (value) => (clearTimeout(timer), resolve(value as TabTools[Name]["output"])),
+        reject: (error) => (clearTimeout(timer), reject(error)),
+      });
+    });
+  }
+
+  handleToolResult(message: ToolResultMessage) {
+    const waiter = this.pending.get(message.callId);
+    if (!waiter) return;
+    this.pending.delete(message.callId);
+    if (message.ok) waiter.resolve(message.result);
+    else waiter.reject(new Error(message.error ?? "Tab tool failed"));
+  }
+
+  close() {
+    this.closed = true;
+    for (const waiter of this.pending.values()) waiter.reject(new RunCancelledError("Extension disconnected"));
+    this.pending.clear();
+  }
+}

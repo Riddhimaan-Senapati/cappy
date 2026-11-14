@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Adaptive Browser Agent",
+  "version": "0.1.0",
+  "description": "Adapts every website to your needs.",
+  "permissions": ["sidePanel", "storage", "tabs", "activeTab", "scripting"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "dist/background.js", "type": "module" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Open adaptive agent" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["dist/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
