@@ -68,6 +68,32 @@ export function cssPath(element: Element): string {
   return parts.join(" > ");
 }
 
+const SAFE_ID = /^[A-Za-z][\w-]*$/;
+
+// Built without CSS escapes so the model can reuse it in CSS (the safety layer rejects backslashes).
+export function uniqueSelector(element: Element): string {
+  const parts: string[] = [];
+  let current: Element | null = element;
+  while (current && current !== document.documentElement) {
+    if (current.id && SAFE_ID.test(current.id)) {
+      parts.unshift(`#${current.id}`);
+      if (document.querySelectorAll(parts.join(" > ")).length === 1) return parts.join(" > ");
+      break;
+    }
+    const parent: Element | null = current.parentElement;
+    parts.unshift(parent ? `${current.tagName.toLowerCase()}:nth-child(${[...parent.children].indexOf(current) + 1})` : current.tagName.toLowerCase());
+    if (document.querySelectorAll(parts.join(" > ")).length === 1) return parts.join(" > ");
+    current = parent;
+  }
+  return parts.join(" > ");
+}
+
+export function describeElement(element: Element): string {
+  const name = element.getAttribute("aria-label") || (element as HTMLInputElement).placeholder || element.textContent?.replace(/\s+/g, " ").trim() || "";
+  const kind = element.matches("a[href]") ? "link" : element.matches("button, [role=button]") ? "button" : element.matches("input, textarea, select") ? "field" : element.matches("img") ? "image" : element.tagName.toLowerCase();
+  return name ? `${name.slice(0, 40)} · ${kind}` : kind;
+}
+
 export function accessibleName(element: Element): string {
   const references = (element.getAttribute("aria-labelledby") ?? "").split(/\s+/).filter(Boolean);
   const referencedText = references.map((id) => {
@@ -121,11 +147,14 @@ function effectiveBackground(element: Element): Rgba {
   return layers.reduceRight((bottom, top) => composite(top, bottom), [255, 255, 255, 1] as Rgba);
 }
 
-export function contrastRatio(element: Element): number {
+export function contrastInfo(element: Element): { ratio: number; color: string; background: string } {
+  const foreground = parseColor(getComputedStyle(element).color) ?? [0, 0, 0, 1];
   const background = effectiveBackground(element);
-  const foreground = parseColor(getComputedStyle(element).color);
-  if (!foreground) return Number.POSITIVE_INFINITY;
-  const backgroundLuminance = luminance(background);
-  const textLuminance = luminance(composite(foreground, background));
-  return (Math.max(backgroundLuminance, textLuminance) + 0.05) / (Math.min(backgroundLuminance, textLuminance) + 0.05);
+  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  const hex = ([r, g, b]: Rgba) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+  return { ratio: Math.round(((light + 0.05) / (dark + 0.05)) * 10) / 10, color: hex(foreground), background: hex(background) };
+}
+
+export function contrastRatio(element: Element): number {
+  return contrastInfo(element).ratio;
 }

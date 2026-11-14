@@ -4,19 +4,38 @@ export type Trigger = "chat" | "page_load";
 export type Tier = "fast" | "frontier";
 export type Routing = "auto" | Tier;
 
+export interface TargetElement {
+  selector: string;
+  label: string;
+  text: string;
+  styles?: Record<string, string>;
+}
+
+export interface ChoiceOption {
+  label: string;
+  request: string;
+}
+
 export interface RunRequest {
   type: "run";
   runId: string;
   trigger: Trigger;
   message: string;
+  provider?: string;
+  target?: TargetElement;
   routing: Routing;
   models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];
   profile: string[];
+  // Notes earlier sessions saved about navigating this hostname. Derived from page content, so untrusted.
+  siteSkill?: string[];
+  activity?: FrictionCount[];
   active: ActiveChange[];
   page: PageOutline;
   clientTime?: { iso: string; timeZone: string };
 }
+
+export type MemoryScope = "site" | "everywhere";
 
 export interface InspectedElement {
   tag: string;
@@ -26,11 +45,21 @@ export interface InspectedElement {
   attributes: Record<string, string>;
 }
 
+export interface ContrastIssue {
+  selector: string;
+  text: string;
+  color: string;
+  background: string;
+  ratio: number;
+}
+
 export interface ApplyOutcome {
   ok: boolean;
   error?: string;
   matched: Record<string, number>;
   waitingForSchedule?: boolean;
+  lowContrast?: ContrastIssue[];
+  replaced?: string[];
   before: PageStats;
   after: PageStats;
   note?: string;
@@ -58,6 +87,7 @@ export interface TabTools {
   use_site_control: { input: SiteControlInput; output: SiteControlOutcome };
   read_page: { input: Record<string, never>; output: PageOutline };
   inspect: { input: { selector: string }; output: { count: number; samples: InspectedElement[] } };
+  list_items: { input: { selector: string; keySelector: string | null }; output: { count: number; items: Array<{ key: string; text: string }> } };
   apply_change: { input: { change: Change }; output: ApplyOutcome };
   revert_change: { input: { id: string }; output: { ok: boolean } };
   screenshot: { input: Record<string, never>; output: { dataUrl: string } };
@@ -84,9 +114,11 @@ export interface ToolResultMessage {
 export type AgentEvent =
   | { type: "progress"; runId: string; text: string }
   | { type: "tier"; runId: string; tier: Tier; model: string }
-  | { type: "profile"; runId: string; lines: string[] }
+  | { type: "profile"; runId: string; lines: string[]; scope: MemoryScope }
+  | { type: "siteSkill"; runId: string; notes: string[] }
   | { type: "warning"; runId: string; text: string }
   | { type: "blocked"; runId: string; reason: string }
+  | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
   | { type: "done"; runId: string; reply: string }
   | { type: "error"; runId: string; message: string };
 
@@ -94,5 +126,90 @@ export interface PingMessage {
   type: "ping";
 }
 
-export type ClientMessage = RunRequest | ToolResultMessage | PingMessage;
-export type ServerMessage = ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models: Record<Tier, string>; available: string[] };
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  setup: "key" | "signin";
+  ready: boolean;
+  models?: Record<Tier, string>;
+  available?: string[];
+}
+
+export interface SetKeyMessage {
+  type: "setKey";
+  provider: string;
+  key: string | null;
+}
+
+export interface ListModelsMessage {
+  type: "listModels";
+  provider: string;
+}
+
+export interface SignInMessage {
+  type: "chatgptLogin";
+}
+
+export interface SignOutMessage {
+  type: "chatgptLogout";
+}
+
+// Friction the extension noticed: counts from the last few minutes, never page text.
+export type FrictionKind = "zoom-in" | "pinch-zoom" | "missed-click" | "rage-click";
+
+// Aggregated counts only. here/elsewhere/sites cover about the last 10 minutes; the rest are longer windows.
+export interface FrictionCount {
+  kind: FrictionKind;
+  here: number;
+  elsewhere: number;
+  sites: number;
+  hourHere: number;
+  sessionHere: number;
+  sessionElsewhere: number;
+  sessionSites: number;
+  totalHere: number;
+}
+
+
+export type FeedbackOutcome = "accepted-site" | "accepted-everywhere" | "accepted" | "dismissed" | "undone";
+
+export interface SuggestionFeedback {
+  text: string;
+  host: string;
+  outcome: FeedbackOutcome;
+  at: number;
+}
+
+// text is the request to run, phrased as the user would type it; memory is the lasting preference line to propose, or null for a one-off.
+export interface Suggestion {
+  text: string;
+  reason: string;
+  scope: MemoryScope;
+  memory: string | null;
+}
+
+export interface SuggestMessage {
+  type: "suggest";
+  requestId: string;
+  provider?: string;
+  models?: Partial<Record<Tier, string>>;
+  profile: string[];
+  applied: string[];
+  page: PageOutline;
+  host?: string;
+  friction?: FrictionCount[];
+  feedback?: SuggestionFeedback[];
+}
+
+export interface CancelMessage {
+  type: "cancel";
+  runId: string;
+}
+
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage | SuggestMessage;
+export type ServerMessage =
+  | ToolCallMessage
+  | AgentEvent
+  | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
+  | { type: "notice"; level: "info" | "error"; text: string }
+  | { type: "suggestion"; requestId: string; suggestion: Suggestion | null };

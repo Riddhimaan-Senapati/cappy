@@ -1,6 +1,6 @@
 import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
-import type { Routing, Tier } from "../../shared/protocol.js";
+import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier } from "../../shared/protocol.js";
 
 export interface Recipe {
   message: string;
@@ -8,59 +8,167 @@ export interface Recipe {
   at: number;
 }
 
+export interface RequestSession {
+  message: string;
+  reply: string;
+  outcome: "done" | "error";
+  thread?: string;
+  options?: { question: string; options: ChoiceOption[] };
+}
+
+export interface PendingSite {
+  host: string;
+  scope: MemoryScope;
+}
+
+export type FrictionCounts = Partial<Record<FrictionKind, number>>;
+
+// Counts per bucket start, then per host. Kept small on purpose: no raw events beyond the last two minutes.
+export interface ActivityStats {
+  buckets: Record<string, Record<string, FrictionCounts>>;
+  totals: Record<string, FrictionCounts>;
+}
+
+export interface FrictionEntry {
+  host: string;
+  kind: FrictionKind;
+  at: number;
+}
+
+export interface SiteSkill {
+  notes: string[];
+  updatedAt: number;
+}
+
+export interface SavedCommand {
+  id: string;
+  name: string;
+  prompt: string;
+  everywhere: boolean;
+  appliedOrigins: string[];
+  createdAt: number;
+}
+
+export interface CameraSettings {
+  enabled: boolean;
+  handScroll: boolean;
+  headScroll: boolean;
+  pointer: boolean;
+  swipeNav?: boolean;
+  speakAfterSelect?: boolean;
+  dwellMs: number;
+}
+
 export interface StoredState {
   profile: string[];
   pendingMemory: string[];
+  pendingSites: Record<string, PendingSite>;
+  siteSkills: Record<string, SiteSkill>;
+  frictionLog: FrictionEntry[];
+  activity: ActivityStats;
+  nudgedAt: Record<string, number>;
+  suggestionFeedback: SuggestionFeedback[];
   history: ChatTurn[];
   submittedRequests: string[];
+  requestSessions: RequestSession[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
   recipes: Record<string, Recipe>;
+  commands: SavedCommand[];
+  camera: CameraSettings;
   paused: boolean;
   proactive: boolean;
   floatingButton: boolean;
   routing: Routing;
-  modelOverrides: Partial<Record<Tier, string>>;
+  provider: string | null;
+  modelChoices: Record<string, Partial<Record<Tier, string>>>;
   serverUrl: string;
-  askBeforeRemember: boolean;
   speakReplies: boolean;
   ttsVoice: string;
   ttsRate: number;
   voiceAutoSend: boolean;
   voiceLang: string;
+  voiceProvider: "chrome" | "openai" | "gemini";
+  openAIVoiceVerified: boolean;
+  geminiVoiceVerified: boolean;
 }
 
 export const DEFAULTS: StoredState = {
   profile: [],
   pendingMemory: [],
+  pendingSites: {},
+  siteSkills: {},
+  frictionLog: [],
+  activity: { buckets: {}, totals: {} },
+  nudgedAt: {},
+  suggestionFeedback: [],
   history: [],
   submittedRequests: [],
+  requestSessions: [],
   globalChanges: [],
   siteChanges: {},
   recipes: {},
+  commands: [],
+  camera: { enabled: false, handScroll: true, headScroll: false, pointer: true, swipeNav: true, dwellMs: 0 },
   paused: false,
   proactive: true,
   floatingButton: true,
   routing: "auto",
-  modelOverrides: {},
+  provider: null,
+  modelChoices: {},
   serverUrl: "ws://localhost:8787/agent",
-  askBeforeRemember: false,
   speakReplies: false,
   ttsVoice: "",
   ttsRate: 1,
   voiceAutoSend: true,
   voiceLang: "",
+  voiceProvider: "chrome",
+  openAIVoiceVerified: false,
+  geminiVoiceVerified: false,
 };
 
 const MAX_RECIPES = 60;
+const MAX_SITE_NOTES = 20;
+const MAX_SKILL_SITES = 100;
 
+// Newest notes win when a site fills up, and the least recently updated sites drop off first.
+export async function saveSiteNotes(host: string, notes: string[]) {
+  const { siteSkills } = await load();
+  const key = host.toLowerCase();
+  const existing = siteSkills[key]?.notes ?? [];
+  const known = new Set(existing.map((note) => note.toLowerCase()));
+  const merged = [...existing, ...notes.filter((note) => !known.has(note.toLowerCase()))].slice(-MAX_SITE_NOTES);
+  const next = { ...siteSkills, [key]: { notes: merged, updatedAt: Date.now() } };
+  const hosts = Object.keys(next).sort((a, b) => next[a].updatedAt - next[b].updatedAt);
+  for (const old of hosts.slice(0, Math.max(0, hosts.length - MAX_SKILL_SITES))) delete next[old];
+  await save({ siteSkills: next });
+}
+
+export async function forgetSiteNotes(host: string) {
+  const { siteSkills } = await load();
+  const next = { ...siteSkills };
+  delete next[host.toLowerCase()];
+  await save({ siteSkills: next });
+}
+
+// A content script left behind by a reloaded extension loses access to chrome.*; treat that as empty, not as a crash.
 export async function load(): Promise<StoredState> {
-  const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
-  return { ...DEFAULTS, ...stored } as StoredState;
+  try {
+    const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
+    const state = { ...DEFAULTS, ...stored } as StoredState;
+    if ((state.voiceProvider === "openai" && !state.openAIVoiceVerified) || (state.voiceProvider === "gemini" && !state.geminiVoiceVerified)) state.voiceProvider = "chrome";
+    return state;
+  } catch {
+    return { ...DEFAULTS };
+  }
 }
 
 export async function save(patch: Partial<StoredState>) {
-  await chrome.storage.local.set(patch);
+  try {
+    await chrome.storage.local.set(patch);
+  } catch {
+    // extension was reloaded; the new instance owns storage now
+  }
 }
 
 function requestHistory(state: Pick<StoredState, "history" | "submittedRequests">): string[] {
@@ -71,16 +179,47 @@ function requestHistory(state: Pick<StoredState, "history" | "submittedRequests"
 
 let requestWrite: Promise<void> = Promise.resolve();
 
-export function recordSubmittedRequest(message: string): Promise<void> {
-  const write = requestWrite.then(async () => {
-    const state = await load();
-    await save({ submittedRequests: [...requestHistory(state), message] });
-  });
+function updateRequestHistory(update: (state: StoredState) => Partial<StoredState>) {
+  const write = requestWrite.then(async () => save(update(await load())));
   requestWrite = write.catch(() => undefined);
   return write;
 }
 
+export function recordSubmittedRequest(message: string) {
+  return updateRequestHistory((state) => ({ submittedRequests: [...requestHistory(state), message] }));
+}
+
+export function recordRequestSession(session: RequestSession) {
+  return updateRequestHistory((state) => {
+    if (!requestHistory(state).some((request) => normalizeRequest(request) === normalizeRequest(session.message))) return {};
+    return { requestSessions: [...state.requestSessions, session] };
+  });
+}
+
+export function findRequestSessions(state: StoredState, message: string): RequestSession[] {
+  const target = normalizeRequest(message);
+  const sessions = state.requestSessions.filter((session) => normalizeRequest(session.thread ?? session.message) === target);
+  if (sessions.length) return sessions;
+  const index = state.history.findLastIndex((turn) => turn.role === "user" && normalizeRequest(turn.text) === target);
+  const next = state.history[index + 1];
+  return index >= 0 && next?.role === "assistant" ? [{ message, reply: next.text, outcome: "done" }] : [];
+}
+
 const normalizeRequest = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+
+export function removeSubmittedRequest(message: string): Promise<void> {
+  const target = normalizeRequest(message);
+  return updateRequestHistory((state) => ({
+    submittedRequests: requestHistory(state).filter((request) => normalizeRequest(request) !== target),
+    history: state.history.filter((turn) => turn.role !== "user" || normalizeRequest(turn.text) !== target),
+    requestSessions: state.requestSessions.filter((session) => normalizeRequest(session.thread ?? session.message) !== target && normalizeRequest(session.message) !== target),
+  }));
+}
+
+export async function deleteRequest(message: string) {
+  const response = await chrome.runtime.sendMessage({ kind: "deleteRequest", message });
+  if (!response?.ok) throw new Error("Could not delete the saved request.");
+}
 
 export function suggestRequests(state: Pick<StoredState, "history" | "submittedRequests">, input: string): string[] {
   const query = normalizeRequest(input);

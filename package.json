@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "server": "bun --watch server/index.ts",
-    "build:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts offscreen=extension/src/offscreen/voice.ts mic=extension/src/mic.ts --bundle --alias:axe-core=axe-core/axe.min.js --format=esm --target=chrome120 --outdir=extension/dist",
-    "watch:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts offscreen=extension/src/offscreen/voice.ts mic=extension/src/mic.ts --bundle --alias:axe-core=axe-core/axe.min.js --format=esm --target=chrome120 --outdir=extension/dist --watch",
+    "build:ext": "bun run setup:vendor && esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts offscreen=extension/src/offscreen/voice.ts mic=extension/src/mic.ts camera=extension/src/camera/camera.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist && esbuild content=extension/src/content/index.ts --bundle --alias:axe-core=axe-core/axe.min.js --format=iife --target=chrome120 --outdir=extension/dist",
+    "watch:ext": "bun run setup:vendor && concurrently -r \"esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts offscreen=extension/src/offscreen/voice.ts mic=extension/src/mic.ts camera=extension/src/camera/camera.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch\" \"esbuild content=extension/src/content/index.ts --bundle --alias:axe-core=axe-core/axe.min.js --format=iife --target=chrome120 --outdir=extension/dist --watch\"",
     "dev": "bun run build:ext && concurrently -k -n server,ext \"bun run server\" \"bun run watch:ext\"",
     "typecheck": "tsc --noEmit",
     "chatgpt:login": "bun server/auth/chatgpt.ts",
@@ -14,11 +14,13 @@
     "e2e": "bun scripts/e2e/run-all.ts",
     "e2e:gate": "bun scripts/e2e/gate.ts",
     "e2e:injection": "bun scripts/e2e/injection.ts",
-    "e2e:replay": "bun scripts/e2e/replay.ts"
+    "e2e:replay": "bun scripts/e2e/replay.ts",
+    "setup:vendor": "node scripts/setup-vendor.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "@google/genai": "^3.3.0",
+    "@mediapipe/tasks-vision": "^1.2.3",
     "axe-core": "^4.14.0",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",

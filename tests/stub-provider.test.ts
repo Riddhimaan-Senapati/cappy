@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { validateChange, type PageOutline } from "../shared/adaptation.js";
 import { planStubRun, type StubCall } from "../server/agent/providers/stub.js";
-import { createProvider } from "../server/agent/providers/index.js";
+import { describeProviders, resolveProvider } from "../server/agent/providers/index.js";
 
 const page = (extra: Partial<PageOutline> = {}): PageOutline => ({
   url: "http://localhost:8787/demo/campus.html",
@@ -67,13 +67,21 @@ describe("stub provider routing", () => {
     const plan = chat("I'm red-green colorblind");
     const [change] = applied(plan.calls);
     assert.deepEqual(change?.block, { name: "colorblind", type: "deuteranopia", scope: "media" });
-    assert.deepEqual(plan.calls.at(-1), { name: "remember", input: { lines: ["Red-green colorblind"] } });
+    assert.deepEqual(plan.calls.at(-1), { name: "remember", input: { lines: ["Red-green colorblind"], scope: "everywhere" } });
+  });
+
+  it("offers options instead of guessing on a vague request", () => {
+    const plan = chat("make this easier to read");
+    assert.equal(plan.calls.length, 1);
+    const [call] = plan.calls;
+    assert.equal(call.name, "offer_options");
+    assert.deepEqual(call.name === "offer_options" ? call.input.options.map(({ label }) => label) : [], ["Larger text", "Dark mode", "Hide clutter"]);
   });
 
   it("remembers preference statements without applying a change", () => {
     const plan = chat("I prefer high contrast menus");
     assert.deepEqual(applied(plan.calls), []);
-    assert.deepEqual(plan.calls, [{ name: "remember", input: { lines: ["I prefer high contrast menus"] } }]);
+    assert.deepEqual(plan.calls, [{ name: "remember", input: { lines: ["I prefer high contrast menus"], scope: "everywhere" } }]);
   });
 
   it("applies larger text on page_load when the profile asks for it", () => {
@@ -109,24 +117,23 @@ describe("provider registry", () => {
     const previous = process.env.LLM_PROVIDER;
     process.env.LLM_PROVIDER = "stub";
     try {
-      const provider = createProvider();
-      assert.equal(provider.name, "stub");
-      assert.deepEqual(provider.models, { fast: "stub-fast", frontier: "stub-frontier" });
+      const provider = resolveProvider();
+      assert.equal(provider?.name, "stub");
+      assert.deepEqual(provider?.models, { fast: "stub-fast", frontier: "stub-frontier" });
     } finally {
       if (previous === undefined) delete process.env.LLM_PROVIDER;
       else process.env.LLM_PROVIDER = previous;
     }
   });
 
-  it("keeps gemini as the default and still requires its key", () => {
-    const saved = { provider: process.env.LLM_PROVIDER, key: process.env.GEMINI_API_KEY };
+  it("never offers the stub in settings unless it was requested", async () => {
+    const previous = process.env.LLM_PROVIDER;
     delete process.env.LLM_PROVIDER;
-    delete process.env.GEMINI_API_KEY;
     try {
-      assert.throws(() => createProvider(), /needs GEMINI_API_KEY/);
+      const ids = (await describeProviders()).map(({ id }) => id);
+      assert.deepEqual(ids, ["chatgpt-signin", "anthropic-key", "openai-key", "gemini"]);
     } finally {
-      if (saved.provider !== undefined) process.env.LLM_PROVIDER = saved.provider;
-      if (saved.key !== undefined) process.env.GEMINI_API_KEY = saved.key;
+      if (previous !== undefined) process.env.LLM_PROVIDER = previous;
     }
   });
 });

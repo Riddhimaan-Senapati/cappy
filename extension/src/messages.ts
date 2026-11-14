@@ -1,4 +1,5 @@
-import type { Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { PageOutline } from "../../shared/adaptation.js";
+import type { ChoiceOption, FrictionCount, FrictionKind, MemoryScope, ProviderInfo, Routing, TabToolName, TargetElement, Tier, Trigger } from "../../shared/protocol.js";
 import type { VoiceEvent } from "./voice/core.js";
 
 export interface AppliedSummary {
@@ -9,11 +10,14 @@ export interface AppliedSummary {
 }
 
 export type UiEvent =
-  | { type: "start"; runId: string; trigger: Trigger; message: string }
+  | { type: "start"; runId: string; trigger: Trigger; message: string; thread?: string }
+  | { type: "queued"; runId: string; message: string; thread?: string }
+  | { type: "cancelled"; runId: string; reason?: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
-  | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[] }
+  | { type: "options"; runId: string; question: string; options: ChoiceOption[] }
+  | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[]; host?: string; scope?: MemoryScope }
   | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
   | { type: "error"; runId: string; message: string };
 
@@ -25,11 +29,12 @@ export type ContentRequest =
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
   | { kind: "startVoice" }
-  | { kind: "frictionSaved"; origin: string }
-  | { kind: "frictionPrompt"; origin: string }
+  | { kind: "targetContextElement" }
+  | { kind: "pickElement" }
   | { kind: "ui"; event: UiEvent }
   | { kind: "readAloud" }
-  | { kind: "voiceEvent"; event: VoiceEvent };
+  | { kind: "voiceEvent"; event: VoiceEvent }
+  | { kind: "frictionEvent"; event: FrictionKind };
 
 export type TtsSource = "reply" | "announce" | "page" | "test";
 
@@ -45,22 +50,33 @@ export type ContentResponse = { ok: true; result: unknown } | { ok: false; error
 export interface StatusInfo {
   connected: boolean;
   busy: boolean;
+  providers?: ProviderInfo[];
+  activeProvider?: string | null;
   provider?: string;
   models?: Record<Tier, string>;
   available?: string[];
+  notice?: { level: "info" | "error"; text: string };
   error?: string;
 }
 
 export type BackgroundRequest =
-  | { kind: "runChat"; message: string; fresh: boolean }
-  | { kind: "frictionAccept" }
+  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement }
+  | { kind: "deleteRequest"; message: string }
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
+  | { kind: "verifyVoice"; key: string; provider?: "openai" | "gemini" }
   | { kind: "status" }
-  | { kind: "voiceStart"; lang: string }
+  | { kind: "setKey"; provider: string; key: string | null }
+  | { kind: "chatgptLogin" }
+  | { kind: "chatgptLogout" }
+  | { kind: "stopRun" }
+  | { kind: "suggest"; page: PageOutline; applied: string[]; friction?: FrictionCount[] }
+  | { kind: "dequeue"; runId: string }
+  | { kind: "voiceStart"; lang: string; hold?: boolean }
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }
+  | { kind: "voicePermissionGranted" }
   | { kind: "recognitionEvent"; event: unknown };
 
 export type DebugPortMessage =
@@ -68,6 +84,6 @@ export type DebugPortMessage =
   | { type: "event"; tabId: number; at: number; event: UiEvent }
   | { type: "tool"; tabId: number; at: number; name: string; ms: number; ok: boolean; detail: string };
 
-export type DebugPortRequest = { type: "chat"; message: string };
+export type DebugPortRequest = { type: "chat"; message: string; thread?: string };
 
-export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Frontier" };
+export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Pro" };

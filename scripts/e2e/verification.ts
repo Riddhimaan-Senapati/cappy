@@ -42,29 +42,38 @@ await runE2E("verification", async ({ browser }) => {
   }, tabId);
   assert.equal(active.find((change) => change.id === base.id)?.css, base.css);
 
-  await demo.bringToFront();
-  await worker.evaluate(() => chrome.storage.local.set({ askBeforeRemember: true }));
-  await worker.evaluate(async (id) => {
-    await chrome.tabs.setZoom(id, 1.1);
-    await chrome.tabs.setZoom(id, 1.25);
-  }, tabId);
-  await waitFor("the larger-text suggestion", () => shadowTextVisible(demo, "Make text bigger on every site?"));
-  await clickShadowButton(demo, "Yes, remember");
-  await waitFor("the saved larger-text preference", () => worker.evaluate(async () => {
-    const { profile } = await chrome.storage.local.get("profile");
-    return Array.isArray(profile) && profile.includes("Prefers larger text");
-  }));
-
-  await worker.evaluate(async (id) => {
-    await chrome.storage.local.set({ askBeforeRemember: false, profile: [] });
+  const zoomTwice = () => worker.evaluate(async (id) => {
     await chrome.tabs.setZoom(id, 1);
     await chrome.tabs.setZoom(id, 1.1);
     await chrome.tabs.setZoom(id, 1.25);
   }, tabId);
-  await waitFor("automatic zoom memory", () => shadowTextVisible(demo, "Remembered that you prefer larger text on every site."));
-  await waitFor("larger font after repeat zoom", async () => (await fontSizeOf(demo)) === 21.6);
+  const feedback = () => worker.evaluate(async () => {
+    const { suggestionFeedback = [] } = await chrome.storage.local.get("suggestionFeedback") as { suggestionFeedback?: Array<{ outcome: string }> };
+    return suggestionFeedback.map(({ outcome }) => outcome);
+  });
 
+  await demo.bringToFront();
+  await zoomTwice();
+  await waitFor("the noticed-friction suggestion chip", () => shadowTextVisible(demo, "You zoomed in 2 times"));
+  await clickShadowButton(demo, "Do it");
+  await waitFor("larger text from the accepted suggestion", async () => (await fontSizeOf(demo)) > 18);
+  await waitFor("the scope prompt for the preference", () => shadowTextVisible(demo, "Save this preference? Prefers larger text"));
+  await clickShadowButton(demo, "All sites");
+  await waitFor("the saved larger-text preference", () => worker.evaluate(async () => {
+    const { profile } = await chrome.storage.local.get("profile");
+    return Array.isArray(profile) && profile.includes("Prefers larger text");
+  }));
+  assert.deepEqual(await feedback(), ["accepted"]);
+
+  await worker.evaluate(() => chrome.storage.local.set({ profile: [], pendingMemory: [], pendingSites: {}, frictionLog: [], nudgedAt: {} }));
+  await worker.evaluate((id) => chrome.tabs.sendMessage(id, { kind: "tool", name: "revert_change", input: { id: "bigger-text" } }), tabId);
+  await waitFor("the original font size before the second round", async () => (await fontSizeOf(demo)) === 18);
+  await zoomTwice();
+  await waitFor("the suggestion chip again", () => shadowTextVisible(demo, "Do it"));
+  await clickShadowButton(demo, "Do it");
+  await waitFor("the combined undo and scope prompt", () => shadowTextVisible(demo, "Save this preference? Prefers larger text"));
   await clickShadowButton(demo, "Undo");
-  await waitFor("the original font size after undo", async () => (await fontSizeOf(demo)) === 18);
+  await waitFor("the original font size after a quick undo", async () => (await fontSizeOf(demo)) === 18);
+  await waitFor("the quick undo recorded as feedback", async () => (await feedback()).includes("undone"));
   assert.equal(await worker.evaluate((id) => chrome.tabs.getZoom(id), tabId), 1.25);
 });

@@ -8,6 +8,8 @@ export interface VoiceState {
 export type VoiceEvent =
   | { type: "listening" }
   | { type: "interim"; text: string }
+  | { type: "pause"; ms: number }
+  | { type: "resume" }
   | { type: "final"; text: string }
   | { type: "error"; error: string }
   | { type: "ended" };
@@ -36,6 +38,8 @@ export function reduceVoice(state: VoiceState, input: VoiceInput): VoiceState {
       return state.phase === "error" ? state : VOICE_IDLE;
     case "interim":
     case "final":
+    case "pause":
+    case "resume":
       return state;
   }
 }
@@ -50,7 +54,11 @@ export function parseVoiceEvent(value: unknown): VoiceEvent | null {
   switch (record.type) {
     case "listening":
     case "ended":
+    case "resume":
       return { type: record.type };
+    case "pause":
+      if (typeof record.ms !== "number" || !Number.isFinite(record.ms) || record.ms < 0 || record.ms > 10_000) return null;
+      return { type: "pause", ms: record.ms };
     case "interim":
     case "final":
       if (typeof record.text !== "string") return null;
@@ -65,20 +73,30 @@ export function parseVoiceEvent(value: unknown): VoiceEvent | null {
 
 export function voiceErrorText(error: string): string {
   switch (error) {
+    case "microphone-setup":
+      return "Allow microphone access in Chrome, then try again.";
     case "not-allowed":
-      return "Microphone access is blocked. A setup tab opened; allow the microphone there, then try again.";
+      return "Microphone access is blocked for Adaptive Browser Agent. Check Chrome and your system microphone permissions.";
     case "service-not-allowed":
       return "Chrome's speech service is turned off for this browser.";
     case "aborted":
       return "Voice input stopped.";
     case "no-speech":
       return "Didn't hear anything. Try again.";
+    case "microphone-unavailable":
+      return "Chrome found a microphone but could not open it. Check your system microphone settings and try again.";
     case "audio-capture":
       return "No microphone was found.";
     case "network":
       return "The speech service could not be reached. Check your connection.";
     case "language-not-supported":
       return "Speech recognition does not support this language yet.";
+    case "gemini-audio":
+      return "Gemini transcription failed. Check the Gemini API key and local server.";
+    case "openai-audio":
+      return "OpenAI audio failed. Check the OpenAI API key and local server.";
+    case "start-failed":
+      return "Could not start voice input. Check microphone access in Settings and try again.";
     case "unsupported":
       return "Voice input is not supported in this browser.";
     default:

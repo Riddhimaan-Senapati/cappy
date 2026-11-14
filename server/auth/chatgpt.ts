@@ -26,9 +26,9 @@ export interface ChatGptCredentials {
   subject: string;
   client_id: string;
   ext_agent_host_id: string;
-  id_token: string;
-  access_token: string;
-  refresh_token: string;
+  id_token?: string;
+  access_token?: string;
+  refresh_token?: string;
   token_type: string;
   expires_in: number;
   scopes: string[];
@@ -45,6 +45,18 @@ interface TokenResponse {
 }
 
 const base64url = (buffer: Buffer) => buffer.toString("base64url");
+
+export function isSignedIn(): boolean {
+  return Boolean(readCredentials()?.refresh_token);
+}
+
+// Keeps the issued client_id and host id so the next sign-in reuses the same registration, as OpenAI's docs ask.
+export function signOut() {
+  const current = readCredentials();
+  if (!current) return;
+  const { access_token: _access, refresh_token: _refresh, id_token: _id, ...registration } = current;
+  writeCredentials({ ...registration, scopes: [], expires_in: 0, saved_at: new Date().toISOString() });
+}
 
 export function readCredentials(): ChatGptCredentials | null {
   if (!existsSync(CREDENTIALS_PATH)) return null;
@@ -84,20 +96,22 @@ let refreshing: Promise<ChatGptCredentials> | null = null;
 
 export async function getAccessToken(): Promise<string> {
   const credentials = readCredentials();
-  if (!credentials) throw new Error("Not signed in to ChatGPT. Run: npm run chatgpt:login");
+  if (!credentials?.access_token || !credentials.refresh_token) throw new Error("Not signed in to ChatGPT. Sign in from the extension settings.");
   const expiresAt = Date.parse(credentials.saved_at) + credentials.expires_in * 1000;
   if (Date.now() < expiresAt - REFRESH_MARGIN_MS) return credentials.access_token;
-  return (await refreshCredentials(credentials)).access_token;
+  const refreshed = await refreshCredentials(credentials);
+  if (!refreshed.access_token) throw new Error("ChatGPT did not return an access token. Sign in again from the extension settings.");
+  return refreshed.access_token;
 }
 
 export function refreshCredentials(current = readCredentials()): Promise<ChatGptCredentials> {
-  if (!current) return Promise.reject(new Error("Not signed in to ChatGPT. Run: npm run chatgpt:login"));
+  if (!current?.refresh_token) return Promise.reject(new Error("Not signed in to ChatGPT. Sign in from the extension settings."));
   refreshing ??= (async () => {
     try {
       const token = await postToken({
         grant_type: "refresh_token",
         client_id: current.client_id,
-        refresh_token: current.refresh_token,
+        refresh_token: current.refresh_token!,
         resource: RESOURCE,
       });
       const next: ChatGptCredentials = {
@@ -125,7 +139,7 @@ function openBrowser(url: string) {
   spawn(command, args, { stdio: "ignore", detached: true }).unref();
 }
 
-export async function login(): Promise<ChatGptCredentials> {
+export async function login({ log = true } = {}): Promise<ChatGptCredentials> {
   const existing = readCredentials();
   const hostId = existing?.ext_agent_host_id ?? `urn:uuid:${randomUUID()}`;
   const clientId = existing?.client_id;
@@ -147,7 +161,7 @@ export async function login(): Promise<ChatGptCredentials> {
     code_challenge: challenge,
   });
   if (clientId) {
-    params.set("id_token_hint", existing!.id_token);
+    if (existing!.id_token) params.set("id_token_hint", existing!.id_token);
     if (existing!.email) params.set("login_hint", existing!.email);
   } else {
     params.set("agent_name_hint", AGENT_NAME);
@@ -164,7 +178,7 @@ export async function login(): Promise<ChatGptCredentials> {
     server.on("error", reject);
     server.listen(CALLBACK_PORT, "127.0.0.1", () => {
       const url = `${AUTHORIZE_URL}?${params}`;
-      console.log(`Opening your browser to sign in with ChatGPT.\nIf it does not open, visit:\n${url}\n`);
+      if (log) console.log(`Opening your browser to sign in with ChatGPT.\nIf it does not open, visit:\n${url}\n`);
       openBrowser(url);
     });
   });

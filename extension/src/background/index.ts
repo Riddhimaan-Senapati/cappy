@@ -1,13 +1,16 @@
+import { requestAudio } from "../voice/audio-api.js";
+import type { TargetElement } from "../../../shared/protocol.js";
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
-import { load, recordSubmittedRequest } from "../storage.js";
+import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, type RequestSession } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
-import { acceptFriction, registerFriction } from "./friction.js";
+import { registerFriction } from "./friction.js";
 import { registerTts } from "./tts.js";
 
 registerTts();
 registerFriction();
 
+const sessionRequests = new Map<string, { message: string; thread?: string; options?: RequestSession["options"] }>();
 const debugPorts = new Set<chrome.runtime.Port>();
 
 function broadcast(message: DebugPortMessage) {
@@ -16,6 +19,20 @@ function broadcast(message: DebugPortMessage) {
 
 const agent = new AgentClient({
   event(tabId: number, event: UiEvent) {
+    if (event.type === "start" && event.trigger === "chat") sessionRequests.set(event.runId, { message: event.message, thread: event.thread });
+    if (event.type === "cancelled") sessionRequests.delete(event.runId);
+    if (event.type === "options") {
+      const request = sessionRequests.get(event.runId);
+      if (request) request.options = { question: event.question, options: event.options };
+    }
+    if (event.type === "done" || event.type === "error") {
+      const message = sessionRequests.get(event.runId);
+      sessionRequests.delete(event.runId);
+      if (message !== undefined) {
+        void recordRequestSession({ ...message, reply: event.type === "done" ? event.reply : event.message, outcome: event.type })
+          .catch(() => console.warn("Could not save request session history."));
+      }
+    }
     void chrome.tabs.sendMessage(tabId, { kind: "ui", event }).catch(() => undefined);
     broadcast({ type: "event", tabId, at: Date.now(), event });
   },
@@ -32,20 +49,48 @@ async function activeTab() {
   return tab;
 }
 
-async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean) {
+const CONTENT_SCRIPT = "dist/content.js";
+
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement) {
   if (!message.trim()) return;
   await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
-  if (tab) await agent.startRun(tab, "chat", message, fresh);
+  if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target });
+}
+
+async function injectContent(tabId: number) {
+  await chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT] });
 }
 
 async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
   if (!tab?.id) return;
   try {
     await sendToTab(tab.id, { kind: "toggleSpotlight" });
+    return;
+  } catch {
+    // tabs opened before the extension was (re)loaded have no content script yet
+  }
+  try {
+    await injectContent(tab.id);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await sendToTab(tab.id, { kind: "toggleSpotlight" });
   } catch {
     await chrome.action.openPopup().catch(() => undefined);
   }
 }
+
+// An earlier version made the toolbar icon open the side panel, and Chrome persists that choice.
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => undefined);
+
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "adapt-element" && tab?.id) void sendToTab(tab.id, { kind: "targetContextElement" }).catch(() => undefined);
+});
+
+chrome.runtime.onInstalled.addListener(async () => {
+  chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Adaptive Agent", contexts: ["all"] }, () => void chrome.runtime.lastError);
+  for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {
+    if (tab.id) void injectContent(tab.id).catch(() => undefined);
+  }
+});
 
 chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command === "toggle-spotlight") await toggleSpotlight(tab ?? (await activeTab()));
@@ -59,9 +104,12 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   }
 });
 
-async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string) {
+// A site with its own saved changes was already adapted without a model call. Global changes alone do not count,
+// since cross-site preferences such as a content filter still need a site-specific implementation here.
+async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restored: number) {
   const state = await load();
-  if (!state.proactive || state.paused || !state.profile.length || !tab.id) return;
+  const adaptedHere = restored > 0 && (state.siteChanges[origin]?.length ?? 0) > 0;
+  if (!state.proactive || state.paused || !state.profile.length || adaptedHere || !tab.id) return;
   const key = JSON.stringify([tab.id, origin, state.profile]);
   const { proactiveSeen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
   if (proactiveSeen.includes(key)) return;
@@ -72,16 +120,20 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string) {
 }
 
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
-  if (handleVoiceRequest(request, sender)) return false;
+  if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
     case "runChat":
-      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh).finally(() => sendResponse());
+      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt, request.thread, request.target).finally(() => sendResponse());
       return !!sender.tab;
-    case "frictionAccept":
-      if (sender.tab) void acceptFriction().catch(() => undefined);
-      break;
+    case "deleteRequest":
+      if (typeof request.message !== "string") return false;
+      void removeSubmittedRequest(request.message).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+      return true;
     case "pageReady":
-      if (sender.tab) void maybeRunProactively(sender.tab, request.origin);
+      if (sender.tab) {
+        void agent.runEverywhereCommands(sender.tab, request.origin);
+        void maybeRunProactively(sender.tab, request.origin, request.restored);
+      }
       break;
     case "openDebug":
       if (sender.tab?.id) void chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => undefined);
@@ -89,9 +141,35 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "openShortcuts":
       void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
       break;
-    case "status":
-      void agent.ensureConnected().catch(() => undefined).finally(() => sendResponse(agent.status));
+    case "verifyVoice":
+      if (sender.id !== chrome.runtime.id || typeof request.key !== "string" || request.key.length > 4096) return false;
+      void requestAudio("verify", JSON.stringify(request.key ? { key: request.key } : {}), "application/json", AbortSignal.timeout(28_000), request.provider)
+        .then(() => sendResponse({ ok: true }), (error: Error) => sendResponse({
+          ok: false,
+          error: error instanceof TypeError ? "Could not reach the local audio server. Check that it is running." : error.message,
+        }));
       return true;
+    case "status":
+      void agent.ensureConnected().catch(() => undefined).then(() => agent.getStatus()).then(sendResponse);
+      return true;
+    case "setKey":
+      void agent.setKey(request.provider, request.key).catch(() => undefined);
+      break;
+    case "chatgptLogin":
+      void agent.signIn().catch(() => undefined);
+      break;
+    case "suggest":
+      void agent.suggest(request.page, request.applied, request.friction).then(sendResponse);
+      return true;
+    case "stopRun":
+      if (sender.tab?.id) agent.stopRun(sender.tab.id);
+      break;
+    case "dequeue":
+      if (sender.tab?.id) agent.dequeue(sender.tab.id, request.runId);
+      break;
+    case "chatgptLogout":
+      void agent.signOut().catch(() => undefined);
+      break;
   }
   return false;
 });
@@ -99,12 +177,16 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== "debug") return;
   debugPorts.add(port);
-  port.postMessage({ type: "status", status: agent.status } satisfies DebugPortMessage);
+  void agent.getStatus().then((status) => port.postMessage({ type: "status", status } satisfies DebugPortMessage));
   void agent.ensureConnected().catch(() => undefined);
   port.onMessage.addListener(async (request: DebugPortRequest) => {
-    if (request.type === "chat") await submitChat(await activeTab(), request.message, true);
+    if (request.type === "chat") await submitChat(await activeTab(), request.message, true, false, request.thread);
   });
   port.onDisconnect.addListener(() => debugPorts.delete(port));
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.provider) void agent.ensureModels();
 });
 
 void agent.ensureConnected().catch(() => undefined);

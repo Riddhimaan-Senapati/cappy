@@ -1,4 +1,6 @@
+import { requestAudio } from "../voice/audio-api.js";
 import type { VoiceEvent } from "../voice/core.js";
+import { ENDPOINT, startEndpoint, stepEndpoint, stripDoneKeyword } from "../voice/endpoint.js";
 
 interface RecognitionResult {
   isFinal: boolean;
@@ -37,6 +39,82 @@ interface RecognizerStatics {
 const speech = globalThis as unknown as { SpeechRecognition?: RecognizerConstructor & RecognizerStatics; webkitSpeechRecognition?: RecognizerConstructor & RecognizerStatics };
 
 let recognizer: Recognizer | null = null;
+let stopMeter: (() => void) | null = null;
+let stopSpotter: (() => void) | null = null;
+const METER_MS = 50;
+// Automatic gain raises room noise as soon as the user stops talking, which hides the pause; noise suppression helps too.
+const MIC: MediaStreamConstraints = { audio: { autoGainControl: false, noiseSuppression: true, echoCancellation: true } };
+
+// Cloud transcription returns text only at the end, so "done" is spotted live with Chrome's on-device recognizer, never its server one.
+async function spotDone(lang: string, onDone: () => void) {
+  stopSpotter?.();
+  const Ctor = speech.SpeechRecognition ?? speech.webkitSpeechRecognition;
+  if (!Ctor || !(await preferOnDevice(Ctor, lang || navigator.language))) return;
+  const spotter = new Ctor();
+  spotter.lang = lang || navigator.language;
+  spotter.continuous = true;
+  spotter.interimResults = true;
+  spotter.processLocally = true;
+  let heard = "";
+  spotter.onresult = (event) => {
+    let text = "";
+    for (let i = 0; i < event.results.length; i++) text += event.results[i][0].transcript;
+    heard = text;
+    if (stripDoneKeyword(heard).done) onDone();
+  };
+  spotter.onerror = () => undefined;
+  spotter.onend = () => undefined;
+  const stop = () => {
+    spotter.onresult = null;
+    try {
+      spotter.abort();
+    } catch {
+      // already stopped
+    }
+    if (stopSpotter === stop) stopSpotter = null;
+  };
+  stopSpotter = stop;
+  try {
+    spotter.start();
+  } catch {
+    stop();
+  }
+}
+
+function stopListening() {
+  if (recording?.state === "recording") recording.stop();
+  recognizer?.stop();
+}
+
+// Measures loudness every 50 ms and ends listening after a pause, when nothing is said, or at the cap.
+function meter(stream: MediaStream, hold: boolean) {
+  stopMeter?.();
+  const context = new AudioContext();
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  context.createMediaStreamSource(stream).connect(analyser);
+  const samples = new Float32Array(analyser.fftSize);
+  let state = startEndpoint(Date.now());
+  const timer = setInterval(() => {
+    analyser.getFloatTimeDomainData(samples);
+    let sum = 0;
+    for (const sample of samples) sum += sample * sample;
+    const step = stepEndpoint(state, Math.sqrt(sum / samples.length), Date.now(), hold);
+    state = step.state;
+    if (!step.signal) return;
+    if (step.signal.type === "stop") {
+      if (step.signal.reason === "no-speech") emit({ type: "error", error: "no-speech" });
+      cleanup();
+      stopListening();
+    } else emit(step.signal);
+  }, METER_MS);
+  const cleanup = () => {
+    clearInterval(timer);
+    void context.close().catch(() => undefined);
+    if (stopMeter === cleanup) stopMeter = null;
+  };
+  stopMeter = cleanup;
+}
 
 function emit(event: VoiceEvent) {
   void chrome.runtime.sendMessage({ target: "background", kind: "recognitionEvent", event }).catch(() => undefined);
@@ -51,7 +129,7 @@ async function preferOnDevice(Ctor: RecognizerStatics, lang: string): Promise<bo
   }
 }
 
-async function start(requested: string) {
+async function start(requested: string, hold: boolean) {
   const previous = recognizer;
   recognizer = null;
   previous?.abort();
@@ -78,27 +156,160 @@ async function start(requested: string) {
       if (result.isFinal) session.committed += result[0].transcript;
       else pending += result[0].transcript;
     }
-    emit({ type: "interim", text: `${session.committed}${pending}`.trim() });
+    const heard = stripDoneKeyword(`${session.committed}${pending}`);
+    emit({ type: "interim", text: heard.text });
+    if (heard.done) {
+      session.committed = heard.text;
+      next.stop();
+    }
   };
   next.onerror = (event) => current() && emit({ type: "error", error: event.error });
   next.onend = () => {
     if (!current()) return;
     recognizer = null;
-    emit({ type: "final", text: session.committed.trim() });
+    stopMeter?.();
+    meterStream?.getTracks().forEach((track) => track.stop());
+    emit({ type: "final", text: stripDoneKeyword(session.committed).text });
     emit({ type: "ended" });
   };
   recognizer = next;
+  // The recognizer has no loudness signal of its own, so a second, local-only stream feeds the pause detector.
+  const meterStream = await navigator.mediaDevices.getUserMedia(MIC).catch(() => undefined);
+  if (!current()) {
+    meterStream?.getTracks().forEach((track) => track.stop());
+    return;
+  }
+  if (meterStream) meter(meterStream, hold);
+  else setTimeout(() => current() && next.stop(), ENDPOINT.maxMs);
   try {
     next.start();
   } catch {
+    stopMeter?.();
+    meterStream?.getTracks().forEach((track) => track.stop());
     recognizer = null;
     emit({ type: "error", error: "start-failed" });
     emit({ type: "ended" });
   }
 }
 
-chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string }) => {
+let recording: MediaRecorder | undefined;
+let recordingTimer: ReturnType<typeof setTimeout> | undefined;
+let playback: AbortController | undefined;
+let player: HTMLAudioElement | undefined;
+
+async function record(provider: "openai" | "gemini", serverUrl: string, hold: boolean, lang: string) {
+  let stream: MediaStream | undefined;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(MIC);
+    const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+    const chunks: Blob[] = [];
+    recording = recorder;
+    recorder.ondataavailable = ({ data }) => chunks.push(data);
+    recorder.onerror = () => {
+      emit({ type: "error", error: "start-failed" });
+      if (recorder.state !== "inactive") recorder.stop();
+    };
+    recorder.onstop = async () => {
+      clearTimeout(recordingTimer);
+      stopMeter?.();
+      stopSpotter?.();
+      stream?.getTracks().forEach((track) => track.stop());
+      if (recording !== recorder) return;
+      try {
+        const response = await requestAudio("transcribe", new Blob(chunks, { type: "audio/webm" }), "audio/webm", AbortSignal.timeout(25_000), provider, serverUrl);
+        const { text } = await response.json() as { text: string };
+        emit({ type: "final", text: stripDoneKeyword(text).text });
+      } catch {
+        emit({ type: "error", error: provider === "gemini" ? "gemini-audio" : "openai-audio" });
+      } finally {
+        recording = undefined;
+        emit({ type: "ended" });
+      }
+    };
+    recorder.start();
+    emit({ type: "listening" });
+    meter(stream, hold);
+    void spotDone(lang, () => {
+      stopMeter?.();
+      if (recorder.state === "recording") recorder.stop();
+    });
+    recordingTimer = setTimeout(() => {
+      if (recorder.state === "recording") recorder.stop();
+    }, ENDPOINT.maxMs);
+  } catch (error) {
+    stream?.getTracks().forEach((track) => track.stop());
+    recording = undefined;
+    const code = error instanceof DOMException ? {
+      NotAllowedError: "not-allowed",
+      SecurityError: "not-allowed",
+      NotFoundError: "audio-capture",
+      NotReadableError: "microphone-unavailable",
+      AbortError: "microphone-unavailable",
+    }[error.name] : undefined;
+    emit({ type: "error", error: code ?? "start-failed" });
+    emit({ type: "ended" });
+  }
+}
+
+function stopPlayback() {
+  playback?.abort();
+  player?.pause();
+}
+
+async function playSpeech(text: string, rate: number, provider: "openai" | "gemini", serverUrl: string) {
+  stopPlayback();
+  const controller = new AbortController();
+  playback = controller;
+  let url: string | undefined;
+  try {
+    const response = await requestAudio("speech", JSON.stringify({ text, rate }), "application/json", AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), provider, serverUrl);
+    const blob = await response.blob();
+    controller.signal.throwIfAborted();
+    url = URL.createObjectURL(blob);
+    const element = new Audio(url);
+    if (provider === "gemini") element.playbackRate = rate;
+    player = element;
+    await new Promise<void>((resolve, reject) => {
+      controller.signal.addEventListener("abort", () => resolve(), { once: true });
+      element.onended = () => resolve();
+      element.onerror = () => reject(new Error("Could not play speech"));
+      void element.play().catch(reject);
+    });
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+    if (playback === controller) {
+      playback = undefined;
+      player = undefined;
+    }
+  }
+}
+
+chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string; hold?: boolean; text?: string; rate?: number; provider?: "openai" | "gemini"; voiceProvider?: "chrome" | "openai" | "gemini"; serverUrl?: string }, _sender, respond) => {
   if (message?.target !== "offscreen") return;
-  if (message.kind === "voiceStart") void start(message.lang ?? "");
-  if (message.kind === "voiceStop") recognizer?.stop();
+  if (message.kind === "voiceStart") {
+    respond(true);
+    const voiceProvider = message.voiceProvider ?? "chrome";
+    void Promise.resolve().then(async () => {
+      const permission = await Promise.resolve().then(() => navigator.permissions.query({ name: "microphone" })).catch(() => undefined);
+      if (permission && permission.state !== "granted" && voiceProvider === "chrome") {
+        emit({ type: "error", error: "microphone-setup" });
+        return;
+      }
+      const hold = message.hold === true;
+      await (voiceProvider === "chrome" ? start(message.lang ?? "", hold) : record(voiceProvider, message.serverUrl ?? "", hold, message.lang ?? ""));
+    }).catch(() => {
+      emit({ type: "error", error: "start-failed" });
+      emit({ type: "ended" });
+    });
+  }
+  if (message.kind === "voiceStop") {
+    stopMeter?.();
+    stopSpotter?.();
+    stopListening();
+  }
+  if (message.kind === "speechStop") stopPlayback();
+  if (message.kind === "speechPlay" && typeof message.text === "string") {
+    void playSpeech(message.text, message.rate ?? 1, message.provider ?? "openai", message.serverUrl ?? "").then(() => respond(true), () => respond(false));
+    return true;
+  }
 });

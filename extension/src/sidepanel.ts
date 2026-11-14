@@ -1,11 +1,28 @@
 import type { ContentRequest, DebugPortMessage, DebugPortRequest, StatusInfo, TtsRequest, TtsStateMessage, UiEvent } from "./messages.js";
-import { adoptStyles, h } from "./ui/dom.js";
+import { adoptStyles, h, icon } from "./ui/dom.js";
 import { TOKENS } from "./ui/theme.js";
-import { paintMic, liveRegion, micButton } from "./voice/button.js";
+import { paintCountdown, paintMic, liveRegion, micButton } from "./voice/button.js";
 import { VoiceController } from "./voice/controller.js";
 import { joinVoiceText, parseVoiceEvent, voiceStatusText, type VoiceState } from "./voice/core.js";
 import { VOICE_CSS } from "./voice/styles.js";
-import { load, suggestRequests, type StoredState } from "./storage.js";
+import { deleteRequest, findRequestSessions, load, suggestRequests, type StoredState } from "./storage.js";
+import { outcomeText, scopeChoices } from "./ui/memory-choice.js";
+import type { MemoryScope } from "../../shared/protocol.js";
+
+function memoryChoice(line: string, host: string | undefined, scope: MemoryScope | undefined): HTMLElement {
+  const item = h("li", "info memory-choice", `Save "${line}"? `);
+  for (const choice of scopeChoices([line], host, scope)) {
+    const button = h("button", choice.suggested ? "suggested" : "", choice.label);
+    button.type = "button";
+    button.addEventListener("click", async () => {
+      const outcome = await choice.run();
+      item.className = outcome.saved ? "good" : "info";
+      item.textContent = `${outcomeText(outcome, host)}: ${line}`;
+    });
+    item.append(button);
+  }
+  return item;
+}
 
 const CSS = `
 html, body { margin: 0; height: 100%; background: #121217; }
@@ -16,6 +33,8 @@ h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
 .dot.on { background: var(--good); } .dot.off { background: var(--bad); }
 .tts { display: flex; gap: 8px; } .tts button[hidden] { display: none; }
+.memory-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.memory-choice button.suggested { font-weight: 600; }
 .timeline { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
 .run { padding: 12px; border-radius: 14px; background: var(--raise); border: 1px solid var(--line); animation: rise 0.3s var(--spring); }
 .run .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
@@ -29,7 +48,10 @@ h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .tools div { display: flex; gap: 8px; } .tools .bad { color: var(--bad); } .tools .ms { color: var(--faint); min-width: 54px; }
 form { display: flex; gap: 8px; }
 .previous-requests { display: grid; gap: 4px; }
+.previous-request button.delete-request { color: #f87171; }
 .previous-requests[hidden] { display: none; }
+.previous-request { display: flex; gap: 4px; }
+.previous-request button:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .previous-requests button { padding: 8px 12px; background: var(--raise); color: var(--text); text-align: left; }
 textarea { flex: 1; resize: none; padding: 10px 12px; border-radius: 12px; background: var(--raise); border: 1px solid var(--line); color: var(--text); font: inherit; outline: none; }
 textarea:focus { border-color: var(--accent); }
@@ -61,11 +83,23 @@ function renderPreviousRequests() {
     const button = h("button", "", message);
     button.type = "button";
     button.addEventListener("click", () => {
-      input.value = message;
-      input.focus();
-      renderPreviousRequests();
+      void openRequestHistory(message);
     });
-    return button;
+    const remove = h("button", "delete-request", "", [icon("trash")]);
+    remove.type = "button";
+    remove.title = "Delete saved request";
+    remove.setAttribute("aria-label", `Delete saved request: ${message}`);
+    remove.addEventListener("click", async () => {
+      input.focus();
+      try {
+        await deleteRequest(message);
+        await refreshRequestState();
+      } catch {
+        live.textContent = "Could not delete the saved request.";
+        live.classList.remove("sr-only");
+      }
+    });
+    return h("div", "previous-request", "", [button, remove]);
   }));
   previousRequests.hidden = !matches.length;
 }
@@ -111,9 +145,13 @@ document.body.append(
 
 let voiceBase = "";
 const voice = new VoiceController({
+  onCountdown(ms) {
+    paintCountdown(mic, ms);
+  },
   onState(state: VoiceState) {
     paintMic(mic, state);
     live.textContent = voiceStatusText(state);
+    live.classList.toggle("sr-only", state.phase !== "error");
   },
   onInterim(text) {
     input.value = joinVoiceText(voiceBase, text);
@@ -142,6 +180,40 @@ chrome.runtime.onMessage.addListener((message: { kind?: string; event?: unknown 
   const event = parseVoiceEvent(message.event);
   if (event) voice.receive(event);
 });
+
+let historyCard: HTMLElement | undefined;
+let historyThread: string | undefined;
+
+async function openRequestHistory(message: string) {
+  const sessions = findRequestSessions(await load(), message);
+  historyThread = message;
+  input.value = "";
+  input.placeholder = "Continue this session";
+  const home = h("button", "", "New chat");
+  home.addEventListener("click", () => {
+    historyThread = undefined;
+    historyCard?.remove();
+    input.placeholder = "Ask the agent";
+    input.focus();
+  });
+  const retry = h("button", "", "Use request again");
+  retry.type = "button";
+  retry.addEventListener("click", () => {
+    input.value = message;
+    input.focus();
+    renderPreviousRequests();
+  });
+  historyCard?.remove();
+  historyCard = h("div", "run", "", [
+    h("div", "top", "", [h("span", "msg", message), h("span", "tag", "Request history")]),
+    ...sessions.map(({ reply, outcome }) => h("div", outcome === "error" ? "reply bad" : "reply", reply || "Done.")),
+    ...(sessions.length ? [] : [h("p", "", "No reply was saved for this request.")]),
+    retry, home,
+  ]);
+  historyCard.tabIndex = -1;
+  timeline.prepend(historyCard);
+  input.focus();
+}
 
 const runs = new Map<string, { card: HTMLElement; steps: HTMLElement; tag: HTMLElement }>();
 
@@ -179,8 +251,34 @@ function onEvent(event: UiEvent) {
     case "blocked":
       run.steps.append(h("li", "bad", `Blocked: ${event.reason}`));
       break;
+    case "options": {
+      const item = h("li", "info memory-choice", `${event.question} `);
+      for (const option of event.options) {
+        const pick = h("button", "", option.label);
+        pick.type = "button";
+        pick.title = option.request;
+        pick.addEventListener("click", () => port.postMessage({ type: "chat", message: option.request, thread: historyThread } satisfies DebugPortRequest));
+        const edit = h("button", "", "Edit");
+        edit.type = "button";
+        edit.setAttribute("aria-label", `Edit option: ${option.label}`);
+        edit.addEventListener("click", () => {
+          input.value = option.request;
+          input.focus();
+        });
+        item.append(pick, edit);
+      }
+      run.steps.append(item);
+      break;
+    }
     case "memory":
-      run.steps.append(h("li", event.status === "saved" ? "good" : "info", `${event.status === "saved" ? "Remembered" : "Proposed"}: ${event.lines.join("; ")}`));
+      if (event.status === "saved") run.steps.append(h("li", "good", `Remembered: ${event.lines.join("; ")}`));
+      else for (const line of event.lines) run.steps.append(memoryChoice(line, event.host, event.scope));
+      break;
+    case "queued":
+      run.tag.textContent = "queued";
+      break;
+    case "cancelled":
+      run.steps.append(h("li", "warn", "Stopped"));
       break;
     case "error":
       run.steps.append(h("li", "bad", `Error: ${event.message}`));
@@ -206,7 +304,7 @@ form.addEventListener("submit", (event) => {
   event.preventDefault();
   const message = input.value.trim();
   if (!message) return;
-  port.postMessage({ type: "chat", message } satisfies DebugPortRequest);
+  port.postMessage({ type: "chat", message, thread: historyThread } satisfies DebugPortRequest);
   input.value = "";
   renderPreviousRequests();
 });

@@ -1,5 +1,5 @@
 import type { ActiveChange, Change, PageOutline } from "../../../shared/adaptation.js";
-import type { Trigger } from "../../../shared/protocol.js";
+import type { TargetElement, Trigger } from "../../../shared/protocol.js";
 import type { AgentSession } from "../session.js";
 import { tools, type AgentTool } from "../tools.js";
 import type { AgentProvider } from "./types.js";
@@ -8,7 +8,8 @@ import type { AgentProvider } from "./types.js";
 // so validateChange, the CSS scan and the injection block all still run.
 export type StubCall =
   | { name: "apply_change"; input: { change: Change } }
-  | { name: "remember"; input: { lines: string[] } };
+  | { name: "remember"; input: { lines: string[]; scope: "site" | "everywhere" } }
+  | { name: "offer_options"; input: { question: string; options: Array<{ label: string; request: string }> } };
 
 export interface StubPlan {
   calls: StubCall[];
@@ -16,6 +17,7 @@ export interface StubPlan {
 }
 
 export interface StubInput {
+  target?: TargetElement;
   trigger: Trigger;
   message: string;
   profile: string[];
@@ -28,9 +30,11 @@ const DARK_MODE = /dark mode/i;
 const INVERT = /\binvert\b/i;
 const REMOVE = /\b(?:remove(?: all)?|hide)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30})\b/i;
 const COLORBLIND = /colou?r[- ]?blind/i;
+const TARGETED = /\b(?:remove|hide|delete|red)\b/i;
+const VAGUE = /^make (?:this|it|the page) easier(?: to (?:read|use|see))?[.!?]?$/i;
 const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
 const SITE_ONLY = /\b(?:only (?:on |for )?this (?:site|website|page)|(?:on |for )?this (?:site|website|page) only|(?:on|for) this (?:site|website|page))\b/i;
-const SITE_SUFFIX = / on (https?:\/\/[^ ]+)$/i;
+const SITE_PREFIX = /^On ([^\s:]+(?::\d+)?): /i;
 
 const HELP = "Stub provider: no scripted rule matched. Try 'make the text bigger', 'dark mode', 'invert the colors', 'hide ads', 'I'm red-green colorblind', or 'I prefer ...'.";
 
@@ -69,8 +73,8 @@ export function planStubRun(input: StubInput): StubPlan {
 
   if (input.trigger === "page_load") {
     for (const line of input.profile) {
-      const restrictedTo = line.match(SITE_SUFFIX)?.[1];
-      if (restrictedTo && restrictedTo !== origin) continue;
+      const restrictedTo = line.match(SITE_PREFIX)?.[1];
+      if (restrictedTo && restrictedTo !== new URL(input.page.url).host) continue;
       const reason = `Profile: "${line}"`;
       const scope = restrictedTo ? "site" : "everywhere";
       const word = line.match(REMOVE)?.[1].toLowerCase();
@@ -92,12 +96,36 @@ export function planStubRun(input: StubInput): StubPlan {
   }
 
   const message = input.message.trim();
+  if (input.target && TARGETED.test(message)) {
+    const { selector, label } = input.target;
+    const red = /\bred\b/i.test(message);
+    return {
+      calls: [{ name: "apply_change", input: { change: change({
+        id: red ? "target-red" : "target-hidden",
+        summary: red ? `Made ${label} red` : `Hid ${label}`,
+        reason: `Request: "${message.slice(0, 100)}"`,
+        scope: "site",
+        css: red ? `${selector} { color: #c00000 !important; }` : `${selector} { display: none !important; }`,
+      }) } }],
+      reply: red ? `Stub: made ${label} red.` : `Stub: hid ${label}.`,
+    };
+  }
+  if (VAGUE.test(message)) {
+    return {
+      calls: [{ name: "offer_options", input: { question: "Which would help most?", options: [
+        { label: "Larger text", request: "make the text bigger" },
+        { label: "Dark mode", request: "turn on dark mode" },
+        { label: "Hide clutter", request: "hide ads and popups" },
+      ] } }],
+      reply: "Pick the option that fits best, or edit one.",
+    };
+  }
   const reason = `Request: "${message.slice(0, 100)}"`;
   const siteOnly = SITE_ONLY.test(message);
   const preference = PREFERENCE.test(message);
   const scope = preference && !siteOnly ? "everywhere" : "site";
   const done: string[] = [];
-  const remember = (line: string) => calls.push({ name: "remember", input: { lines: [siteOnly ? `${line} on ${origin}` : line] } });
+  const remember = (line: string) => calls.push({ name: "remember", input: { lines: [line], scope: siteOnly ? "site" : "everywhere" } });
 
   if (BIGGER_TEXT.test(message)) {
     calls.push({ name: "apply_change", input: { change: change({ id: "bigger-text", summary: "Larger text (130%)", reason, scope, block: { name: "textScale", scale: 1.3 } }) } });
@@ -158,6 +186,12 @@ export function createStubProvider(): AgentProvider {
   return {
     name: "stub",
     models: { fast: "stub-fast", frontier: "stub-frontier" },
+    // Mirrors the suggest contract: noticed zooming yields a larger-text suggestion, anything else NONE.
+    async complete(_system: string, user: string) {
+      const zooms = user.match(/- (?:zoom-in|pinch-zoom): here (\d+) \(10m\)/);
+      if (!zooms) return "NONE";
+      return JSON.stringify({ text: "make the text bigger", reason: `You zoomed in ${zooms[1]} times`, scope: "everywhere", memory: "Prefers larger text" });
+    },
     async run(session: AgentSession) {
       const { trigger, message, profile, page, active } = session.request;
 
@@ -177,7 +211,7 @@ export function createStubProvider(): AgentProvider {
           if (/"status":"(?:applied|already-set)"/.test(result.text)) return "Turned on the site's dark mode.";
         }
       }
-      const plan = planStubRun({ trigger, message, profile, page, active });
+      const plan = planStubRun({ trigger, message, profile, page, active, target: session.request.target });
       const rejected: string[] = [];
       for (const call of plan.calls) {
         const tool = toolNamed(call.name);

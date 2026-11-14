@@ -1,24 +1,98 @@
-import { existsSync } from "node:fs";
-import { CREDENTIALS_PATH } from "../../auth/chatgpt.js";
+import type { ProviderInfo } from "../../../shared/protocol.js";
+import { isSignedIn } from "../../auth/chatgpt.js";
+import { getKey, type KeyName } from "../../keys.js";
 import { createAnthropicProvider } from "./anthropic.js";
 import { createGeminiProvider } from "./gemini.js";
 import { createStubProvider } from "./stub.js";
 import { createChatGptProvider, createOpenAIKeyProvider } from "./openai.js";
 import type { AgentProvider } from "./types.js";
 
-const providers: Record<string, { ready: () => string | null; create: () => AgentProvider }> = {
-  gemini: { ready: () => (process.env.GEMINI_API_KEY ? null : "needs GEMINI_API_KEY in .env"), create: createGeminiProvider },
-  "anthropic-key": { ready: () => (process.env.ANTHROPIC_API_KEY ? null : "needs ANTHROPIC_API_KEY in .env"), create: createAnthropicProvider },
-  "openai-key": { ready: () => (process.env.OPENAI_API_KEY ? null : "needs OPENAI_API_KEY in .env"), create: createOpenAIKeyProvider },
-  stub: { ready: () => null, create: createStubProvider },
-  "chatgpt-signin": { ready: () => (existsSync(CREDENTIALS_PATH) ? null : "needs a ChatGPT sign-in: run npm run chatgpt:login"), create: createChatGptProvider },
+interface Entry {
+  label: string;
+  setup: ProviderInfo["setup"];
+  key?: KeyName;
+  ready(): boolean;
+  create(): AgentProvider;
+}
+
+const keyed = (label: string, key: KeyName, create: () => AgentProvider): Entry => ({ label, setup: "key", key, ready: () => !!getKey(key), create });
+
+// Order is the fallback preference when the user has not picked a provider.
+const REGISTRY: Record<string, Entry> = {
+  "chatgpt-signin": { label: "ChatGPT", setup: "signin", ready: isSignedIn, create: createChatGptProvider },
+  "anthropic-key": keyed("Claude", "ANTHROPIC_API_KEY", createAnthropicProvider),
+  "openai-key": keyed("OpenAI API", "OPENAI_API_KEY", createOpenAIKeyProvider),
+  gemini: keyed("Gemini", "GEMINI_API_KEY", createGeminiProvider),
 };
 
-export function createProvider(): AgentProvider {
-  const id = process.env.LLM_PROVIDER ?? "gemini";
-  const entry = providers[id];
-  if (!entry) throw new Error(`Unknown LLM_PROVIDER "${id}". Available: ${Object.keys(providers).join(", ")}`);
-  const problem = entry.ready();
-  if (problem) throw new Error(`LLM_PROVIDER=${id} ${problem}`);
-  return entry.create();
+// The deterministic stub is for offline runs and e2e tests, so it only exists when explicitly requested.
+const STUB: Entry = { label: "Offline stub", setup: "key", ready: () => true, create: createStubProvider };
+const registry = (): Record<string, Entry> => (process.env.LLM_PROVIDER === "stub" ? { ...REGISTRY, stub: STUB } : REGISTRY);
+
+const instances = new Map<string, { provider: AgentProvider; fingerprint: string }>();
+const modelCache = new Map<string, { at: number; list: string[] }>();
+const MODEL_TTL_MS = 5 * 60_000;
+// Model lists cost an API call, so only fetch them for providers the user has actually selected.
+const wanted = new Set<string>();
+
+export function wantModels(id: string) {
+  wanted.add(id);
+}
+
+const fingerprint = (entry: Entry) => (entry.key ? (getKey(entry.key) ?? "") : String(entry.ready()));
+
+export function keyFor(id: string): KeyName | undefined {
+  return registry()[id]?.key;
+}
+
+export function forget(id: string) {
+  instances.delete(id);
+  modelCache.delete(id);
+}
+
+export function getProvider(id: string): AgentProvider | null {
+  const entry = registry()[id];
+  if (!entry?.ready()) return null;
+  const print = fingerprint(entry);
+  const cached = instances.get(id);
+  if (cached && cached.fingerprint === print) return cached.provider;
+  const provider = entry.create();
+  instances.set(id, { provider, fingerprint: print });
+  modelCache.delete(id);
+  return provider;
+}
+
+export function defaultProviderId(): string | null {
+  const preferred = process.env.LLM_PROVIDER;
+  if (preferred && registry()[preferred]?.ready()) return preferred;
+  return Object.keys(registry()).find((id) => registry()[id].ready()) ?? null;
+}
+
+export function resolveProvider(requested?: string | null): AgentProvider | null {
+  return (requested && getProvider(requested)) || (defaultProviderId() ? getProvider(defaultProviderId()!) : null);
+}
+
+async function availableModels(id: string, provider: AgentProvider): Promise<string[]> {
+  const cached = modelCache.get(id);
+  if (cached && Date.now() - cached.at < MODEL_TTL_MS) return cached.list;
+  let list: string[] = [];
+  try {
+    const timeout = new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 4000));
+    list = [...new Set(await Promise.race([provider.listModels?.() ?? Promise.resolve([]), timeout]))].sort();
+  } catch (error) {
+    console.warn(`[models] ${id}:`, error instanceof Error ? error.message : error);
+  }
+  modelCache.set(id, { at: Date.now(), list });
+  return list;
+}
+
+export async function describeProviders(): Promise<ProviderInfo[]> {
+  return Promise.all(
+    Object.entries(registry()).map(async ([id, entry]) => {
+      const provider = getProvider(id);
+      if (!provider) return { id, label: entry.label, setup: entry.setup, ready: false };
+      const available = wanted.has(id) ? await availableModels(id, provider) : undefined;
+      return { id, label: entry.label, setup: entry.setup, ready: true, models: provider.models, available };
+    }),
+  );
 }
