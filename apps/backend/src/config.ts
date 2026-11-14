@@ -2,13 +2,16 @@ import type { ThinkingLevel } from "@google/genai";
 import type { AppDeps } from "./app";
 import { geminiAdapter } from "./gemini-adapter";
 import { geminiLlm } from "./gemini-llm";
+import { geminiRequester, stubRequester } from "./requester";
 import { stubAdapter } from "./stub-adapter";
 import { stubLlm } from "./stub-llm";
+import { geminiVerifier, stubVerifier } from "./verifier";
 
 export type Env = Record<string, string | undefined>;
 
 export const DEFAULT_ADAPT_MODEL = "gemini-3.6-flash";
 export const DEFAULT_CHAT_MODEL = "gemini-3.8-flash";
+export const DEFAULT_VERIFY_MODEL = "gemini-3.8-flash";
 const THINKING_LEVELS = ["MINIMAL", "LOW", "MEDIUM", "HIGH"] as const;
 const DEFAULT_PORT = 8787;
 
@@ -19,12 +22,16 @@ function thinkingFrom(value: string | undefined): ThinkingLevel {
 
 export function depsFromEnv(env: Env): AppDeps {
   const apiKey = env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return { adapter: stubAdapter, llm: stubLlm };
+  if (!apiKey) return { adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier };
   const adaptModel = env.GEMINI_ADAPT_MODEL?.trim() || DEFAULT_ADAPT_MODEL;
   const chatModel = env.GEMINI_CHAT_MODEL?.trim() || DEFAULT_CHAT_MODEL;
+  const verifyModel = env.GEMINI_VERIFY_MODEL?.trim() || DEFAULT_VERIFY_MODEL;
+  const adaptThinking = thinkingFrom(env.GEMINI_ADAPT_THINKING);
   return {
-    adapter: geminiAdapter(apiKey, adaptModel, thinkingFrom(env.GEMINI_ADAPT_THINKING)),
+    adapter: geminiAdapter(apiKey, adaptModel, adaptThinking),
     llm: geminiLlm(apiKey, chatModel, thinkingFrom(env.GEMINI_CHAT_THINKING)),
+    requester: geminiRequester(apiKey, adaptModel, adaptThinking),
+    verifier: geminiVerifier(apiKey, verifyModel),
   };
 }
 
