@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AdaptationId, BlockConfig, PageOutline, PageStats, SnapshotOp } from "@browser-agent/shared";
+import { AdaptationId, BlockConfig, ContentFilter, PageOutline, PageStats, SnapshotOp } from "@browser-agent/shared";
 
 export const PageReady = z
   .object({ type: z.literal("page-ready"), url: z.string().max(2048), outline: PageOutline })
@@ -48,6 +48,14 @@ export const UndoRuntime = z.object({ type: z.literal("undo-runtime") }).strict(
 export const ApplyOps = z
   .object({ type: z.literal("apply-ops"), adaptationId: AdaptationId, ops: z.array(SnapshotOp).min(1).max(20) })
   .strict();
+export const ApplyFilters = z
+  .object({
+    type: z.literal("apply-filters"),
+    adaptationId: AdaptationId,
+    filters: z.array(ContentFilter).min(1).max(6),
+  })
+  .strict();
+export const ApplyFiltersReply = z.object({ matched: z.number().int().nonnegative() });
 export const AxeCount = z.object({ type: z.literal("axe-count") }).strict();
 export const BannerNote = z.object({ type: z.literal("banner-note"), text: z.string().max(200) }).strict();
 export const AxeCountReply = z.object({ count: z.number().int().nonnegative() });
@@ -67,6 +75,7 @@ export const ToContentMessage = z.discriminatedUnion("type", [
   BannerNote,
   AxeCount,
   ApplyOps,
+  ApplyFilters,
   PageStatsRequest,
 ]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;
