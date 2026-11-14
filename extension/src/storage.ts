@@ -9,6 +9,7 @@ export interface Recipe {
 
 export interface StoredState {
   profile: string[];
+  pendingMemory: string[];
   history: ChatTurn[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
@@ -28,6 +29,7 @@ export interface StoredState {
 
 export const DEFAULTS: StoredState = {
   profile: [],
+  pendingMemory: [],
   history: [],
   globalChanges: [],
   siteChanges: {},

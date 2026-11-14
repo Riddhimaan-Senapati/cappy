@@ -2,6 +2,7 @@ import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing } from "../../../shared/protocol.js";
 import { SUGGESTIONS } from "../defaults.js";
 import { ROUTING_LABELS, type AppliedSummary, type UiEvent } from "../messages.js";
+import { acceptProposal, forgetLine, rejectProposal } from "../memory.js";
 import { load, save, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
@@ -34,10 +35,18 @@ interface RunResult {
   applied: AppliedSummary[];
 }
 
+type MemoryStatus = "proposed" | "remembered" | "rejected" | "forgotten";
+
+interface MemoryEntry {
+  line: string;
+  status: MemoryStatus;
+}
+
 interface RunState {
   runId: string | null;
   message: string;
   steps: Array<{ text: string; tone: string }>;
+  memory: MemoryEntry[];
   tier?: { tier: string; model: string };
   result?: RunResult;
   shownSteps: number;
@@ -251,6 +260,7 @@ export class Spotlight {
         run: async () => (await save({ floatingButton: state?.floatingButton === false }), this.hide()),
       },
       { id: "debug", icon: "bug", title: "Open debug panel", hint: "chat + tool log", kind: "command", section: "Commands", keywords: "developer console logs", run: () => (this.deps.openDebug(), this.hide()) },
+      { id: "clear-chat", icon: "text", title: "Clear chat", hint: "memory is kept", kind: "command", section: "Commands", keywords: "history reset conversation", run: async () => { await save({ history: [] }); this.run = null; } },
     ];
 
     const tries: Item[] = SUGGESTIONS.map((text) => ({ id: `try:${text}`, icon: "sparkle", title: text, kind: "try", section: "Try asking", run: () => this.ask(text, false) }));
@@ -307,7 +317,7 @@ export class Spotlight {
   ask(message: string, fresh: boolean) {
     if (!message) return;
     window.clearTimeout(this.closeTimer);
-    this.run = { runId: null, message, steps: [{ text: "Sending to the agent", tone: "info" }], shownSteps: 0, shownResult: false };
+    this.run = { runId: null, message, steps: [{ text: "Sending to the agent", tone: "info" }], memory: [], shownSteps: 0, shownResult: false };
     this.input.value = "";
     this.setView("run");
     this.deps.ask(message, fresh);
@@ -323,6 +333,7 @@ export class Spotlight {
 
     const children: Node[] = [h("div", "you", "", [icon("sparkle", 15), h("span", "", run.message)])];
     if (stepNodes.length) children.push(h("ul", `steps${run.result ? "" : " live"}`, "", stepNodes));
+    if (run.memory.length) children.push(h("div", "applied", "", run.memory.map((entry) => this.memoryCard(entry))));
 
     if (run.result) {
       const { kind, text, applied } = run.result;
@@ -347,6 +358,27 @@ export class Spotlight {
       }
     }
     this.body.replaceChildren(h("div", "run", "", children));
+  }
+
+  private memoryCard(entry: MemoryEntry) {
+    const act = (label: string, status: MemoryStatus, change: (line: string) => Promise<void>) => {
+      const button = h("button", "link", label);
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        await change(entry.line);
+        entry.status = status;
+        this.render();
+      });
+      return button;
+    };
+    const actions = entry.status === "proposed"
+      ? [act("Accept", "remembered", acceptProposal), act("Reject", "rejected", rejectProposal)]
+      : entry.status === "remembered"
+        ? [act("Undo", "forgotten", forgetLine)]
+        : [];
+    const label = { proposed: "Remember this?", remembered: "Remembered", rejected: "Not remembered", forgotten: "Forgotten" }[entry.status];
+    const inactive = entry.status === "rejected" || entry.status === "forgotten";
+    return h("div", `chg${inactive ? " gone" : ""}`, "", [h("div", "top", "", [h("b", "", entry.line), h("span", "tag", label), ...actions])]);
   }
 
   private renderSettingsView() {
@@ -389,6 +421,9 @@ export class Spotlight {
         break;
       case "tier":
         run.tier = { tier: event.tier, model: event.model };
+        break;
+      case "memory":
+        run.memory.push(...event.lines.map((line) => ({ line, status: (event.status === "saved" ? "remembered" : "proposed") as MemoryStatus })));
         break;
       case "blocked":
         run.result = { kind: "blocked", text: `Blocked. This page tried to give the agent instructions: "${event.reason.slice(0, 90)}"`, applied: [] };
