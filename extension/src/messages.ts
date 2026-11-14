@@ -1,4 +1,4 @@
-import type { Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
+import type { ProviderInfo, Routing, TabToolName, Tier, Trigger } from "../../shared/protocol.js";
 
 export interface AppliedSummary {
   id: string;
@@ -28,9 +28,12 @@ export type ContentResponse = { ok: true; result: unknown } | { ok: false; error
 export interface StatusInfo {
   connected: boolean;
   busy: boolean;
+  providers?: ProviderInfo[];
+  activeProvider?: string | null;
   provider?: string;
   models?: Record<Tier, string>;
   available?: string[];
+  notice?: { level: "info" | "error"; text: string };
   error?: string;
 }
 
@@ -39,7 +42,9 @@ export type BackgroundRequest =
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
-  | { kind: "status" };
+  | { kind: "status" }
+  | { kind: "setKey"; provider: string; key: string | null }
+  | { kind: "chatgptLogin" };
 
 export type DebugPortMessage =
   | { type: "status"; status: StatusInfo }
@@ -48,4 +53,4 @@ export type DebugPortMessage =
 
 export type DebugPortRequest = { type: "chat"; message: string };
 
-export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Frontier" };
+export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Pro" };

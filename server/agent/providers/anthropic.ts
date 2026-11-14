@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { Tier } from "../../../shared/protocol.js";
+import { getKey } from "../../keys.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
 import { tools, type ToolOutput } from "../tools.js";
@@ -17,7 +18,7 @@ function toContent(output: ToolOutput) {
 }
 
 export function createAnthropicProvider(): AgentProvider {
-  const client = new Anthropic();
+  const client = new Anthropic({ apiKey: getKey("ANTHROPIC_API_KEY") });
   const models: Record<Tier, string> = {
     fast: process.env.ANTHROPIC_MODEL_FAST ?? "claude-haiku-5-5",
     frontier: process.env.ANTHROPIC_MODEL_FRONTIER ?? process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5",
@@ -50,7 +51,7 @@ export function createAnthropicProvider(): AgentProvider {
         system: SYSTEM_PROMPT,
         tools: runnableTools,
         messages: [{ role: "user", content: buildUserTurn(session.request) }],
-      });
+      }, { signal: session.signal });
 
       if (finalMessage.stop_reason === "refusal") return "I can't help with that one.";
       return finalMessage.content

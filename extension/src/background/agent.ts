@@ -1,5 +1,5 @@
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
-import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
+import type { ApplyOutcome, ClientMessage, ProviderInfo, RunRequest, ServerMessage, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
 import { load, recipeKey, save, saveRecipe } from "../storage.js";
 
@@ -42,12 +42,51 @@ export class AgentClient {
   private opening: Promise<void> | null = null;
   private keepAlive: ReturnType<typeof setInterval> | undefined;
   private runs = new Map<string, Run>();
+  private providers: ProviderInfo[] = [];
+  private defaultProvider: string | null = null;
+  private notice: StatusInfo["notice"];
+  private modelsRequested = new Set<string>();
 
   constructor(private hooks: AgentHooks) {}
 
   private setStatus(patch: Partial<StatusInfo>) {
     this.status = { ...this.status, ...patch, busy: this.runs.size > 0 };
-    this.hooks.status(this.status);
+    void this.getStatus().then((status) => this.hooks.status(status));
+    // Settings views repaint on storage changes, so a stamp tells them the status moved.
+    void chrome.storage.local.set({ statusStamp: Date.now() });
+  }
+
+  async getStatus(): Promise<StatusInfo> {
+    const state = await load();
+    const ready = this.providers.filter((provider) => provider.ready);
+    const active = ready.find((provider) => provider.id === state.provider) ?? ready.find((provider) => provider.id === this.defaultProvider) ?? ready[0];
+    return {
+      ...this.status,
+      providers: this.providers,
+      activeProvider: active?.id ?? null,
+      provider: active?.label,
+      models: active?.models,
+      available: active?.available,
+      notice: this.notice,
+    };
+  }
+
+  async ensureModels() {
+    const { activeProvider } = await this.getStatus();
+    const active = this.providers.find((provider) => provider.id === activeProvider);
+    if (!active?.ready || active.available || this.modelsRequested.has(active.id)) return;
+    this.modelsRequested.add(active.id);
+    this.send({ type: "listModels", provider: active.id });
+  }
+
+  async setKey(provider: string, key: string | null) {
+    await this.ensureConnected();
+    this.send({ type: "setKey", provider, key });
+  }
+
+  async signIn() {
+    await this.ensureConnected();
+    this.send({ type: "chatgptLogin" });
   }
 
   ensureConnected(): Promise<void> {
@@ -111,8 +150,9 @@ export class AgentClient {
     this.setStatus({});
   }
 
-  private busyTab(tabId: number) {
-    return [...this.runs.values()].some((run) => run.tabId === tabId);
+  private cancel(run: Run) {
+    this.send({ type: "cancel", runId: run.runId });
+    this.finish(run);
   }
 
   async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false) {
@@ -122,8 +162,10 @@ export class AgentClient {
     const runId = crypto.randomUUID();
     const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map() };
 
+    const running = [...this.runs.values()].filter((existing) => existing.tabId === tabId);
+    if (running.length && trigger === "page_load") return;
+    for (const existing of running) this.cancel(existing);
     this.emit(run, { type: "start", runId, trigger, message });
-    if (this.busyTab(tabId)) return this.emit(run, { type: "error", runId, message: "Still working on the last request." });
 
     const state = await load();
     if (state.paused) return this.emit(run, { type: "error", runId, message: "Adaptations are paused. Turn them on in settings." });
@@ -150,8 +192,9 @@ export class AgentClient {
         runId,
         trigger,
         message,
+        provider: (await this.getStatus()).activeProvider ?? undefined,
         routing: state.routing,
-        models: state.modelOverrides,
+        models: state.modelChoices[(await this.getStatus()).activeProvider ?? ""] ?? {},
         history: state.history.slice(-8),
         profile: state.profile,
         active,
@@ -185,8 +228,17 @@ export class AgentClient {
   }
 
   private async onMessage(message: ServerMessage) {
-    if (message.type === "hello") {
-      this.setStatus({ connected: true, provider: message.provider, models: message.models, available: message.available, error: undefined });
+    if (message.type === "providers") {
+      this.providers = message.providers;
+      this.defaultProvider = message.defaultProvider;
+      if (this.notice?.level === "info") this.notice = undefined;
+      this.setStatus({ connected: true, error: undefined });
+      void this.ensureModels();
+      return;
+    }
+    if (message.type === "notice") {
+      this.notice = { level: message.level, text: message.text };
+      this.setStatus({});
       return;
     }
     if (message.type === "tool") return this.runTool(message);

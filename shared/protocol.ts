@@ -9,6 +9,7 @@ export interface RunRequest {
   runId: string;
   trigger: Trigger;
   message: string;
+  provider?: string;
   routing: Routing;
   models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];
@@ -72,5 +73,38 @@ export interface PingMessage {
   type: "ping";
 }
 
-export type ClientMessage = RunRequest | ToolResultMessage | PingMessage;
-export type ServerMessage = ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models: Record<Tier, string>; available: string[] };
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  setup: "key" | "signin";
+  ready: boolean;
+  models?: Record<Tier, string>;
+  available?: string[];
+}
+
+export interface SetKeyMessage {
+  type: "setKey";
+  provider: string;
+  key: string | null;
+}
+
+export interface ListModelsMessage {
+  type: "listModels";
+  provider: string;
+}
+
+export interface SignInMessage {
+  type: "chatgptLogin";
+}
+
+export interface CancelMessage {
+  type: "cancel";
+  runId: string;
+}
+
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | ListModelsMessage;
+export type ServerMessage =
+  | ToolCallMessage
+  | AgentEvent
+  | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
+  | { type: "notice"; level: "info" | "error"; text: string };

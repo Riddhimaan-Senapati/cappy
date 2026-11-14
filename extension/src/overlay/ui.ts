@@ -31,7 +31,9 @@ export class OverlayUi {
     this.fab.type = "button";
     this.fab.setAttribute("aria-label", "Open adaptive agent");
     this.fab.append(this.fabOrb);
-    this.fab.addEventListener("click", () => this.spotlight.toggle());
+    this.fab.addEventListener("click", () => {
+      if (this.deps.ensureAlive()) this.spotlight.toggle();
+    });
     this.shadow.append(this.fab);
     document.documentElement.append(this.host);
     this.bringToFront();
@@ -44,6 +46,12 @@ export class OverlayUi {
     } catch {
       // popover unsupported: the fixed host still renders, just not in the top layer
     }
+  }
+
+  destroy() {
+    this.spotlight.destroy();
+    window.clearTimeout(this.toastTimer);
+    this.host.remove();
   }
 
   setFab(visible: boolean) {

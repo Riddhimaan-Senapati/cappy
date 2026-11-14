@@ -1,7 +1,7 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing } from "../../../shared/protocol.js";
 import { SUGGESTIONS } from "../defaults.js";
-import { ROUTING_LABELS, type AppliedSummary, type UiEvent } from "../messages.js";
+import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { load, save, type StoredState } from "../storage.js";
 import { h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
@@ -13,6 +13,7 @@ export interface SpotlightDeps {
   revertAll(): Promise<void>;
   openDebug(): void;
   settings: SettingsContext;
+  ensureAlive(): boolean;
 }
 
 type View = "list" | "run" | "settings";
@@ -28,24 +29,27 @@ interface Item {
   run(): void | Promise<void>;
 }
 
-interface RunResult {
-  kind: "done" | "error" | "blocked";
+interface Step {
   text: string;
-  applied: AppliedSummary[];
+  tone: "info" | "good" | "warn" | "bad";
 }
 
 interface RunState {
   runId: string | null;
   message: string;
-  steps: Array<{ text: string; tone: string }>;
-  tier?: { tier: string; model: string };
-  result?: RunResult;
-  shownSteps: number;
+  steps: Step[];
+  model?: string;
+  tier?: string;
+  startedAt: number;
+  endedAt?: number;
+  result?: { kind: "done" | "error" | "blocked"; text: string; applied: AppliedSummary[] };
   shownResult: boolean;
+  shownSteps: number;
+  expanded: boolean;
 }
 
 const AUTO_CLOSE_MS = 9000;
-const ROUTING_ORDER: Routing[] = ["auto", "fast", "frontier"];
+const SUGGESTION_COUNT = 3;
 
 export class Spotlight {
   private layer = h("div", "sp");
@@ -53,9 +57,9 @@ export class Spotlight {
   private bar = h("div", "bar");
   private orb = h("div", "orb");
   private input = h("input", "input");
-  private trail = h("div", "trail");
+  private pill = h("button", "pill");
   private body = h("div", "body");
-  private foot = h("div", "foot");
+  private hints = h("div", "hints");
   private view: View = "list";
   private items: Item[] = [];
   private selected = 0;
@@ -65,8 +69,9 @@ export class Spotlight {
   private disposeSettings: (() => void) | null = null;
   private animateBody = true;
   private cache: StoredState | null = null;
+  private status: StatusInfo | null = null;
   private previousFocus: HTMLElement | null = null;
-  private idlePlaceholder = 'Try "Make the text bigger"';
+  private placeholder = "Ask anything  ·  / for commands";
 
   constructor(
     private shadow: ShadowRoot,
@@ -77,18 +82,20 @@ export class Spotlight {
     this.bar.setAttribute("aria-label", "Adaptive agent");
     this.bar.setAttribute("aria-modal", "true");
     this.input.setAttribute("role", "combobox");
-    this.input.setAttribute("aria-label", "Ask the agent or search commands");
+    this.input.setAttribute("aria-label", "Ask the agent, or type / for commands");
     this.input.setAttribute("aria-autocomplete", "list");
     this.input.spellcheck = false;
     this.input.autocomplete = "off";
     this.body.setAttribute("role", "listbox");
+    this.pill.type = "button";
 
-    this.bar.append(h("div", "row", "", [this.orb, this.input, this.trail]), this.body, this.foot);
+    this.bar.append(h("div", "row", "", [this.orb, this.input, this.pill]), this.body, this.hints);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
 
     this.scrim.addEventListener("click", () => this.hide());
     this.input.addEventListener("input", () => this.onInput());
+    this.pill.addEventListener("click", () => (this.view === "settings" ? this.setView("list") : void this.toggleModel()));
     this.bar.addEventListener("pointerenter", () => window.clearTimeout(this.closeTimer));
     this.input.addEventListener("blur", () => {
       setTimeout(() => {
@@ -96,6 +103,17 @@ export class Spotlight {
       }, 0);
     });
     chrome.storage.onChanged.addListener(() => void this.refreshCache());
+    addEventListener("pointerdown", this.onOutsidePointer, true);
+  }
+
+  private onOutsidePointer = (event: PointerEvent) => {
+    if (this.opened && !event.composedPath().includes(this.shadow.host)) this.hide();
+  };
+
+  destroy() {
+    removeEventListener("pointerdown", this.onOutsidePointer, true);
+    window.clearTimeout(this.closeTimer);
+    this.disposeSettings?.();
   }
 
   isOpen() {
@@ -108,6 +126,7 @@ export class Spotlight {
 
   private async refreshCache() {
     this.cache = await load();
+    this.renderPill();
     if (this.opened && this.view === "list") this.renderList();
   }
 
@@ -117,13 +136,18 @@ export class Spotlight {
   }
 
   async show(view?: View) {
+    if (!this.deps.ensureAlive()) return;
     this.previousFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     await this.refreshCache();
+    void this.deps.settings.getStatus().then((status) => {
+      this.status = status;
+      this.renderPill();
+    });
     this.opened = true;
+    this.suggestionSeed = Math.random();
     this.input.value = "";
     this.selected = 0;
-    this.idlePlaceholder = `Try "${SUGGESTIONS[Math.floor(Math.random() * SUGGESTIONS.length)]}"`;
-    this.setView(view ?? (this.run && !this.run.result ? "run" : "list"));
+    this.setView(view ?? (this.working ? "run" : "list"));
     this.layer.classList.add("open");
     this.onToggle(true);
     requestAnimationFrame(() => this.input.focus({ preventScroll: true }));
@@ -148,6 +172,7 @@ export class Spotlight {
       this.disposeSettings = null;
     }
     this.view = view;
+    if (view === "settings") this.input.value = "";
     this.animateBody = true;
     this.render();
   }
@@ -155,26 +180,56 @@ export class Spotlight {
   private render() {
     this.layer.classList.toggle("running", this.view === "run");
     this.input.readOnly = this.view === "settings";
-    this.input.placeholder = this.view === "settings" ? "Settings" : this.view === "run" ? "Refine, or ask for something else" : this.idlePlaceholder;
+    this.input.placeholder = this.view === "settings" ? "Settings" : this.view === "run" ? "Ask a follow-up" : this.placeholder;
     this.orb.classList.toggle("work", this.working);
-    this.renderTrail();
+    this.renderPill();
     if (this.view === "settings") this.renderSettingsView();
     else if (this.view === "run") this.renderRun();
     else this.renderList();
-    this.renderFoot();
+    this.renderHints();
     this.animateBody = false;
   }
 
-  private renderTrail() {
+  private renderPill() {
     if (this.view === "settings") {
-      const back = h("button", "back", "", [icon("back", 14), document.createTextNode("Back")]);
-      back.type = "button";
-      back.addEventListener("click", () => this.setView("list"));
-      this.trail.replaceChildren(back);
-    } else {
-      this.trail.replaceChildren(h("span", "kbd", "esc"));
+      this.pill.className = "pill";
+      this.pill.replaceChildren(icon("back", 13), document.createTextNode("Back"));
+      this.pill.title = "Back (Esc)";
+      this.pill.setAttribute("aria-label", "Back");
+      return;
     }
+    const routing: Routing = this.cache?.routing ?? "fast";
+    const models = this.status?.models;
+    this.pill.className = `pill${routing === "frontier" ? " pro" : ""}`;
+    this.pill.replaceChildren(icon(routing === "frontier" ? "sparkle" : "bolt", 13), document.createTextNode(ROUTING_LABELS[routing]), h("span", "k", "⇥"));
+    const detail = models ? ` (Fast: ${models.fast}, Pro: ${models.frontier})` : "";
+    this.pill.title = `Model: ${ROUTING_LABELS[routing]}. Tab to switch${detail}`;
+    this.pill.setAttribute("aria-label", `Model ${ROUTING_LABELS[routing]}, press Tab to switch`);
   }
+
+  private async toggleModel() {
+    const routing: Routing = this.cache?.routing ?? "fast";
+    const next: Routing = routing === "frontier" ? "fast" : "frontier";
+    if (this.cache) this.cache.routing = next;
+    this.renderPill();
+    this.pill.classList.remove("flip");
+    void this.pill.offsetWidth;
+    this.pill.classList.add("flip");
+    await save({ routing: next });
+  }
+
+  private renderHints() {
+    this.hints.hidden = true;
+  }
+
+  private suggestion(changes: ActiveChange[]): Item | null {
+    const open = SUGGESTIONS.filter((candidate) => !changes.some((change) => candidate.covers.test(`${change.summary} ${change.id}`)));
+    if (!open.length) return null;
+    const pick = open[Math.floor(this.suggestionSeed * open.length)];
+    return { id: `try:${pick.text}`, icon: "sparkle", title: pick.text, hint: "suggested", kind: "try", section: "", run: () => this.ask(pick.text, false) };
+  }
+
+  private suggestionSeed = Math.random();
 
   private onInput() {
     window.clearTimeout(this.closeTimer);
@@ -182,60 +237,18 @@ export class Spotlight {
     if (this.view !== "list") return;
     this.selected = 0;
     this.renderList();
+    this.renderHints();
   }
 
-  private buildItems(): Item[] {
-    const q = this.input.value.trim();
-    const tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
-    const matches = (item: Item) => tokens.every((token) => `${item.title} ${item.keywords ?? ""}`.toLowerCase().includes(token));
+  private commands(changes: ActiveChange[]): Item[] {
     const state = this.cache;
-    const routing: Routing = state?.routing ?? "auto";
-    const changes = this.deps.listChanges();
-
-    const undo: Item[] = changes.map((change) => ({
-      id: `undo:${change.id}`,
-      icon: "undo",
-      title: `Undo: ${change.summary}`,
-      hint: change.scope === "everywhere" ? "all sites" : "this site",
-      kind: "undo",
-      section: "On this page",
-      keywords: "revert remove",
-      run: () => this.deps.revert(change.id),
-    }));
-
-    const next = ROUTING_ORDER[(ROUTING_ORDER.indexOf(routing) + 1) % ROUTING_ORDER.length];
-    const cycleModel: Item = {
-      id: "model-cycle",
-      icon: "bolt",
-      title: "Switch model",
-      hint: `${ROUTING_LABELS[routing]} → ${ROUTING_LABELS[next]}`,
-      kind: "command",
-      section: "Commands",
-      keywords: "model routing fast frontier auto smart quick",
-      run: () => save({ routing: next }),
-    };
-    const modelChoices: Item[] = ROUTING_ORDER.map((value) => ({
-      id: `model:${value}`,
-      icon: "bolt",
-      title: value === "auto" ? "Model: choose automatically" : `Model: always use ${value}`,
-      hint: routing === value ? "current" : undefined,
-      kind: "command",
-      section: "Commands",
-      keywords: "switch change routing fast frontier auto smart quick",
-      run: () => save({ routing: value }),
-    }));
-
-    const commands: Item[] = [
-      { id: "settings", icon: "settings", title: "Settings", hint: "preferences", kind: "command", section: "Commands", keywords: "profile model routing options", run: () => this.setView("settings") },
-      cycleModel,
-      ...(changes.length
-        ? [{ id: "undo-all", icon: "undo" as IconName, title: "Undo all changes on this page", kind: "command" as const, section: "Commands", keywords: "revert reset", run: async () => (await this.deps.revertAll(), this.hide()) }]
-        : []),
+    return [
+      { id: "settings", icon: "settings", title: "Settings", kind: "command", section: "Commands", keywords: "preferences profile model options", run: () => this.setView("settings") },
+      ...(changes.length ? [{ id: "undo-all", icon: "undo" as IconName, title: "Undo all changes on this page", kind: "command" as const, section: "Commands", keywords: "revert reset", run: async () => (await this.deps.revertAll(), this.hide()) }] : []),
       {
         id: "pause",
         icon: state?.paused ? "play" : "pause",
         title: state?.paused ? "Resume adaptations" : "Pause adaptations",
-        hint: "master switch",
         kind: "command",
         section: "Commands",
         keywords: "kill switch off on disable enable",
@@ -250,23 +263,47 @@ export class Spotlight {
         keywords: "orb launcher",
         run: async () => (await save({ floatingButton: state?.floatingButton === false }), this.hide()),
       },
-      { id: "debug", icon: "bug", title: "Open debug panel", hint: "chat + tool log", kind: "command", section: "Commands", keywords: "developer console logs", run: () => (this.deps.openDebug(), this.hide()) },
+      { id: "model", icon: "bolt", title: "Switch model", hint: (state?.routing ?? "fast") === "frontier" ? "Pro → Fast" : "Fast → Pro", kind: "command", section: "Commands", keywords: "fast pro smart frontier routing", run: () => this.toggleModel() },
+      { id: "debug", icon: "bug", title: "Open debug panel", kind: "command", section: "Commands", keywords: "developer console logs chat", run: () => (this.deps.openDebug(), this.hide()) },
     ];
+  }
 
-    const tries: Item[] = SUGGESTIONS.map((text) => ({ id: `try:${text}`, icon: "sparkle", title: text, kind: "try", section: "Try asking", run: () => this.ask(text, false) }));
+  private buildItems(): Item[] {
+    const raw = this.input.value.trim();
+    const changes = this.deps.listChanges();
+    const undo: Item[] = changes.map((change) => ({
+      id: `undo:${change.id}`,
+      icon: "undo",
+      title: `Undo ${change.summary.charAt(0).toLowerCase()}${change.summary.slice(1)}`,
+      hint: change.scope === "everywhere" ? "all sites" : undefined,
+      kind: "undo",
+      section: "On this page",
+      keywords: "revert remove",
+      run: () => this.deps.revert(change.id),
+    }));
 
-    if (!q) return [...undo, ...commands, ...tries];
-    const ask: Item = { id: "ask", icon: "sparkle", title: q, hint: "Ask AI", kind: "ask", section: "", run: () => this.ask(q, false) };
-    const matched = [...undo, ...commands.filter((item) => item.id !== "model-cycle"), ...modelChoices].filter(matches);
-    const lowered = q.toLowerCase();
-    const strong = q.length >= 2 ? matched.find((item) => item.title.toLowerCase().startsWith(lowered) || item.title.toLowerCase().replace(/^(undo|model): /, "").startsWith(lowered)) : undefined;
-    return strong ? [strong, ask, ...matched.filter((item) => item !== strong)] : [ask, ...matched];
+    if (!raw) {
+      const suggestion = this.suggestion(changes);
+      return suggestion ? [suggestion] : [];
+    }
+
+    const isCommand = raw.startsWith("/");
+    const query = (isCommand ? raw.slice(1) : raw).trim().toLowerCase();
+    const tokens = query.split(/\s+/).filter(Boolean);
+    const matches = (item: Item) => tokens.every((token) => `${item.title} ${item.keywords ?? ""}`.toLowerCase().includes(token));
+    const pool = [...undo, ...this.commands(changes)];
+    if (isCommand) return pool.filter(matches).slice(0, 8);
+
+    const matched = pool.filter(matches);
+    const ask: Item = { id: "ask", icon: "sparkle", title: raw, hint: "Ask", kind: "ask", section: "", run: () => this.ask(raw, false) };
+    const strong = query.length >= 2 ? matched.find((item) => item.title.toLowerCase().startsWith(query)) : undefined;
+    return (strong ? [strong, ask, ...matched.filter((item) => item !== strong)] : [ask, ...matched]).slice(0, 5);
   }
 
   private renderList() {
     this.items = this.buildItems();
     this.selected = Math.min(this.selected, Math.max(0, this.items.length - 1));
-    const showSections = !this.input.value.trim();
+    const showSections = false;
     const nodes: Node[] = [];
     let lastSection = "";
     this.items.forEach((item, index) => {
@@ -274,7 +311,7 @@ export class Spotlight {
         nodes.push(h("div", "sec", item.section));
         lastSection = item.section;
       }
-      const row = h("div", `item${index === this.selected ? " sel" : ""}${item.kind === "ask" ? " ask" : ""}`, "", [icon(item.icon, 16), h("span", "title", item.title), item.hint ? h("span", "hint", item.hint) : null]);
+      const row = h("div", `item${index === this.selected ? " sel" : ""}`, "", [icon(item.icon, 15), h("span", "title", item.title), item.hint ? h("span", "hint", item.hint) : null]);
       row.setAttribute("role", "option");
       row.setAttribute("aria-selected", String(index === this.selected));
       row.dataset.index = String(index);
@@ -285,7 +322,6 @@ export class Spotlight {
     });
     this.body.classList.toggle("enter", this.animateBody);
     this.body.replaceChildren(...nodes);
-    this.renderFoot();
   }
 
   private select(index: number, scroll = true) {
@@ -307,46 +343,93 @@ export class Spotlight {
   ask(message: string, fresh: boolean) {
     if (!message) return;
     window.clearTimeout(this.closeTimer);
-    this.run = { runId: null, message, steps: [{ text: "Sending to the agent", tone: "info" }], shownSteps: 0, shownResult: false };
+    this.run = { runId: null, message, steps: [{ text: "Reading the page", tone: "info" }], startedAt: Date.now(), shownResult: false, shownSteps: 0, expanded: false };
     this.input.value = "";
     this.setView("run");
     this.deps.ask(message, fresh);
+  }
+
+  private elapsed(run: RunState) {
+    return `${(((run.endedAt ?? Date.now()) - run.startedAt) / 1000).toFixed(1)}s`;
+  }
+
+  private stepNodes(run: RunState, live: boolean): Node[] {
+    const currentTask = live ? run.steps.map((step) => step.tone).lastIndexOf("info") : -1;
+    const nodes = run.steps.map((step, index) => {
+      const isOutcome = step.tone !== "info";
+      const current = index === currentTask;
+      const mark = current ? h("span", "spin") : icon(step.tone === "bad" ? "x" : step.tone === "warn" ? "circle" : "check", 12);
+      const row = h("li", `st ${step.tone}${isOutcome ? " out" : ""}${current ? " now" : ""}${index >= run.shownSteps ? " new" : ""}`, "", [mark, h("span", "t", step.text)]);
+      return row;
+    });
+    run.shownSteps = run.steps.length;
+    return live ? nodes.slice(-6) : nodes;
   }
 
   private renderRun() {
     const run = this.run;
     if (!run) return;
     this.body.classList.remove("enter");
-    const visible = run.steps.slice(-5);
-    const stepNodes = visible.map((step, i) => h("li", `step ${step.tone}${run.steps.length - visible.length + i >= run.shownSteps ? " new" : ""}`, step.text));
-    run.shownSteps = run.steps.length;
+    const meta = h("span", "meta", `${this.elapsed(run)}${run.model ? ` · ${run.model}` : ""}`);
+    const head = h("div", "ask-line", "", [h("span", "q", run.message), meta]);
 
-    const children: Node[] = [h("div", "you", "", [icon("sparkle", 15), h("span", "", run.message)])];
-    if (stepNodes.length) children.push(h("ul", `steps${run.result ? "" : " live"}`, "", stepNodes));
-
-    if (run.result) {
-      const { kind, text, applied } = run.result;
-      children.push(h("div", `result ${kind === "done" ? "" : kind}${run.shownResult ? "" : " new"}`, "", [icon(kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 15), h("p", "", text)]));
-      run.shownResult = true;
-      if (applied.length) {
-        const cards = applied.map((change) => {
-          const undo = h("button", "link", "Undo");
-          undo.type = "button";
-          const card = h("div", "chg", "", [
-            h("div", "top", "", [h("b", "", change.summary), h("span", "tag", change.scope === "everywhere" ? "all sites" : "this site"), undo]),
-            h("div", "why", `Because: ${change.reason}`),
-          ]);
-          undo.addEventListener("click", async () => {
-            await this.deps.revert(change.id);
-            card.classList.add("gone");
-            undo.remove();
-          });
-          return card;
-        });
-        children.push(h("div", "applied", "", cards));
-      }
+    if (!run.result) {
+      this.body.replaceChildren(h("div", "run", "", [head, h("ul", "steps", "", this.stepNodes(run, true))]));
+      this.startTicker();
+      return;
     }
+
+    this.stopTicker();
+    const { kind, text, applied } = run.result;
+    const result = h("div", `result ${kind === "done" ? "" : kind}${run.shownResult ? "" : " new"}`, "", [icon(kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 15), h("span", "", text)]);
+    run.shownResult = true;
+    const children: Node[] = [head, result];
+    if (applied.length) {
+      const rows = applied.map((change) => {
+        const undo = h("button", "link", "Undo");
+        undo.type = "button";
+        const row = h("div", "chg", "", [h("b", "", change.summary), h("span", "why", change.reason), undo]);
+        row.title = `Because: ${change.reason}`;
+        undo.setAttribute("aria-label", `Undo ${change.summary}`);
+        undo.addEventListener("click", async () => {
+          await this.deps.revert(change.id);
+          row.classList.add("gone");
+          undo.remove();
+        });
+        return row;
+      });
+      children.push(h("div", "changes", "", rows));
+    }
+
+    const count = run.steps.filter((step) => step.tone === "info").length;
+    const toggle = h("button", "fold", `${run.expanded ? "Hide" : "Show"} ${count} step${count === 1 ? "" : "s"} · ${this.elapsed(run)}${run.model ? ` · ${run.model}` : ""}`);
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", String(run.expanded));
+    toggle.addEventListener("click", () => {
+      run.expanded = !run.expanded;
+      run.shownSteps = run.expanded ? 0 : run.steps.length;
+      this.renderRun();
+    });
+    children.push(toggle);
+    if (run.expanded) children.push(h("ul", "steps done", "", this.stepNodes(run, false)));
+    head.lastElementChild?.remove();
     this.body.replaceChildren(h("div", "run", "", children));
+  }
+
+  private ticker: number | undefined;
+
+  private startTicker() {
+    if (this.ticker !== undefined) return;
+    this.ticker = window.setInterval(() => {
+      const meta = this.body.querySelector<HTMLElement>(".meta");
+      if (!this.run || this.run.result || !meta) return this.stopTicker();
+      meta.textContent = `${this.elapsed(this.run)}${this.run.model ? ` · ${this.run.model}` : ""}`;
+    }, 100);
+  }
+
+  private stopTicker() {
+    window.clearInterval(this.ticker);
+    this.ticker = undefined;
   }
 
   private renderSettingsView() {
@@ -357,26 +440,12 @@ export class Spotlight {
     this.disposeSettings = renderSettings(container, this.deps.settings);
   }
 
-  private renderFoot() {
-    const hint = (keys: string[], label: string) => h("span", "k", "", [...keys.map((key) => h("span", "kbd", key)), h("span", "", label)]);
-    const left =
-      this.view === "settings"
-        ? [hint(["esc"], "back")]
-        : this.view === "run"
-          ? [hint(["↵"], "send a follow-up"), hint(["esc"], "hide")]
-          : [hint(["↑", "↓"], "navigate"), hint(["↵"], "select"), ...(this.input.value.trim() ? [hint(["⇧", "↵"], "ask AI again")] : [])];
-    const nodes: Node[] = [...left, h("span", "grow")];
-    if (this.run?.tier && this.view === "run") nodes.push(h("span", `chip ${this.run.tier.tier}`, `${this.run.tier.tier} · ${this.run.tier.model}`));
-    this.foot.replaceChildren(...nodes);
-  }
-
   handleEvent(event: UiEvent): boolean {
     const run = this.run;
     if (!run) return false;
     if (event.type === "start") {
       if (run.runId === null && event.trigger === "chat" && event.message === run.message) {
         run.runId = event.runId;
-        run.steps = [];
         return true;
       }
       return false;
@@ -388,10 +457,12 @@ export class Spotlight {
         run.steps.push({ text: event.text, tone: event.tone });
         break;
       case "tier":
-        run.tier = { tier: event.tier, model: event.model };
+        run.tier = event.tier;
+        run.model = event.model;
+        run.steps.push({ text: "Thinking", tone: "info" });
         break;
       case "blocked":
-        run.result = { kind: "blocked", text: `Blocked. This page tried to give the agent instructions: "${event.reason.slice(0, 90)}"`, applied: [] };
+        run.result = { kind: "blocked", text: "Blocked. This page tried to give the agent instructions.", applied: [] };
         break;
       case "done":
         if (!run.result) run.result = { kind: "done", text: event.reply || "Done.", applied: event.applied };
@@ -400,17 +471,19 @@ export class Spotlight {
         run.result = { kind: "error", text: event.message, applied: [] };
         break;
     }
-    if (this.opened) {
-      this.render();
-      if (run.result) {
-        this.input.focus({ preventScroll: true });
-        window.clearTimeout(this.closeTimer);
-        this.closeTimer = window.setTimeout(() => {
-          if (this.opened && this.view === "run" && !this.input.value && !this.bar.matches(":hover")) this.hide();
-        }, AUTO_CLOSE_MS);
-      }
-    } else {
+    if (run.result && !run.endedAt) run.endedAt = Date.now();
+
+    if (!this.opened) {
       this.orb.classList.toggle("work", this.working);
+      return true;
+    }
+    if (this.view === "run") this.render();
+    else this.orb.classList.toggle("work", this.working);
+    if (run.result) {
+      window.clearTimeout(this.closeTimer);
+      this.closeTimer = window.setTimeout(() => {
+        if (this.opened && this.view === "run" && !this.input.value && !this.bar.matches(":hover") && !run.expanded) this.hide();
+      }, AUTO_CLOSE_MS);
     }
     return true;
   }
@@ -423,9 +496,19 @@ export class Spotlight {
       else this.hide();
       return true;
     }
+    const inSearchField = this.shadow.activeElement === this.input;
+    if (key === "Backspace" && inSearchField && !this.input.value && (this.view === "settings" || (this.view === "run" && this.run?.result))) {
+      this.setView("list");
+      return true;
+    }
+    if (key === "Tab" && this.view !== "settings") {
+      void this.toggleModel();
+      this.renderHints();
+      return true;
+    }
     if (this.view === "list" && this.items.length) {
-      if (key === "ArrowDown" || (key === "Tab" && !event.shiftKey)) return this.select((this.selected + 1) % this.items.length), true;
-      if (key === "ArrowUp" || (key === "Tab" && event.shiftKey)) return this.select((this.selected - 1 + this.items.length) % this.items.length), true;
+      if (key === "ArrowDown") return this.select((this.selected + 1) % this.items.length), true;
+      if (key === "ArrowUp") return this.select((this.selected - 1 + this.items.length) % this.items.length), true;
       if (key === "Enter") {
         const item = this.items[this.selected];
         if (event.shiftKey && item.kind === "ask") this.ask(this.input.value.trim(), true);

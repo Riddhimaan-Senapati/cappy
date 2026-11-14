@@ -13,11 +13,24 @@ export class AgentSession {
   failures = 0;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private closed = false;
+  private controller = new AbortController();
 
   constructor(
     private socket: WebSocket,
     readonly request: RunRequest,
   ) {}
+
+  get signal() {
+    return this.controller.signal;
+  }
+
+  get cancelled() {
+    return this.closed;
+  }
+
+  throwIfCancelled() {
+    if (this.closed) throw new RunCancelledError("Run cancelled");
+  }
 
   send(message: ServerMessage) {
     if (!this.closed) this.socket.send(JSON.stringify(message));
@@ -68,6 +81,7 @@ export class AgentSession {
 
   close() {
     this.closed = true;
+    this.controller.abort();
     for (const waiter of this.pending.values()) waiter.reject(new RunCancelledError("Extension disconnected"));
     this.pending.clear();
   }

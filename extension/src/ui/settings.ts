@@ -10,6 +10,8 @@ export interface SettingsContext {
   openDebug(): void;
   openShortcuts(): void;
   getStatus(): Promise<StatusInfo>;
+  setKey(provider: string, key: string | null): void;
+  signIn(): void;
 }
 
 function toggle(label: string, sub: string, checked: boolean, onChange: (value: boolean) => void) {
@@ -23,10 +25,12 @@ function toggle(label: string, sub: string, checked: boolean, onChange: (value: 
 }
 
 function modelPickers(state: StoredState, status: StatusInfo): Node[] {
+  if (!status.activeProvider) return [];
   const defaults = status.models;
   const available = status.available ?? [];
   const field = (tier: Tier, label: string) => {
-    const current = state.modelOverrides[tier] ?? "";
+    const providerId = status.activeProvider ?? "";
+    const current = state.modelChoices[providerId]?.[tier] ?? "";
     const options = [...new Set([current, ...available].filter(Boolean))];
     const select = h("select", "s-select");
     select.setAttribute("aria-label", `${label} model`);
@@ -39,27 +43,85 @@ function modelPickers(state: StoredState, status: StatusInfo): Node[] {
     }
     select.value = current;
     select.addEventListener("change", () => {
-      const next = { ...state.modelOverrides };
+      const next = { ...(state.modelChoices[providerId] ?? {}) };
       if (select.value) next[tier] = select.value;
       else delete next[tier];
-      void save({ modelOverrides: next });
+      void save({ modelChoices: { ...state.modelChoices, [providerId]: next } });
     });
     return h("label", "s-row", "", [h("div", "grow", "", [h("div", "", label), h("small", "", tier === "fast" ? "Used for simple requests and page-load checks" : "Used for harder requests and retries")]), select]);
   };
-  return [field("fast", "Fast model"), field("frontier", "Frontier model")];
+  return [field("fast", "Fast model"), field("frontier", "Pro model")];
 }
 
 function statusCard(status: StatusInfo) {
   const dot = h("span", `s-dot ${status.connected ? "on" : "off"}`);
   const title = status.connected ? `Connected to ${status.provider ?? "agent"}` : "Agent server offline";
-  const sub = status.connected && status.models ? `${status.models.fast} (fast) · ${status.models.frontier} (frontier)` : (status.error ?? "Start it with npm run dev");
+  const sub = status.connected && status.models ? `${status.models.fast} (Fast) · ${status.models.frontier} (Pro)` : (status.error ?? "Start it with npm run dev");
   return h("div", "s-status", "", [dot, h("div", "", "", [h("b", "", title), h("small", "", sub)])]);
 }
 
 export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => void {
   root.classList.add("s");
   let draft = "";
+  let editingKey: string | null = null;
+  let keyDraft = "";
   let disposed = false;
+
+  const providerSection = (status: StatusInfo, state: StoredState): Node[] => {
+    if (!status.connected) return [statusCard(status)];
+    const rows = (status.providers ?? []).map((provider) => {
+      const active = provider.id === status.activeProvider;
+      const sub = provider.ready
+        ? provider.models
+          ? `${provider.models.fast} · ${provider.models.frontier}`
+          : "Ready"
+        : provider.setup === "signin"
+          ? "Use your ChatGPT Plus or Pro plan"
+          : "Paste an API key to use it";
+      let action: Node;
+      if (active) action = h("span", "s-on", "In use");
+      else if (provider.ready) {
+        const use = h("button", "s-btn s-small", "Use");
+        use.type = "button";
+        use.addEventListener("click", () => save({ provider: provider.id }));
+        action = use;
+      } else {
+        const setup = h("button", "s-btn s-small", provider.setup === "signin" ? "Sign in" : editingKey === provider.id ? "Cancel" : "Add key");
+        setup.type = "button";
+        setup.addEventListener("click", () => {
+          if (provider.setup === "signin") return ctx.signIn();
+          editingKey = editingKey === provider.id ? null : provider.id;
+          keyDraft = "";
+          queue();
+        });
+        action = setup;
+      }
+      const row = h("div", `s-row${active ? " s-active" : ""}`, "", [h("span", `s-dot ${provider.ready ? "on" : "idle"}`), h("div", "grow", "", [h("div", "", provider.label), h("small", "", sub)]), action]);
+      if (editingKey !== provider.id) return row;
+
+      const input = h("input");
+      input.type = "password";
+      input.placeholder = `${provider.label} API key`;
+      input.value = keyDraft;
+      input.autocomplete = "off";
+      input.setAttribute("aria-label", `${provider.label} API key`);
+      input.addEventListener("input", () => (keyDraft = input.value));
+      const form = h("form", "s-add", "", [input, h("button", "s-btn", "Save")]);
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!input.value.trim()) return;
+        ctx.setKey(provider.id, input.value.trim());
+        editingKey = null;
+        keyDraft = "";
+        if (!state.provider) void save({ provider: provider.id });
+      });
+      queueMicrotask(() => input.focus());
+      return h("div", "s-sec", "", [row, form]);
+    });
+    const notice = status.notice ? [h("div", `s-note${status.notice.level === "error" ? " s-error" : ""}`, status.notice.text)] : [];
+    const hint = status.activeProvider ? [] : [h("div", "s-note", "Sign in with ChatGPT or add a key to start. Keys stay on your computer, in the local server.")];
+    return [h("section", "s-sec", "", [h("h3", "", "AI provider"), ...rows, ...notice, ...hint])];
+  };
   let queued = false;
 
   const paint = async () => {
@@ -101,10 +163,10 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     });
     const routingNote =
       state.routing === "auto"
-        ? "Simple requests use the fast model. Harder ones, or ones that fail, use the frontier model."
+        ? "Picks per request: Fast for simple ones, Pro for harder ones or when Fast misses."
         : state.routing === "fast"
-          ? "Always the fast model. Quickest, may miss on hard pages."
-          : "Always the frontier model. Most capable, slower.";
+          ? "Quickest. Press Tab in the bar to use Pro for a harder request."
+          : "Most capable, slower. Press Tab in the bar to go back to Fast.";
 
     const changeRows = changes.length
       ? changes.map((change) => {
@@ -132,7 +194,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     const set = <K extends keyof StoredState>(key: K) => (value: StoredState[K]) => save({ [key]: value } as Partial<StoredState>);
 
     root.replaceChildren(
-      statusCard(status),
+      ...providerSection(status, state),
       section(
         "General",
         toggle("Adaptations", "Master switch. Off reverts everything.", !state.paused, (on) => set("paused")(!on)),

@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
 import type { Tier } from "../../../shared/protocol.js";
+import { getKey } from "../../keys.js";
 import { getAccessToken, refreshCredentials } from "../../auth/chatgpt.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
@@ -27,6 +28,7 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
   const input: ResponseInputItem[] = [{ role: "user", content: buildUserTurn(session.request) }];
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    session.throwIfCancelled();
     const client = await getClient();
     // store:false + stream:true are required by the ChatGPT plan route; harmless with an API key.
     const stream = await client.responses.create({
@@ -36,7 +38,7 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
       tools: [namespaceTool],
       store: false,
       stream: true,
-    });
+    }, { signal: session.signal });
 
     let output: ResponseOutputItem[] | null = null;
     for await (const event of stream) {
@@ -54,6 +56,13 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
         .join("\n")
         .trim();
     }
+
+    const note = output
+      .flatMap((item) => (item.type === "message" ? item.content : []))
+      .flatMap((part) => (part.type === "output_text" ? [part.text.trim()] : []))
+      .join(" ")
+      .trim();
+    if (note) session.progress(note.length > 120 ? `${note.slice(0, 117)}...` : note);
 
     input.push(...(output as ResponseInputItem[]));
     for (const call of calls) {
@@ -78,7 +87,7 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
 }
 
 export function createOpenAIKeyProvider(): AgentProvider {
-  const client = new OpenAI();
+  const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
   const models: Record<Tier, string> = {
     fast: process.env.OPENAI_MODEL_FAST ?? "gpt-6-luna",
     frontier: process.env.OPENAI_MODEL_FRONTIER ?? process.env.OPENAI_MODEL ?? "gpt-6.1-sol",

@@ -1,6 +1,7 @@
 import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import { z } from "zod";
 import type { Tier } from "../../../shared/protocol.js";
+import { getKey } from "../../keys.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
 import { tools } from "../tools.js";
@@ -9,7 +10,7 @@ import type { AgentProvider } from "./types.js";
 const MAX_STEPS = 16;
 
 export function createGeminiProvider(): AgentProvider {
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  const ai = new GoogleGenAI({ apiKey: getKey("GEMINI_API_KEY") });
   const fast = process.env.GEMINI_MODEL_FAST ?? process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
   const models: Record<Tier, string> = { fast, frontier: process.env.GEMINI_MODEL_FRONTIER ?? fast };
   const functionDeclarations = tools.map((tool) => ({
@@ -30,10 +31,11 @@ export function createGeminiProvider(): AgentProvider {
       const contents: Content[] = [{ role: "user", parts: [{ text: buildUserTurn(session.request) }] }];
 
       for (let step = 0; step < MAX_STEPS; step++) {
+        session.throwIfCancelled();
         const response = await ai.models.generateContent({
           model,
           contents,
-          config: { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }] },
+          config: { systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }], abortSignal: session.signal },
         });
 
         const calls = response.functionCalls ?? [];

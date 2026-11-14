@@ -237,6 +237,12 @@ export async function revertAll(animate = true) {
   await transition(() => [...applied.keys()].forEach(revertNow), animate);
 }
 
+export function stopEngine() {
+  observer?.disconnect();
+  observer = null;
+  pendingRoots = new Set();
+}
+
 export function activeChanges(): ActiveChange[] {
   return [...applied.values()].map((entry) => entry.change);
 }
