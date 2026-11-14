@@ -214,3 +214,21 @@ describe("request prompt", () => {
     expect(buildRequestPrompt(body("hide podcasts"))).not.toContain("Your previous filter matched nothing");
   });
 });
+
+test("stub filter never targets a bare generic tag and prefers specific groups", async () => {
+  const body: any = {
+    url: "https://www.youtube.com/",
+    outline: {
+      title: "YouTube", headings: [], forms: 0, images: 0, videos: 0, canvases: 0,
+      groups: [
+        { selector: "div", count: 31, samples: ["Podcasts", "Lex Fridman Podcast", "cooking"] },
+        { selector: "ytd-rich-item-renderer", count: 24, samples: ["Huberman Lab Podcast", "pasta", "news"] },
+      ],
+    },
+    profile: { version: 0, summary: "", needs: [] },
+    request: "remove all podcasts",
+  };
+  const res = await stubRequester(body);
+  expect(res.kind).toBe("adaptation");
+  if (res.kind === "adaptation") expect(res.adaptation.filters?.[0]?.itemSelector).toBe("ytd-rich-item-renderer");
+});

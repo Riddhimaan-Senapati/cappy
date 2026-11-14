@@ -200,14 +200,26 @@ export function scheduleFor(text: string, clientTime: ClientTime | undefined): S
 }
 
 // Largest repeated group whose samples name the keyword. Without one the filter applies to all repeated items.
+// A bare generic tag matches whole page sections, so hiding by it removes far more than the items asked for.
+const GENERIC_TAG = /^(div|span|a|p|li|ul|section|main|body)$/i;
+
+function specificity(g: ItemGroup): number {
+  if (g.source === "adapter") return 3;
+  if (g.label) return 2;
+  return g.selector.includes("-") || /[.[]/.test(g.selector) ? 1 : 0;
+}
+
+function bySpecificity(a: ItemGroup, b: ItemGroup): number {
+  return specificity(b) - specificity(a) || b.count - a.count;
+}
+
 function filterFor(body: RequestBody, verb: string, word: string): ContentFilter | undefined {
   const groups = body.outline.groups ?? [];
   if (groups.length === 0 || word.length < 2 || word.length > 40) return undefined;
   const keywords = pluralVariants(word.toLowerCase());
-  const bySize = (a: ItemGroup, b: ItemGroup) => b.count - a.count;
   const mentions = (g: ItemGroup) =>
     g.samples.some((s) => keywords.some((k) => s.toLowerCase().includes(k)));
-  const group = [...groups].filter(mentions).sort(bySize)[0];
+  const group = [...groups].filter((g) => mentions(g) && !GENERIC_TAG.test(g.selector)).sort(bySpecificity)[0];
   const action = verb.toLowerCase() === "dim" ? "dim" : "hide";
   const schedule = scheduleFor(body.request, body.clientTime);
   return {
