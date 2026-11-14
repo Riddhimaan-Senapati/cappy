@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node / Bun / WXT
+node_modules/
+.output/
+.wxt/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
