@@ -10,7 +10,7 @@ export interface AppliedSummary {
 }
 
 export type UiEvent =
-  | { type: "start"; runId: string; trigger: Trigger; message: string }
+  | { type: "start"; runId: string; trigger: Trigger; message: string; thread?: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
@@ -54,7 +54,8 @@ export interface StatusInfo {
 }
 
 export type BackgroundRequest =
-  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean }
+  | { kind: "stopRequest" }
+  | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string }
   | { kind: "deleteRequest"; message: string }
   | { kind: "frictionAccept" }
   | { kind: "pageReady"; origin: string; restored: number }
@@ -74,6 +75,6 @@ export type DebugPortMessage =
   | { type: "event"; tabId: number; at: number; event: UiEvent }
   | { type: "tool"; tabId: number; at: number; name: string; ms: number; ok: boolean; detail: string };
 
-export type DebugPortRequest = { type: "chat"; message: string };
+export type DebugPortRequest = { type: "chat"; message: string; thread?: string };
 
 export const ROUTING_LABELS: Record<Routing, string> = { auto: "Auto", fast: "Fast", frontier: "Frontier" };

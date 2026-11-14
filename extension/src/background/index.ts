@@ -9,7 +9,7 @@ import { registerTts } from "./tts.js";
 registerTts();
 registerFriction();
 
-const sessionRequests = new Map<string, string>();
+const sessionRequests = new Map<string, { message: string; thread?: string }>();
 const debugPorts = new Set<chrome.runtime.Port>();
 
 function broadcast(message: DebugPortMessage) {
@@ -18,12 +18,12 @@ function broadcast(message: DebugPortMessage) {
 
 const agent = new AgentClient({
   event(tabId: number, event: UiEvent) {
-    if (event.type === "start" && event.trigger === "chat") sessionRequests.set(event.runId, event.message);
+    if (event.type === "start" && event.trigger === "chat") sessionRequests.set(event.runId, { message: event.message, thread: event.thread });
     if (event.type === "done" || event.type === "error") {
       const message = sessionRequests.get(event.runId);
       sessionRequests.delete(event.runId);
       if (message !== undefined) {
-        void recordRequestSession({ message, reply: event.type === "done" ? event.reply : event.message, outcome: event.type })
+        void recordRequestSession({ ...message, reply: event.type === "done" ? event.reply : event.message, outcome: event.type })
           .catch(() => console.warn("Could not save request session history."));
       }
     }
@@ -43,10 +43,10 @@ async function activeTab() {
   return tab;
 }
 
-async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false) {
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string) {
   if (!message.trim()) return;
   await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
-  if (tab) await agent.startRun(tab, "chat", message, fresh, interrupt);
+  if (tab) await agent.startRun(tab, "chat", message, fresh, interrupt, thread);
 }
 
 async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
@@ -85,8 +85,11 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string) {
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
   if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
+    case "stopRequest":
+      if (sender.tab?.id !== undefined) agent.stopRequest(sender.tab.id);
+      break;
     case "runChat":
-      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt).finally(() => sendResponse());
+      if (sender.tab) void submitChat(sender.tab, request.message, request.fresh, request.interrupt, request.thread).finally(() => sendResponse());
       return !!sender.tab;
     case "deleteRequest":
       if (typeof request.message !== "string") return false;
@@ -130,7 +133,7 @@ chrome.runtime.onConnect.addListener((port) => {
   port.postMessage({ type: "status", status: agent.status } satisfies DebugPortMessage);
   void agent.ensureConnected().catch(() => undefined);
   port.onMessage.addListener(async (request: DebugPortRequest) => {
-    if (request.type === "chat") await submitChat(await activeTab(), request.message, true);
+    if (request.type === "chat") await submitChat(await activeTab(), request.message, true, false, request.thread);
   });
   port.onDisconnect.addListener(() => debugPorts.delete(port));
 });

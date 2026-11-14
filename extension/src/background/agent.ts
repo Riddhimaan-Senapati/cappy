@@ -4,7 +4,7 @@ import { hasMemoryLine, rememberLines } from "../memory.js";
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
 import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, SiteControlOutcome, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
-import { load, recipeKey, save, saveRecipe } from "../storage.js";
+import { findRequestSessions, load, recipeKey, save, saveRecipe } from "../storage.js";
 import { speakIfEnabled } from "./tts.js";
 
 interface Run {
@@ -137,19 +137,28 @@ export class AgentClient {
     this.setStatus({});
   }
 
-  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, interrupt = false) {
+  stopRequest(tabId: number) {
+    const run = [...this.runs.values()].find((entry) => entry.tabId === tabId);
+    if (run) this.cancelRun(run, "Request stopped.");
+  }
+
+  private cancelRun(run: Run, message: string) {
+    this.send({ type: "cancel", runId: run.runId });
+    this.fail(run, message);
+  }
+
+  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, interrupt = false, thread?: string) {
     if (!tab.id || !tab.url?.startsWith("http")) return;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const runId = crypto.randomUUID();
     const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map() };
 
-    this.emit(run, { type: "start", runId, trigger, message });
+    this.emit(run, { type: "start", runId, trigger, message, thread });
     const activeRun = [...this.runs.values()].find((entry) => entry.tabId === tabId);
     if (activeRun) {
       if (!interrupt) return this.emit(run, { type: "error", runId, message: "Still working on the last request." });
-      this.send({ type: "cancel", runId: activeRun.runId });
-      this.fail(activeRun, "Interrupted by a new request.");
+      this.cancelRun(activeRun, "Interrupted by a new request.");
     }
     this.runs.set(runId, run);
 
@@ -157,7 +166,7 @@ export class AgentClient {
     if (!this.runs.has(runId)) return;
     if (state.paused) return this.fail(run, "Adaptations are paused. Turn them on in settings.");
 
-    if (trigger === "chat" && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) return;
+    if (trigger === "chat" && !thread && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) return;
     if (!this.runs.has(runId)) return;
 
     try {
@@ -183,7 +192,11 @@ export class AgentClient {
         message,
         routing: state.routing,
         models: this.status.provider === state.modelOverrideProvider ? state.modelOverrides : undefined,
-        history: state.history.slice(-8),
+        history: thread
+          ? findRequestSessions(state, thread).filter(({ outcome }) => outcome === "done").slice(-4).flatMap(({ message, reply }) => [
+              { role: "user", text: message }, { role: "assistant", text: reply },
+            ])
+          : state.history.slice(-8),
         profile: trigger === "page_load" ? state.profile.filter((line) => !hasMemoryLine([line], LARGER_TEXT)) : state.profile,
         active,
         page,

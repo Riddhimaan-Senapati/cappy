@@ -160,9 +160,20 @@ chrome.runtime.onMessage.addListener((message: { kind?: string; event?: unknown 
 });
 
 let historyCard: HTMLElement | undefined;
+let historyThread: string | undefined;
 
 async function openRequestHistory(message: string) {
   const sessions = findRequestSessions(await load(), message);
+  historyThread = message;
+  input.value = "";
+  input.placeholder = "Continue this session";
+  const home = h("button", "", "New chat");
+  home.addEventListener("click", () => {
+    historyThread = undefined;
+    historyCard?.remove();
+    input.placeholder = "Ask the agent";
+    input.focus();
+  });
   const retry = h("button", "", "Use request again");
   retry.type = "button";
   retry.addEventListener("click", () => {
@@ -175,11 +186,11 @@ async function openRequestHistory(message: string) {
     h("div", "top", "", [h("span", "msg", message), h("span", "tag", "Request history")]),
     ...sessions.map(({ reply, outcome }) => h("div", outcome === "error" ? "reply bad" : "reply", reply || "Done.")),
     ...(sessions.length ? [] : [h("p", "", "No reply was saved for this request.")]),
-    retry,
+    retry, home,
   ]);
   historyCard.tabIndex = -1;
   timeline.prepend(historyCard);
-  historyCard.focus();
+  input.focus();
 }
 
 const runs = new Map<string, { card: HTMLElement; steps: HTMLElement; tag: HTMLElement }>();
@@ -245,7 +256,7 @@ form.addEventListener("submit", (event) => {
   event.preventDefault();
   const message = input.value.trim();
   if (!message) return;
-  port.postMessage({ type: "chat", message } satisfies DebugPortRequest);
+  port.postMessage({ type: "chat", message, thread: historyThread } satisfies DebugPortRequest);
   input.value = "";
   renderPreviousRequests();
 });

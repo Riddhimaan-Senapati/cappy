@@ -12,7 +12,8 @@ import { VoiceController } from "../voice/controller.js";
 import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
 
 export interface SpotlightDeps {
-  ask(message: string, fresh: boolean, interrupt?: boolean): void;
+  ask(message: string, fresh: boolean, interrupt?: boolean, thread?: string): void;
+  stopRequest(): void;
   listChanges(): ActiveChange[];
   revert(id: string): Promise<void>;
   revertAll(): Promise<void>;
@@ -186,9 +187,9 @@ export class Spotlight {
 
   private render() {
     this.layer.classList.toggle("running", this.view === "run");
-    this.input.readOnly = this.view === "settings" || this.view === "history";
+    this.input.readOnly = this.view === "settings";
     this.mic.disabled = this.input.readOnly;
-    this.input.placeholder = this.view === "settings" ? "Settings" : this.view === "run" ? "Refine, or ask for something else" : this.idlePlaceholder;
+    this.input.placeholder = this.view === "settings" ? "Settings" : this.view === "history" ? "Continue this session" : this.view === "run" ? "Refine, or ask for something else" : this.idlePlaceholder;
     this.orb.classList.toggle("work", this.working);
     this.renderTrail();
     if (this.view === "settings") this.renderSettingsView();
@@ -199,14 +200,30 @@ export class Spotlight {
     this.animateBody = false;
   }
 
+  private goHome() {
+    window.clearTimeout(this.closeTimer);
+    this.historyRequest = "";
+    this.setView("list");
+    this.input.focus({ preventScroll: true });
+  }
+
   private renderTrail() {
-    if (this.view === "settings" || this.view === "history") {
-      const back = h("button", "back", "", [icon("back", 14), document.createTextNode("Back")]);
+    if (this.view !== "list") {
+      const back = h("button", "back", "", [icon("back", 14), document.createTextNode(this.view === "run" ? "Home" : "Back")]);
       back.type = "button";
-      back.addEventListener("click", () => this.setView("list"));
+      back.addEventListener("click", () => this.goHome());
       this.trail.replaceChildren(back);
     } else {
       this.trail.replaceChildren(h("span", "kbd", "esc"));
+    }
+    if (this.working && (this.view === "run" || this.view === "list")) {
+      const stop = h("button", "back", "Stop request");
+      stop.type = "button";
+      stop.addEventListener("click", () => {
+        stop.disabled = true;
+        this.deps.stopRequest();
+      });
+      this.trail.prepend(stop);
     }
   }
 
@@ -395,8 +412,9 @@ export class Spotlight {
     this.cache = await load();
     if (!this.opened) return;
     this.historyRequest = message;
-    this.input.value = message;
+    this.input.value = "";
     this.setView("history");
+    this.input.focus({ preventScroll: true });
   }
 
   private renderHistory() {
@@ -410,7 +428,7 @@ export class Spotlight {
     });
     this.body.replaceChildren(
       h("h3", "sec", "Request history"),
-      ...sessions.map(({ reply, outcome }) => h("div", `result ${outcome}`, reply || "Done.")),
+      ...sessions.flatMap(({ message, reply, outcome }) => [h("p", "you", message), h("div", `result ${outcome}`, reply || "Done.")]),
       ...(sessions.length ? [] : [h("p", "you", "No reply was saved for this request.")]),
       retry,
     );
@@ -422,7 +440,7 @@ export class Spotlight {
     this.run = { runId: null, message, steps: [{ text: "Sending to the agent", tone: "info" }], memory: [], shownSteps: 0, shownResult: false };
     this.input.value = "";
     this.setView("run");
-    this.deps.ask(message, fresh, interrupt);
+    this.deps.ask(message, fresh, interrupt, this.historyRequest || undefined);
   }
 
   private queueRequest() {
@@ -550,7 +568,7 @@ export class Spotlight {
       this.view === "settings"
         ? [hint(["esc"], "back")]
         : this.view === "run"
-          ? [hint(["↵"], "send a follow-up"), hint(["esc"], "hide")]
+          ? [hint(["↵"], "send a follow-up"), hint(["esc"], "home")]
           : [hint(["↑", "↓"], "navigate"), hint(["↵"], "select"), ...(this.input.value.trim() ? [hint(["⇧", "↵"], "ask AI again")] : [])];
     const nodes: Node[] = [...left, h("span", "grow")];
     if (this.run?.tier && this.view === "run") nodes.push(h("span", `chip ${this.run.tier.tier}`, `${this.run.tier.tier} · ${this.run.tier.model}`));
@@ -672,7 +690,7 @@ export class Spotlight {
         this.voice.stop();
         return true;
       }
-      if (this.view === "settings" || this.view === "history") this.setView("list");
+      if (this.view !== "list") this.goHome();
       else this.hide();
       return true;
     }
@@ -699,7 +717,7 @@ export class Spotlight {
         return true;
       }
     }
-    if (this.view === "run" && key === "Enter") {
+    if ((this.view === "run" || this.view === "history") && key === "Enter") {
       const text = this.input.value.trim();
       if (text) this.ask(text, event.shiftKey);
       else this.hide();

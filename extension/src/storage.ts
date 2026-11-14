@@ -12,6 +12,7 @@ export interface RequestSession {
   message: string;
   reply: string;
   outcome: "done" | "error";
+  thread?: string;
 }
 
 export interface StoredState {
@@ -108,7 +109,7 @@ export function recordRequestSession(session: RequestSession) {
 
 export function findRequestSessions(state: StoredState, message: string): RequestSession[] {
   const target = normalizeRequest(message);
-  const sessions = state.requestSessions.filter((session) => normalizeRequest(session.message) === target);
+  const sessions = state.requestSessions.filter((session) => normalizeRequest(session.thread ?? session.message) === target);
   if (sessions.length) return sessions;
   const index = state.history.findLastIndex((turn) => turn.role === "user" && normalizeRequest(turn.text) === target);
   const next = state.history[index + 1];
@@ -122,7 +123,7 @@ export function removeSubmittedRequest(message: string): Promise<void> {
   return updateRequestHistory((state) => ({
     submittedRequests: requestHistory(state).filter((request) => normalizeRequest(request) !== target),
     history: state.history.filter((turn) => turn.role !== "user" || normalizeRequest(turn.text) !== target),
-    requestSessions: state.requestSessions.filter((session) => normalizeRequest(session.message) !== target),
+    requestSessions: state.requestSessions.filter((session) => normalizeRequest(session.thread ?? session.message) !== target && normalizeRequest(session.message) !== target),
   }));
 }
 
