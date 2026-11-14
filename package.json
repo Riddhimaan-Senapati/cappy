@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "server": "tsx watch server/index.ts",
+    "server": "bun --watch server/index.ts",
     "build:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist",
     "watch:ext": "esbuild background=extension/src/background/index.ts sidepanel=extension/src/sidepanel.ts popup=extension/src/popup.ts content=extension/src/content/index.ts --bundle --format=esm --target=chrome120 --outdir=extension/dist --watch",
-    "dev": "npm run build:ext && concurrently -k -n server,ext \"npm run server\" \"npm run watch:ext\"",
+    "dev": "bun run build:ext && concurrently -k -n server,ext \"bun run server\" \"bun run watch:ext\"",
     "typecheck": "tsc --noEmit",
-    "chatgpt:login": "tsx server/auth/chatgpt.ts"
+    "chatgpt:login": "bun server/auth/chatgpt.ts",
+    "test": "bun x tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
@@ -32,5 +33,6 @@
     "happy-dom": "^21.0.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
-  }
+  },
+  "packageManager": "bun@1.3.14"
 }

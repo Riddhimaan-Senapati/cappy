@@ -91,14 +91,14 @@ demo-sites/              campus.html (messy demo page), trap.html (injection tes
 ## Running it
 
 ```bash
-npm install
+bun install
 cp .env.example .env          # set LLM_PROVIDER and the matching key
-npm run dev                   # server on :8787 + extension build in watch mode
+bun run dev                   # server on :8787 + extension build in watch mode
 ```
 
 Then open `chrome://extensions`, enable Developer mode, **Load unpacked** the `extension/` folder, open `http://localhost:8787/demo/campus.html`, click the extension icon to open the side panel. Reload open tabs after (re)loading the extension so the content script is injected.
 
-Other scripts: `npm run typecheck`, `npm run build:ext`, `npm run server`.
+Other scripts: `bun run typecheck`, `bun run build:ext`, `bun run server`, `bun run test`.
 
 ## LLM providers
 
@@ -108,7 +108,7 @@ Full rules in [LLM-PROVIDERS.md](LLM-PROVIDERS.md). Summary:
 - Anthropic uses the SDK tool runner (`client.beta.messages.toolRunner` + `betaZodTool`) with server-side refusal fallbacks enabled. Default model `claude-opus-5-5` at effort `low`; override with `ANTHROPIC_MODEL` / `AGENT_EFFORT`.
 - Gemini uses a manual function-calling loop with `@google/genai`. Default `gemini-3.5-flash`; confirm the current model name before the demo.
 - `openai-key` and `chatgpt-signin` share one Responses API loop ([server/agent/providers/openai.ts](server/agent/providers/openai.ts)): tools grouped in a `namespace` tool, `store: false`, `stream: true`, no system messages / temperature / max_output_tokens (required by the ChatGPT plan route).
-- `chatgpt-signin` follows OpenAI's official open-source "Sign in with ChatGPT" flow (developers.openai.com/siwc/token-sharing-open-source): `npm run chatgpt:login` does dynamic client registration + PKCE on `http://127.0.0.1:1455/auth/callback`, verifies the ID token via OIDC discovery, requires the `chatgpt.tokens.use.direct` scope, and saves `.chatgpt-credentials.json` (gitignored, 0600). Tokens refresh 5 minutes before expiry; one retry after a refresh on 401. Local use only (hosted apps need OpenAI approval); plan limits surface as an error, never a silent fallback.
+- `chatgpt-signin` follows OpenAI's official open-source "Sign in with ChatGPT" flow (developers.openai.com/siwc/token-sharing-open-source): `bun run chatgpt:login` does dynamic client registration + PKCE on `http://127.0.0.1:1455/auth/callback`, verifies the ID token via OIDC discovery, requires the `chatgpt.tokens.use.direct` scope, and saves `.chatgpt-credentials.json` (gitignored, 0600). Tokens refresh 5 minutes before expiry; one retry after a refresh on 401. Local use only (hosted apps need OpenAI approval); plan limits surface as an error, never a silent fallback.
 - Consumer Claude logins cannot be used by third-party tools, so say "Claude via API key".
 
 ## Coding conventions
