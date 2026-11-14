@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { EMPTY_PROFILE, Need, NeedId, NeedKind, Profile } from "@browser-agent/shared";
 import { KEYS, saveProfile } from "../../utils/state";
+import { PREFERENCE_KEY, parseStore, type PreferenceEntry, type PreferenceStore } from "../../utils/preferences";
 import { guessNeedKind } from "../../utils/ui-need";
 import { parseFlag, useStored } from "./hooks";
 
@@ -32,8 +33,24 @@ const parseProfile = (raw: unknown): Profile | undefined => {
   return parsed.success ? parsed.data : undefined;
 };
 
+// Says what a saved preference does on pages; an entry for an older wording of the detail counts as still setting up.
+function preferenceStatus(entry: PreferenceEntry | undefined, detail: string): string {
+  if (!entry || entry.detail !== detail) return "Setting up…";
+  switch (entry.status) {
+    case "compiled":
+      return `Applies everywhere: ${entry.summary ?? "saved"}`;
+    case "none":
+      return `Guides the agent only: ${entry.reason ?? "no page change fits"}`;
+    case "error":
+      return "Couldn't reach the server, will retry";
+    case "pending":
+      return "Setting up…";
+  }
+}
+
 export function ProfileEditor() {
   const profile = useStored("local", KEYS.profile, parseProfile) ?? EMPTY_PROFILE;
+  const changes: PreferenceStore = useStored("local", PREFERENCE_KEY, parseStore) ?? {};
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -107,6 +124,9 @@ export function ProfileEditor() {
               <li key={need.id} className="chip">
                 <span className="chip-text">
                   <span className="chip-kind">{label}</span> {need.detail}
+                  {need.kind === "preference" && (
+                    <span className="chip-status">{preferenceStatus(changes[need.id], need.detail)}</span>
+                  )}
                 </span>
                 <button
                   type="button"

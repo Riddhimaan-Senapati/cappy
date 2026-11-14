@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AdaptationId, BlockConfig, ContentFilter, PageOutline, PageStats, Rule, SnapshotOp } from "@browser-agent/shared";
+import { PreferenceLayer } from "./preferences";
 
 export const PageReady = z
   .object({ type: z.literal("page-ready"), url: z.string().max(2048), outline: PageOutline })
@@ -57,6 +58,7 @@ export const ApplyFilters = z
   .strict();
 export const ApplyFiltersReply = z.object({ matched: z.number().int().nonnegative() });
 export const ApplyRules = z.object({ type: z.literal("apply-rules"), rules: z.array(Rule).max(50) }).strict();
+export const ApplyPreferences = z.object({ type: z.literal("apply-preferences"), layer: PreferenceLayer }).strict();
 export const AxeCount = z.object({ type: z.literal("axe-count") }).strict();
 export const BannerNote = z.object({ type: z.literal("banner-note"), text: z.string().max(200) }).strict();
 export const AxeCountReply = z.object({ count: z.number().int().nonnegative() });
@@ -78,6 +80,7 @@ export const ToContentMessage = z.discriminatedUnion("type", [
   ApplyOps,
   ApplyFilters,
   ApplyRules,
+  ApplyPreferences,
   PageStatsRequest,
 ]);
 export type ToContentMessage = z.infer<typeof ToContentMessage>;

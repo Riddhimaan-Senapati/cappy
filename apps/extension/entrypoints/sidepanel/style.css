@@ -107,6 +107,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 .chip-text { overflow-wrap: anywhere; min-width: 0; }
 .chip-kind { font-weight: 600; }
+.chip-status { display: block; font-size: 12px; color: #5f6368; margin-top: 2px; }
 .chip.editing { flex-basis: 100%; border-radius: 10px; padding: 8px; }
 .need-edit { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .need-edit label { font-size: 12px; color: var(--muted); }
