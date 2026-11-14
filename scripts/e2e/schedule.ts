@@ -34,4 +34,8 @@ await runE2E("schedule", async ({ browser }) => {
   await demo.keyboard.press("ArrowRight");
   await waitFor("change history saying the podcast rule is on", () => shadowTextVisible(demo, "on now"));
   await waitFor("change history saying the shorts rule is off", () => shadowTextVisible(demo, "off right now"));
+
+  await sendChat(panel, demo, "don't show shorts for the next 8 seconds");
+  await waitFor("shorts hidden for the short span", () => short.isHidden());
+  await waitFor("shorts return when the span ends", () => short.isVisible(), 15_000);
 });

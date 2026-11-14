@@ -386,6 +386,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         toggle("Adaptations", "Master switch. Off reverts everything.", !state.paused, (on) => set("paused")(!on)),
         toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
         toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
+        toggle("Track events", "Keep a log of what happens on each page. The debug panel inspector shows the latest 100.", state.trackEvents, set("trackEvents")),
       ),
       section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, voiceKeyField, verify, verificationStatus),
       memory.render(state, toggle),

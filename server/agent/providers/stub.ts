@@ -1,5 +1,6 @@
 import type { ActiveChange, Change, PageOutline, Schedule } from "../../../shared/adaptation.js";
 import type { TargetElement, Trigger } from "../../../shared/protocol.js";
+import { parseSpokenSchedule } from "../schedule.js";
 import type { AgentSession } from "../session.js";
 import { tools, type AgentTool } from "../tools.js";
 import type { AgentProvider } from "./types.js";
@@ -28,7 +29,7 @@ export interface StubInput {
 const BIGGER_TEXT = /\b(bigger|larger)\b[^.!?]*\btext\b|\btext\b[^.!?]*\b(bigger|larger)\b/i;
 const DARK_MODE = /dark mode/i;
 const INVERT = /\binvert\b/i;
-const REMOVE = /\b(?:remove(?: all)?|hide)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30})\b/i;
+const REMOVE = /\b(?:remove(?: all)?|hide|ignore|(?:do not|don['’]t|dont)\s+show)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30})\b/i;
 const COLORBLIND = /colou?r[- ]?blind/i;
 const TARGETED = /\b(?:remove|hide|delete|red)\b/i;
 const VAGUE = /^make (?:this|it|the page) easier(?: to (?:read|use|see))?[.!?]?$/i;
@@ -55,26 +56,9 @@ function change(fields: Pick<Change, "id" | "summary" | "reason" | "scope"> & Pa
   return { css: null, dom: null, block: null, ...fields };
 }
 
-const TIME = String.raw`(\d{1,2})(?::(\d{2}))?\s*(am|pm)?`;
-const WINDOW = new RegExp(String.raw`\b(?:between|from)\s+${TIME}\s+(?:and|to)\s+${TIME}`, "i");
-
-const clock = (hour: string, minute: string | undefined, half: string | undefined) => {
-  let h = Number(hour) % 24;
-  if (half?.toLowerCase() === "pm" && h < 12) h += 12;
-  if (half?.toLowerCase() === "am" && h === 12) h = 0;
-  return `${String(h).padStart(2, "0")}:${minute ?? "00"}`;
-};
-
-// Deterministic reading of "between 9am and 5pm", "from 14:00 to 15:00", "on weekdays" and "on weekends".
-export function stubSchedule(message: string): Schedule | null {
-  const window = message.match(WINDOW);
-  const days = /\bweekdays?\b/i.test(message) ? (["mon", "tue", "wed", "thu", "fri"] as const) : /\bweekends?\b/i.test(message) ? (["sat", "sun"] as const) : null;
-  if (!window && !days) return null;
-  return {
-    days: days ? [...days] : null,
-    start: window ? clock(window[1], window[2], window[3]) : null,
-    end: window ? clock(window[4], window[5], window[6]) : null,
-  };
+// Deterministic reading of clock windows, weekends, and "for the next 30 seconds".
+export function stubSchedule(message: string, now = new Date()): Schedule | null {
+  return parseSpokenSchedule(message, now);
 }
 
 function filterChange(word: string, page: PageOutline, reason: string, siteOnly: boolean, schedule: Schedule | null = null): Change {
@@ -179,8 +163,9 @@ export function planStubRun(input: StubInput): StubPlan {
   const removal = message.match(REMOVE);
   if (removal) {
     const word = removal[1].toLowerCase();
-    calls.push({ name: "apply_change", input: { change: filterChange(word, input.page, reason, siteOnly, stubSchedule(message)) } });
-    remember(`Hide ${word}`);
+    const schedule = stubSchedule(message);
+    calls.push({ name: "apply_change", input: { change: filterChange(word, input.page, reason, siteOnly, schedule) } });
+    if (!schedule?.untilAt) remember(`Hide ${word}`);
     done.push(`hid ${word}`);
   }
 

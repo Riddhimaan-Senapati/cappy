@@ -104,6 +104,7 @@ function scheduleProblem(s: ScheduleLike): string | null {
   if (s.until != null && !DATE.test(s.until)) return "schedule until must be YYYY-MM-DD";
   if (s.from != null && s.until != null && s.from > s.until) return "schedule from is after until";
   if (s.days != null && (s.days.length === 0 || s.days.some((d) => !(DAY_INDEX as readonly string[]).includes(d)))) return "bad schedule days";
+  if (s.untilAt != null && Number.isNaN(Date.parse(s.untilAt))) return "schedule untilAt must be a datetime";
   return null;
 }
 
@@ -128,6 +129,10 @@ export function isScheduleActive(schedule: Change["schedule"], now: Date): boole
   if (schedule.from != null && date < schedule.from) return false;
   if (schedule.until != null && date > schedule.until) return false;
   if (schedule.days != null && !schedule.days.includes(DAY_INDEX[day.getDay()])) return false;
+  if (schedule.untilAt != null) {
+    const end = Date.parse(schedule.untilAt);
+    if (!Number.isNaN(end) && now.getTime() >= end) return false;
+  }
   return true;
 }
 
@@ -157,6 +162,10 @@ export function describeSchedule(schedule: Change["schedule"]): string | null {
   if (schedule.from != null && schedule.until != null) parts.push(`${shortDate(schedule.from)} to ${shortDate(schedule.until)}`);
   else if (schedule.from != null) parts.push(`from ${shortDate(schedule.from)}`);
   else if (schedule.until != null) parts.push(`until ${shortDate(schedule.until)}`);
+  if (schedule.untilAt != null) {
+    const at = new Date(schedule.untilAt);
+    if (!Number.isNaN(at.getTime())) parts.push(`until ${time(`${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`)}`);
+  }
   const text = parts.filter(Boolean).join(", ");
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : null;
 }

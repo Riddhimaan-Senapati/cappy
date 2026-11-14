@@ -202,13 +202,14 @@ export const OVERLAY_CSS = `
   box-shadow: 0 16px 44px rgba(0, 0, 0, 0.45); transform: translateY(10px); opacity: 0; transition: transform 0.35s var(--spring), opacity 0.2s; }
 .toast.show { transform: none; opacity: 1; }
 .toast.speak { bottom: 22px; right: 76px; padding: 10px 12px; align-items: center; }
-.nudge { position: fixed; right: 70px; bottom: 22px; z-index: 2147483644; max-width: min(320px, calc(100vw - 110px)); pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 9px 8px 9px 12px;
-  border-radius: 13px; background: rgba(23, 23, 28, 0.95); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.08); color: var(--text); font-size: 12.5px; line-height: 1.4;
-  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.45); animation: rise 0.35s var(--spring) both; }
-.nudge > .ico { color: var(--accent); }
-.nudge .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.nudge .text b { font-size: 13px; font-weight: 550; color: rgba(255, 255, 255, 0.9); overflow-wrap: anywhere; }
-.nudge .why { font-size: 11.5px; color: rgba(255, 255, 255, 0.42); }
+.nudge { position: fixed; right: 20px; bottom: 68px; z-index: 2147483644; max-width: min(260px, calc(100vw - 48px)); pointer-events: auto; display: flex; align-items: flex-start; justify-content: flex-end; gap: 2px;
+  animation: rise 0.35s var(--spring) both; }
+.nudge .ghost { all: unset; cursor: pointer; min-width: 0; font-size: 13px; font-weight: 450; line-height: 1.35; text-align: right; color: rgba(255, 255, 255, 0.78);
+  text-shadow: 0 0 1px rgba(0, 0, 0, 0.95), 0 1px 2px rgba(0, 0, 0, 0.9), 0 0 12px rgba(0, 0, 0, 0.65); }
+.nudge .ghost:hover { color: #fff; }
+.nudge .ghost:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.nudge .x { margin-top: 1px; color: rgba(255, 255, 255, 0.72); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.85)); }
+.nudge .x:hover { background: rgba(0, 0, 0, 0.28); color: #fff; }
 .toast > .ico { margin-top: 1px; color: var(--accent); }
 .toast.error > .ico { color: var(--bad); }
 .toast .msg { flex: 1; }

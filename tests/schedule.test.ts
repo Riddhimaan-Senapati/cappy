@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { addSeconds } from "date-fns";
 import { describeSchedule, isScheduleActive } from "../shared/validate.js";
 import type { Change } from "../shared/adaptation.js";
+import { parseSpokenSchedule } from "../server/agent/schedule.js";
 
 type Schedule = NonNullable<Change["schedule"]>;
-const at = (y: number, mo: number, d: number, h: number, m = 0) => new Date(y, mo - 1, d, h, m);
+const at = (y: number, mo: number, d: number, h: number, m = 0, s = 0) => new Date(y, mo - 1, d, h, m, s);
 
 describe("isScheduleActive", () => {
   it("is always active without a schedule", () => {
@@ -45,6 +47,13 @@ describe("isScheduleActive", () => {
     assert.equal(isScheduleActive(night, at(2026, 11, 16, 12, 0)), false, "noon");
   });
 
+  it("a short span is active until its end instant", () => {
+    const end = at(2026, 11, 14, 16, 33, 30);
+    const span: Schedule = { untilAt: end.toISOString() };
+    assert.equal(isScheduleActive(span, new Date(end.getTime() - 1000)), true);
+    assert.equal(isScheduleActive(span, end), false);
+  });
+
   it("overnight ranges respect days by their start day", () => {
     const fridayNight: Schedule = { days: ["fri"], start: "22:00", end: "06:00" };
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 21, 3, 0)), true, "Saturday 03:00 is Friday night");
@@ -66,5 +75,22 @@ describe("describeSchedule", () => {
     assert.equal(describeSchedule({ until: "2026-12-15" }), "Until Dec 15");
     assert.equal(describeSchedule({ from: "2026-11-20", until: "2026-12-01" }), "Nov 20 to Dec 1");
     assert.equal(describeSchedule(null), null);
+    const end = at(2026, 11, 14, 16, 33, 30);
+    assert.equal(describeSchedule({ untilAt: end.toISOString() }), "Until 16:33:30");
+  });
+});
+
+describe("parseSpokenSchedule", () => {
+  const now = at(2026, 11, 14, 16, 33, 0);
+
+  it("turns a next-seconds phrase into an end instant", () => {
+    const schedule = parseSpokenSchedule("for the next 30 seconds, don't show videos", now);
+    assert.equal(schedule?.untilAt, addSeconds(now, 30).toISOString());
+    assert.equal(schedule?.start, null);
+    assert.equal(schedule?.days, null);
+  });
+
+  it("keeps weekends as Saturday and Sunday", () => {
+    assert.deepEqual(parseSpokenSchedule("ignore podcasts on weekends", now), { days: ["sat", "sun"], start: null, end: null });
   });
 });

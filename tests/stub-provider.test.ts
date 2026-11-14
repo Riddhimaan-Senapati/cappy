@@ -75,6 +75,16 @@ describe("stub provider routing", () => {
     assert.deepEqual(stubSchedule("hide shorts from 22:30 to 6 on weekdays"), { days: ["mon", "tue", "wed", "thu", "fri"], start: "22:30", end: "06:00" });
     assert.deepEqual(stubSchedule("hide podcasts on weekends"), { days: ["sat", "sun"], start: null, end: null });
     assert.equal(stubSchedule("hide podcasts"), null);
+    const now = new Date(2026, 10, 14, 16, 33, 0);
+    const brief = stubSchedule("for the next 30 seconds, don't show videos", now);
+    assert.equal(brief?.untilAt, new Date(now.getTime() + 30_000).toISOString());
+    const ignored = chat("ignore podcasts on weekends");
+    assert.deepEqual(applied(ignored.calls)[0]?.schedule, { days: ["sat", "sun"], start: null, end: null });
+    assert.ok(ignored.calls.some((call) => call.name === "remember"));
+    const fleeting = chat("don't show videos for the next 30 seconds");
+    assert.equal(applied(fleeting.calls)[0]?.block?.name, "contentFilter");
+    assert.ok(applied(fleeting.calls)[0]?.schedule?.untilAt);
+    assert.equal(fleeting.calls.some((call) => call.name === "remember"), false);
     const [call] = applied(chat("hide podcasts between 12am and 11pm").calls);
     assert.deepEqual(call.schedule, { days: null, start: "00:00", end: "23:00" });
   });
@@ -112,7 +122,7 @@ describe("stub provider routing", () => {
   });
 
   it("only produces changes that pass the shared validator", () => {
-    const messages = ["make the text bigger", "dark mode", "invert", "hide ads", "colorblind", "remove all popups"];
+    const messages = ["make the text bigger", "dark mode", "invert", "hide ads", "colorblind", "remove all popups", "don't show videos for the next 30 seconds", "ignore podcasts on weekends"];
     for (const message of messages) {
       for (const change of applied(chat(message).calls)) {
         assert.equal(validateChange(change), null, `${message}: ${change.id}`);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import type { ActiveChange, Change } from "../../shared/adaptation.js";
 import type { ApplyOutcome } from "../../shared/protocol.js";
 import type { ContentRequest, ContentResponse } from "../../extension/src/messages.js";
-import { clickShadowButton, fontSizeOf, openDemo, runE2E, shadowTextVisible, waitFor } from "./lib.js";
+import { clickShadowButton, fontSizeOf, openDemo, runE2E, shadowButtonVisible, shadowTextVisible, waitFor } from "./lib.js";
 
 await runE2E("verification", async ({ browser }) => {
   const demo = await openDemo(browser, "/demo/campus.html");
@@ -54,8 +54,8 @@ await runE2E("verification", async ({ browser }) => {
 
   await demo.bringToFront();
   await zoomTwice();
-  await waitFor("the noticed-friction suggestion chip", () => shadowTextVisible(demo, "You zoomed in 2 times"));
-  await clickShadowButton(demo, "Do it");
+  await waitFor("the noticed-friction suggestion", () => shadowButtonVisible(demo, "make the text bigger"));
+  await clickShadowButton(demo, "make the text bigger");
   await waitFor("larger text from the accepted suggestion", async () => (await fontSizeOf(demo)) > 18);
   await waitFor("the scope prompt for the preference", () => shadowTextVisible(demo, "Save this preference? Prefers larger text"));
   await clickShadowButton(demo, "All sites");
@@ -69,8 +69,8 @@ await runE2E("verification", async ({ browser }) => {
   await worker.evaluate((id) => chrome.tabs.sendMessage(id, { kind: "tool", name: "revert_change", input: { id: "bigger-text" } }), tabId);
   await waitFor("the original font size before the second round", async () => (await fontSizeOf(demo)) === 18);
   await zoomTwice();
-  await waitFor("the suggestion chip again", () => shadowTextVisible(demo, "Do it"));
-  await clickShadowButton(demo, "Do it");
+  await waitFor("the suggestion again", () => shadowButtonVisible(demo, "make the text bigger"));
+  await clickShadowButton(demo, "make the text bigger");
   await waitFor("the combined undo and scope prompt", () => shadowTextVisible(demo, "Save this preference? Prefers larger text"));
   await clickShadowButton(demo, "Undo");
   await waitFor("the original font size after a quick undo", async () => (await fontSizeOf(demo)) === 18);

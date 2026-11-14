@@ -14,7 +14,7 @@ import { describeElement, uniqueSelector } from "./dom.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, ensureBaseStyle, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
-import { inspectPage, recordActivity, recordChange, recordRun, recordUsage } from "./inspection.js";
+import { inspectPage, recordActivity, recordChange, recordRun, recordUsage, setEventTracking } from "./inspection.js";
 import { inspect, listItems, readPage } from "./outline.js";
 import { findSiteFeatures } from "./site-controls.js";
 import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
@@ -425,6 +425,7 @@ function start() {
         else await restore(true);
       }).catch(() => undefined);
     }
+    if (changes.trackEvents) setEventTracking(changes.trackEvents.newValue !== false);
     if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
     if (changes.camera || changes.paused) void load().then((state) => whenReady(() => syncCamera(state.camera, state.paused)));
   });
@@ -436,6 +437,7 @@ function start() {
 
   (async () => {
     const state = await load();
+    setEventTracking(state.trackEvents);
     recordActivity(state.paused ? "Adaptations paused; saved changes were not restored." : "Restoring saved site and global changes locally.");
     whenReady(() => {
       if (state.floatingButton) ensureOverlay().setFab(true);

@@ -858,16 +858,8 @@ export class Spotlight {
           "changes",
           "",
           applied.map((change) => {
-            const undo = h("button", "link", "Undo");
-            undo.type = "button";
-            undo.setAttribute("aria-label", `Undo ${change.summary}`);
-            const row = h("div", "chg", "", [h("b", "", change.summary), h("span", "why", change.schedule ?? change.reason), undo]);
+            const row = h("div", "chg", "", [h("b", "", change.summary), h("span", "why", change.schedule ?? change.reason)]);
             row.title = `Because: ${change.reason}${change.scope === "everywhere" ? " (all sites)" : ""}`;
-            undo.addEventListener("click", async () => {
-              await this.deps.revert(change.id);
-              row.classList.add("gone");
-              undo.remove();
-            });
             return row;
           }),
         ),

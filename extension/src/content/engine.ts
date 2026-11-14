@@ -24,7 +24,7 @@ interface Applied {
 const applied = new Map<string, Applied>();
 const siteControls = new Map<string, { change: ActiveChange; restore: () => Promise<boolean> }>();
 const SCHEDULE_TICK_MS = 30_000;
-let scheduleTimer: ReturnType<typeof setInterval> | undefined;
+let scheduleTimer: ReturnType<typeof setTimeout> | undefined;
 // Every change applied on this page, including ones turned off, so history can turn them back on.
 const changeLog = new Map<string, ActiveChange>();
 let generatedIds = 0;
@@ -241,13 +241,27 @@ function revertNow(id: string): boolean {
   return true;
 }
 
+function nextScheduleDelay(now = Date.now()): number {
+  let delay = SCHEDULE_TICK_MS;
+  for (const entry of applied.values()) {
+    const untilAt = entry.change.schedule?.untilAt;
+    if (!untilAt) continue;
+    const at = Date.parse(untilAt);
+    if (Number.isNaN(at)) continue;
+    const remaining = at - now;
+    // Land just after the instant so the check sees the span as over.
+    if (remaining > 0) delay = Math.min(delay, remaining + 25);
+  }
+  return delay;
+}
+
 function manageScheduleTimer() {
-  const scheduled = [...applied.values()].some((entry) => entry.change.schedule);
-  if (scheduled && scheduleTimer === undefined) scheduleTimer = setInterval(() => syncSchedules(), SCHEDULE_TICK_MS);
-  if (!scheduled && scheduleTimer !== undefined) {
-    clearInterval(scheduleTimer);
+  if (scheduleTimer !== undefined) {
+    clearTimeout(scheduleTimer);
     scheduleTimer = undefined;
   }
+  if (![...applied.values()].some((entry) => entry.change.schedule)) return;
+  scheduleTimer = setTimeout(() => syncSchedules(), nextScheduleDelay());
 }
 
 // Switches scheduled changes on or off to match the clock. Runs on a timer, on visibilitychange and after each apply.
@@ -463,7 +477,7 @@ export async function revertAll(animate = true) {
 }
 
 export function stopEngine() {
-  clearInterval(scheduleTimer);
+  clearTimeout(scheduleTimer);
   scheduleTimer = undefined;
   observer?.disconnect();
   observer = null;

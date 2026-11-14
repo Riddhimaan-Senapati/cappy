@@ -6,8 +6,15 @@ const loadedAt = Date.now();
 const sources = new Map<string, string>();
 const activity: PageInspection["activity"] = [];
 const usage: TokenUsage = { calls: 0, inputTokens: 0, outputTokens: 0 };
+let tracking = true;
+
+export function setEventTracking(on: boolean) {
+  tracking = on;
+  if (!on) activity.length = 0;
+}
 
 export function recordActivity(text: string) {
+  if (!tracking) return;
   activity.push({ at: Date.now(), text });
   if (activity.length > 100) activity.shift();
 }
