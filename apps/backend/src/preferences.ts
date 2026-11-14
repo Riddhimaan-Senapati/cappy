@@ -14,8 +14,6 @@ export const PREFERENCE_UNAVAILABLE: CompilePreferenceResponse = { kind: "none",
 
 const SUMMARY_MAX = 160;
 const KEYWORDS_MAX = 12;
-const DARK_CSS =
-  "html { filter: invert(1) hue-rotate(180deg) !important; background: #fff; } img, video, picture, canvas, svg, iframe { filter: invert(1) hue-rotate(180deg) !important; }";
 const NOT_A_TOPIC = new Set(["one", "more", "else", "ever", "any", "idea", "way"]);
 const NO_AUTOMATIC_CHANGE = "This preference guides the agent's choices but has no automatic change";
 
@@ -37,7 +35,7 @@ export const stubPreferenceCompiler: PreferenceCompiler = async (req) => {
   const empty: GlobalChange = { blocks: [], filters: [] };
 
   if (/dark (mode|theme)|night mode/.test(text)) {
-    return compiled({ ...empty, css: DARK_CSS }, "Dark mode on every site");
+    return compiled({ ...empty, blocks: [{ block: "dark_mode", allowSiteControls: true }] }, "Dark mode on every site, using each site's own dark theme when it has one");
   }
   if (/bigger|larger text|font/.test(text)) {
     return compiled({ ...empty, blocks: [{ block: "text_scale", scale: 1.3 }] }, "Larger text on every site");
@@ -79,8 +77,9 @@ const PREFERENCE_RULES = [
   "You compile one saved preference of one user into one global change. The extension applies that change on every website later, with no model call.",
   "Answer only with JSON matching the response schema.",
   "The change must be safe on any website. Never name site-specific selectors: filters must not set itemSelector.",
-  "Use blocks only for text_scale (scale from 1 to 2, usually 1.3) and stop_motion (pauseMedia true).",
-  "css may change only the look of the page, such as dark mode or inverted colors. css must not use url(), @import, @font-face, image-set, or content text, and must not contain script.",
+  "Use blocks only for text_scale (scale from 1 to 2, usually 1.3), stop_motion (pauseMedia true) and dark_mode (allowSiteControls true).",
+  "Prefer the website's own features over changing the page: for dark mode, dark theme or night mode always use the dark_mode block, which turns on the site's own dark theme and only inverts colors when the site has none. Never write css for dark mode.",
+  "css may change only the look of the page when no block covers it. css must not use url(), @import, @font-face, image-set, or content text, and must not contain script.",
   "Filters hide repeated items on the page by keyword. Keywords are 2 to 40 characters, must appear in an item's text, aria-label or link URL, and include singular and plural forms. Use action hide and at most 12 keywords.",
   "Any one keyword hides an item, so keep keywords specific to the topic. Never add broad words that would hide unrelated items: for no spoilers for Formula 1 use Formula 1, F1 and spoiler words, not Grand Prix.",
   "Leave out css, blocks or filters that the change does not use, rather than sending empty values.",

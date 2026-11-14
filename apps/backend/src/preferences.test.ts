@@ -44,12 +44,12 @@ function post(app: ReturnType<typeof createApp>, body: unknown) {
 }
 
 describe("stub preference compiler", () => {
-  test("dark mode becomes an inverting css change", async () => {
+  test("dark mode uses the site's own dark theme first", async () => {
     const res = await compileStub("prefers dark mode");
-    expect(res).toMatchObject({ kind: "compiled", summary: "Dark mode on every site" });
+    expect(res.kind).toBe("compiled");
     if (res.kind !== "compiled") throw new Error("expected compiled");
-    expect(res.change.css).toContain("filter: invert(1) hue-rotate(180deg) !important");
-    expect(res.change.css).toContain("img, video, picture, canvas, svg, iframe");
+    expect(res.change.blocks).toEqual([{ block: "dark_mode", allowSiteControls: true }]);
+    expect(res.change.css).toBeUndefined();
   });
 
   test("dark theme and night mode also map to dark mode", async () => {
@@ -114,7 +114,7 @@ describe("POST /compile-preference", () => {
   test("compiles a valid preference through the stub", async () => {
     const res = await post(app, { need: need("prefers dark mode") });
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ kind: "compiled", summary: "Dark mode on every site" });
+    expect(await res.json()).toMatchObject({ kind: "compiled", change: { blocks: [{ block: "dark_mode" }] } });
   });
 
   test("passes clientTime through to the compiler", async () => {

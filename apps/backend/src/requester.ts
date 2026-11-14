@@ -41,7 +41,8 @@ const COLOR_VISION = /colou?r ?blind|red-green/i;
 const GESTURE = /hand|gesture|wave|raise/i;
 const FORM = /form|label|click target/i;
 const DISTRACTION = /distract|focus|clutter/i;
-const INVERT = /invert|dark mode|night/i;
+const INVERT = /invert/i;
+const DARK = /dark (mode|theme)|night mode|make (it|this|the page|every site) dark/i;
 const HIDE = /hide (the )?(sidebar|ads?|recommendations)/i;
 const HIDE_TARGET = /sidebar|\bads?\b|recommend/i;
 const MAX_HIDE_IDS = 50;
@@ -232,6 +233,9 @@ function filterFor(body: RequestBody, verb: string, word: string): ContentFilter
 }
 
 export const stubRequester: Requester = async (body) => {
+  if (DARK.test(body.request)) {
+    return { kind: "adaptation", adaptation: adaptationFor(body, [{ block: "dark_mode", allowSiteControls: true }]) };
+  }
   if (INVERT.test(body.request)) {
     return { kind: "adaptation", adaptation: adaptationFor(body, [], { css: INVERT_CSS }) };
   }

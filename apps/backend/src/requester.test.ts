@@ -232,3 +232,11 @@ test("stub filter never targets a bare generic tag and prefers specific groups",
   expect(res.kind).toBe("adaptation");
   if (res.kind === "adaptation") expect(res.adaptation.filters?.[0]?.itemSelector).toBe("ytd-rich-item-renderer");
 });
+
+test("dark mode requests use the native-first dark_mode block, invert stays css", async () => {
+  const base: any = { url: "https://example.com/", outline: { title: "x", headings: [], forms: 0, images: 0, videos: 0, canvases: 0 }, profile: { version: 0, summary: "", needs: [] } };
+  const dark = await stubRequester({ ...base, request: "turn on dark mode" });
+  expect(dark.kind === "adaptation" && dark.adaptation.blocks).toEqual([{ block: "dark_mode", allowSiteControls: true }]);
+  const invert = await stubRequester({ ...base, request: "invert this page" });
+  expect(invert.kind === "adaptation" && invert.adaptation.css).toContain("invert");
+});

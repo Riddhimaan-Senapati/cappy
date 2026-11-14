@@ -15,11 +15,13 @@ import { BLOCKED_VALIDATION } from "./guard";
 export const BLOCK_RULES = [
   "stop_motion pauses running animations, CSS transitions and autoplaying video or audio. Pick it for light sensitivity, flashing or distracting motion.",
   "text_scale multiplies the real computed font sizes of text on the page. Prefer it over text_focus fontScale when the user needs larger text.",
+  "dark_mode turns on the site's own dark theme (its dark class, data-theme attribute, prefers-color-scheme styles or its theme toggle) and only inverts colors when the site has none. Use it for any dark mode, dark theme or night mode request instead of writing css; set allowSiteControls true.",
+  "Prefer the website's own features over changing the page; change the page only when the site offers no way to do it.",
 ];
 
 // Shared with the requester: both let the model style the page beyond the fixed blocks.
 export const CHANGE_RULES = [
-  "You may write css for visual changes the blocks cannot express, such as invert, dim, dark mode or spacing. css must not use url(), @import, @font-face or content text.",
+  "You may write css for visual changes the blocks cannot express, such as invert, dim or spacing (dark mode uses the dark_mode block, never css). css must not use url(), @import, @font-face or content text.",
   "You may write ops to hide or style specific page elements. Ops may name only ids from the page elements list, never invented ids.",
 ];
 
