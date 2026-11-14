@@ -361,6 +361,7 @@ export class AgentClient {
   private async onMessage(message: ServerMessage) {
     if (message.type === "usage") {
       const run = message.runId ? this.runs.get(message.runId) : undefined;
+      if (run) this.emit(run, { type: "usage", runId: run.runId, usage: message.usage });
       const tabId = run?.tabId ?? (message.requestId ? this.suggestionTabs.get(message.requestId) : undefined);
       if (tabId) void sendToTab(tabId, { kind: "usage", usage: message.usage, model: message.model, purpose: run ? (run.trigger === "page_load" ? "Automatic page adaptation" : "Chat adaptation") : "Page suggestion" }).catch(() => undefined);
       this.usageUpdates = this.usageUpdates.then(async () => {
