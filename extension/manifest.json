@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "description": "Adapts every website to your needs. Press the shortcut on any page and say what you need.",
   "minimum_chrome_version": "116",
-  "permissions": ["sidePanel", "storage", "tabs", "activeTab", "scripting"],
+  "permissions": ["sidePanel", "storage", "tabs", "activeTab", "scripting", "tts"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "dist/background.js", "type": "module" },
   "action": { "default_title": "Adaptive Agent settings", "default_popup": "popup.html" },

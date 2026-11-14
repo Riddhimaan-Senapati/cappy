@@ -3,7 +3,7 @@ import { REMOVABLE_ATTRIBUTES, SAFE_ATTRIBUTES } from "./validate.js";
 
 export { LIMITS, scanCss, validateChange } from "./validate.js";
 
-export const BLOCK_NAMES = ["colorblind", "textScale", "stopMotion"] as const;
+export const BLOCK_NAMES = ["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter"] as const;
 export type BlockName = (typeof BLOCK_NAMES)[number];
 
 // Schemas avoid min/max keywords so they map cleanly onto LLM structured-output formats; limits are enforced in validateChange.
@@ -31,7 +31,26 @@ export const BlockCall = z.discriminatedUnion("name", [
     scale: z.number().describe("Multiplier for every text element's computed size, 1.0 to 2.0. Works on px-based sites where CSS rem/% tricks fail."),
   }),
   z.object({ name: z.literal("stopMotion") }),
+  z.object({
+    name: z.literal("darkMode"),
+    allowSiteControls: z.boolean().describe("true lets it click the site's own dark mode toggle when the site has one."),
+  }),
+  z.object({
+    name: z.literal("contentFilter"),
+    keywords: z.array(z.string()).describe("Words that appear in the items to hide (text, aria-label or link URL); include singular and plural."),
+    itemSelector: z.string().nullable().describe("Selector of the repeated item card from the page outline's itemGroups, or null to apply to every repeated item group on any site."),
+    action: z.enum(["hide", "dim"]),
+  }),
 ]);
+
+export const Schedule = z.object({
+  days: z.array(z.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])).nullable().describe("Days the change is active, or null for every day."),
+  start: z.string().nullable().describe("Local start time HH:MM (24h), or null."),
+  end: z.string().nullable().describe("Local end time HH:MM (24h), or null. Overnight ranges like 22:00-06:00 are allowed."),
+  from: z.string().nullable().describe("First active date YYYY-MM-DD, or null."),
+  until: z.string().nullable().describe("Last active date YYYY-MM-DD inclusive, or null."),
+});
+export type Schedule = z.infer<typeof Schedule>;
 
 export const Change = z.object({
   id: z.string().describe("Short kebab-case id, stable for the same intent (e.g. 'invert-page'). Reusing an id replaces that change."),
@@ -41,6 +60,7 @@ export const Change = z.object({
   dom: z.array(DomOp).nullable().describe("Allowed DOM operations for what CSS cannot do."),
   block: BlockCall.nullable().describe("A pre-built capability for what neither CSS nor DOM ops can do."),
   scope: z.enum(["site", "everywhere"]).describe("site = only this website; everywhere = every site the user visits (only when the user asks for it or the need is clearly universal)."),
+  schedule: Schedule.nullable().optional().describe("Only for time-limited requests (e.g. weekdays 9-5, until Dec 15); null means always."),
 });
 
 export type DomOp = z.infer<typeof DomOp>;

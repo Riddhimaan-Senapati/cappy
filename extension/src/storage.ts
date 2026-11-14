@@ -19,6 +19,11 @@ export interface StoredState {
   routing: Routing;
   modelOverrides: Partial<Record<Tier, string>>;
   serverUrl: string;
+  askBeforeRemember: boolean;
+  speakReplies: boolean;
+  ttsVoice: string;
+  ttsRate: number;
+  voiceAutoSend: boolean;
 }
 
 export const DEFAULTS: StoredState = {
@@ -33,6 +38,11 @@ export const DEFAULTS: StoredState = {
   routing: "auto",
   modelOverrides: {},
   serverUrl: "ws://localhost:8787/agent",
+  askBeforeRemember: false,
+  speakReplies: false,
+  ttsVoice: "",
+  ttsRate: 1,
+  voiceAutoSend: true,
 };
 
 const MAX_RECIPES = 60;

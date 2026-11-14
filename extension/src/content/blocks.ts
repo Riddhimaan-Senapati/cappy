@@ -157,5 +157,8 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return textScale(block.scale);
     case "stopMotion":
       return stopMotion();
+    case "darkMode":
+    case "contentFilter":
+      throw new Error(`block ${block.name} is not implemented yet`);
   }
 }
