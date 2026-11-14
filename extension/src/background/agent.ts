@@ -1,5 +1,5 @@
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
-import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
+import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, SiteControlOutcome, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
 import { rememberLines } from "../memory.js";
 import { load, recipeKey, save, saveRecipe } from "../storage.js";
@@ -13,6 +13,7 @@ interface Run {
   trigger: Trigger;
   message: string;
   applied: Map<string, ActiveChange>;
+  siteControls: Map<string, ActiveChange>;
 }
 
 export interface AgentHooks {
@@ -122,7 +123,7 @@ export class AgentClient {
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const runId = crypto.randomUUID();
-    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map() };
+    const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map() };
 
     this.emit(run, { type: "start", runId, trigger, message });
     if (this.busyTab(tabId)) return this.emit(run, { type: "error", runId, message: "Still working on the last request." });
@@ -186,7 +187,7 @@ export class AgentClient {
   }
 
   private summaries(run: Run): AppliedSummary[] {
-    return [...run.applied.values()].map(({ id, summary, reason, scope }) => ({ id, summary, reason, scope }));
+    return [...run.applied.values(), ...run.siteControls.values()].map(({ id, summary, reason, scope }) => ({ id, summary, reason, scope }));
   }
 
   private async onMessage(message: ServerMessage) {
@@ -246,10 +247,25 @@ export class AgentClient {
       if (message.name === "screenshot") {
         if (run.trigger === "page_load") await sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
         result = { dataUrl: await captureScaled(run.windowId) };
+      } else if (message.name === "use_site_control") {
+        if (run.trigger !== "chat") throw new Error("Site controls require a chat request.");
+        result = await sendToTab(run.tabId, { kind: "useSiteControl", input: message.input, userMessage: run.message });
       } else {
         result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input });
       }
       if (message.name === "apply_change") this.afterApply(run, (message.input as { change: Change }).change, result as ApplyOutcome);
+      if (message.name === "use_site_control") {
+        const outcome = result as SiteControlOutcome;
+        if (outcome.status === "applied") {
+          run.siteControls.set(outcome.change.id, outcome.change);
+          this.step(run, `Verified site control: ${outcome.change.summary}`, "good");
+        }
+      }
+      if (message.name === "revert_change" && (result as { ok: boolean }).ok) {
+        const { id } = message.input as { id: string };
+        run.applied.delete(id);
+        run.siteControls.delete(id);
+      }
       this.hooks.tool(run.tabId, message.name, Date.now() - started, true, summarizeInput(message));
       this.send({ type: "toolResult", callId: message.callId, ok: true, result });
     } catch (error) {

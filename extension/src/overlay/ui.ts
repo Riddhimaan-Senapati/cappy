@@ -8,6 +8,8 @@ import { OVERLAY_CSS } from "./styles.js";
 
 const TOAST_MS = 9000;
 
+type ToastAction = { label: string; run: () => Promise<void> };
+
 export class OverlayUi {
   readonly host = document.createElement("div");
   readonly spotlight: Spotlight;
@@ -93,7 +95,7 @@ export class OverlayUi {
     });
   }
 
-  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>) {
+  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>, action?: ToastAction) {
     window.clearTimeout(this.toastTimer);
     const previous = this.toast;
     if (previous) {
@@ -110,10 +112,19 @@ export class OverlayUi {
       undo.type = "button";
       undo.addEventListener("click", async () => {
         await onUndo?.();
-        for (const id of undoIds) await this.deps.revert(id);
-        this.dismissToast();
+        for (const id of [...undoIds].reverse()) await this.deps.revert(id);
+        if (this.toast === toast) this.dismissToast();
       });
       nodes.push(undo);
+    }
+    if (action) {
+      const button = h("button", "link", action.label);
+      button.type = "button";
+      button.addEventListener("click", () => {
+        this.dismissToast();
+        void action.run();
+      });
+      nodes.push(button);
     }
     nodes.push(close, h("div", "life"));
 

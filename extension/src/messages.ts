@@ -18,11 +18,13 @@ export type UiEvent =
   | { type: "error"; runId: string; message: string };
 
 export type ContentRequest =
-  | { kind: "tool"; name: Exclude<TabToolName, "screenshot">; input: unknown }
+  | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown }
+  | { kind: "useSiteControl"; input: unknown; userMessage: string }
   | { kind: "list" }
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
+  | { kind: "frictionPrompt"; origin: string }
   | { kind: "ui"; event: UiEvent }
   | { kind: "readAloud" }
   | { kind: "voiceEvent"; event: VoiceEvent };
@@ -49,6 +51,7 @@ export interface StatusInfo {
 
 export type BackgroundRequest =
   | { kind: "runChat"; message: string; fresh: boolean }
+  | { kind: "frictionAccept" }
   | { kind: "pageReady"; origin: string; restored: number }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }

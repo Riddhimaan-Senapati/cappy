@@ -2,9 +2,11 @@ import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo,
 import { load } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
+import { acceptFriction, registerFriction } from "./friction.js";
 import { registerTts } from "./tts.js";
 
 registerTts();
+registerFriction();
 
 const debugPorts = new Set<chrome.runtime.Port>();
 
@@ -62,6 +64,9 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
   switch (request.kind) {
     case "runChat":
       if (sender.tab) void agent.startRun(sender.tab, "chat", request.message, request.fresh);
+      break;
+    case "frictionAccept":
+      if (sender.tab) void acceptFriction(sender.tab, agent).catch(() => undefined);
       break;
     case "pageReady":
       if (sender.tab) void maybeRunProactively(sender.tab, request.origin, request.restored);

@@ -5,25 +5,31 @@ import { findItemGroups } from "./item-groups.js";
 
 const TARGETS = 'a[href], button, [role="button"], input:not([type="hidden"]), select, textarea';
 const MAX_ELEMENTS = 80;
+const MAX_STATS_SCAN = 3000;
 
 const clip = (text: string | null | undefined, length = 80) => (text ?? "").replace(/\s+/g, " ").trim().slice(0, length);
 
 export function computeStats(): PageStats {
-  const texts = textElements(3000).filter(isVisible);
-  const media = [...document.querySelectorAll<HTMLMediaElement>("video, audio")].filter((element) => !element.paused);
+  const texts = textElements(MAX_STATS_SCAN).filter(isVisible);
+  const visible = (selector: string) => queryAll(selector).slice(0, MAX_STATS_SCAN).filter(isVisible);
+  const media = queryAll("video, audio").slice(0, MAX_STATS_SCAN).filter((element) => !(element as HTMLMediaElement).paused);
+  const running = document.getAnimations().filter((animation) => {
+    const target = (animation.effect as KeyframeEffect | null)?.target;
+    return animation.playState === "running" && !(target instanceof Element && isOwn(target));
+  });
 
   return {
-    inputsWithoutLabel: queryAll(LABELLABLE).filter((element) => isVisible(element) && !accessibleName(element)).length,
-    smallTargets: queryAll(TARGETS).filter((element) => {
-      if (!isVisible(element) || element.closest("p, li")) return false;
+    inputsWithoutLabel: visible(LABELLABLE).filter((element) => !accessibleName(element)).length,
+    smallTargets: visible(TARGETS).filter((element) => {
+      if (element.matches("a[href]") && element.closest("p, li")) return false;
       const rect = element.getBoundingClientRect();
       return rect.width < 24 || rect.height < 24;
     }).length,
     smallText: texts.filter((element) => parseFloat(getComputedStyle(element).fontSize) < 14).length,
     lowContrastText: texts.filter((element) => contrastRatio(element) < 4.5).length,
-    imagesWithoutAlt: queryAll("img:not([alt])").filter(isVisible).length,
-    runningAnimations: document.getAnimations().filter((animation) => animation.playState === "running").length + media.length,
-    visibleAdsOrPopups: queryAll(AD_OR_POPUP).filter(isVisible).length,
+    imagesWithoutAlt: visible("img:not([alt])").length,
+    runningAnimations: running.length + media.length,
+    visibleAdsOrPopups: visible(AD_OR_POPUP).length,
   };
 }
 

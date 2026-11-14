@@ -1,9 +1,10 @@
 import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js";
 import { isScheduleActive, validateChange } from "../../../shared/validate.js";
-import type { ApplyOutcome } from "../../../shared/protocol.js";
+import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
 import { computeStats } from "./outline.js";
+import { isSiteControlInput, siteControlId, useSiteControl } from "./site-controls.js";
 
 type Undo = () => void;
 type Reapply = (roots: Element[]) => void;
@@ -21,6 +22,7 @@ interface Applied {
 }
 
 const applied = new Map<string, Applied>();
+const siteControls = new Map<string, { change: ActiveChange; restore: () => Promise<boolean> }>();
 const SCHEDULE_TICK_MS = 30_000;
 let scheduleTimer: ReturnType<typeof setInterval> | undefined;
 let generatedIds = 0;
@@ -161,6 +163,7 @@ function materialize(change: Change, matched: Record<string, number>): Live {
       if (block.matched && change.block.name === "contentFilter") {
         matched[`contentFilter ${change.block.itemSelector ?? "all item groups"}`] = block.matched();
       }
+      if (block.matched && change.block.name === "formFixer") matched.formFixer = block.matched();
     }
   } catch (caught) {
     unwind(live);
@@ -268,40 +271,94 @@ function stopObservingIfIdle() {
   }
 }
 
-export async function applyChange(change: Change, animate = true): Promise<ApplyOutcome> {
-  ensureBaseStyle();
-  const problem = validateChange(change);
-  const before = computeStats();
-  if (problem) return { ok: false, error: problem, matched: {}, before, after: before };
-
-  const matched: Record<string, number> = {};
-  let error: string | undefined;
-  let waiting = false;
-  let note: Promise<string> | undefined;
-
+async function installChange(entry: Applied, matched: Record<string, number>, animate: boolean): Promise<string | undefined> {
   await transition(() => {
-    revertNow(change.id);
-    const entry: Applied = { change: { ...change, appliedAt: Date.now() }, live: null };
-    waiting = change.schedule != null && !isScheduleActive(change.schedule, new Date());
-    if (!waiting) {
-      try {
-        entry.live = materialize(change, matched);
-        note = entry.live.note;
-      } catch (caught) {
-        error = caught instanceof Error ? caught.message : String(caught);
-        return;
-      }
-    }
-    applied.set(change.id, entry);
+    revertNow(entry.change.id);
+    const waiting = entry.change.schedule != null && !isScheduleActive(entry.change.schedule, new Date());
+    entry.live = waiting ? null : materialize(entry.change, matched);
+    applied.set(entry.change.id, entry);
     if (entry.live?.reapply.length) startObserving();
     manageScheduleTimer();
   }, animate);
+  return entry.live?.note;
+}
 
-  const outcome = { ok: !error, error, matched, before, after: computeStats(), ...(waiting ? { waitingForSchedule: true } : {}) };
-  return note ? { ...outcome, note: await note } : outcome;
+// View transitions and pulses can introduce temporary animations during verification.
+function observedProblems(
+  { runningAnimations: _runningAnimations, lowContrastText, ...stats }: ReturnType<typeof computeStats>,
+  change: Change,
+): number {
+  // Dark mode checks the rendered theme separately. The generic contrast count cannot see CSS filters.
+  const contrastProblems = change.block?.name === "darkMode" ? 0 : lowContrastText;
+  return Object.values(stats).reduce((sum, count) => sum + count, contrastProblems);
+}
+
+export async function applyChange(change: Change, animate = true): Promise<ApplyOutcome> {
+  ensureBaseStyle();
+  const problem = validateChange(change);
+  if (problem) {
+    const before = computeStats();
+    return { ok: false, error: problem, matched: {}, before, after: before };
+  }
+
+  const previous = applied.get(change.id);
+  const before = computeStats();
+  const attempts = animate ? 2 : 1;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const entry: Applied = { change: { ...change, appliedAt: Date.now() }, live: null };
+    const matched: Record<string, number> = {};
+    let after = before;
+    let error: string;
+    try {
+      const note = await installChange(entry, matched, animate);
+      after = entry.live ? computeStats() : before;
+      const counts = Object.values(matched);
+      const missed = !change.block && counts.length > 0 && counts.every((count) => count === 0);
+      const worsened = observedProblems(after, change) > observedProblems(before, change);
+      if (!animate || !entry.live || (!missed && !worsened)) {
+        return { ok: true, matched, before, after, note, ...(!entry.live ? { waitingForSchedule: true } : {}) };
+      }
+      error = missed ? "No elements matched the change." : "The change increased measured accessibility problems.";
+    } catch (caught) {
+      error = caught instanceof Error ? caught.message : String(caught);
+    }
+    revertNow(change.id);
+    if (attempt === attempts) {
+      if (previous) await installChange(previous, {}, false);
+      return { ok: false, error: `${error} The page was restored.`, matched, before, after };
+    }
+  }
+  throw new Error("No verification attempt ran");
+}
+
+export async function applySiteControl(input: unknown, message: string): Promise<SiteControlOutcome> {
+  if (!isSiteControlInput(input)) return { status: "unavailable", error: "Invalid site control request." };
+  try {
+    const undo = await useSiteControl(input, message);
+    if (!undo) return { status: "already-set" };
+    const change: ActiveChange = {
+      id: `site-control-${siteControlId()}`,
+      summary: input.summary,
+      reason: input.reason,
+      scope: "site",
+      css: null,
+      dom: null,
+      block: null,
+      appliedAt: Date.now(),
+    };
+    siteControls.set(change.id, { change, restore: undo });
+    return { status: "applied", change };
+  } catch (error) {
+    return { status: "unavailable", error: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 export async function revertChange(id: string, animate = true): Promise<boolean> {
+  const siteControl = siteControls.get(id);
+  if (siteControl) {
+    siteControls.delete(id);
+    return siteControl.restore();
+  }
   let reverted = false;
   await transition(() => {
     reverted = revertNow(id);
@@ -310,11 +367,12 @@ export async function revertChange(id: string, animate = true): Promise<boolean>
 }
 
 export async function revertAll(animate = true) {
+  for (const id of [...siteControls.keys()].reverse()) await revertChange(id, false);
   await transition(() => [...applied.keys()].forEach(revertNow), animate);
 }
 
 export function activeChanges(): ActiveChange[] {
-  return [...applied.values()].map((entry) => entry.change);
+  return [...applied.values(), ...siteControls.values()].map((entry) => entry.change);
 }
 
 let busyTimer: ReturnType<typeof setTimeout> | undefined;

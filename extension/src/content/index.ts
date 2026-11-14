@@ -2,13 +2,22 @@ import type { ActiveChange, Change } from "../../../shared/adaptation.js";
 import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "../messages.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
-import { activeChanges, applyChange, revertAll, revertChange, setBusy } from "./engine.js";
+import { activeChanges, applyChange, applySiteControl, revertAll, revertChange, setBusy } from "./engine.js";
 import { inspect, readPage } from "./outline.js";
+import { findSiteFeatures } from "./site-controls.js";
 import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
 onSpeechChange((on) => ensureOverlay().setSpeaking(on));
+
+let pendingMutation: Promise<unknown> = Promise.resolve();
+
+function mutate<T>(operation: () => Promise<T>): Promise<T> {
+  const result = pendingMutation.then(operation);
+  pendingMutation = result.catch(() => undefined);
+  return result;
+}
 
 const send = (request: BackgroundRequest) => chrome.runtime.sendMessage(request).catch(() => undefined);
 
@@ -19,10 +28,16 @@ async function apply(change: Change) {
   return outcome;
 }
 
-async function revert(id: string) {
-  const ok = await revertChange(id);
-  await recordReverted(origin, id);
-  return { ok };
+function revert(id: string) {
+  return mutate(async () => {
+    const ok = await revertChange(id);
+    if (id.startsWith("site-control-")) {
+      if (!ok) ensureOverlay().showToast("The site control could not be restored.", [], true);
+    } else {
+      await recordReverted(origin, id);
+    }
+    return { ok };
+  });
 }
 
 async function restore(animate: boolean) {
@@ -39,7 +54,7 @@ function ensureOverlay(): OverlayUi {
     listChanges: activeChanges,
     revert: async (id) => void (await revert(id)),
     revertAll: async () => {
-      for (const change of activeChanges()) await revert(change.id);
+      for (const change of activeChanges().reverse()) await revert(change.id);
     },
     openDebug: () => void send({ kind: "openDebug" }),
     readAloud: () => {
@@ -66,16 +81,29 @@ async function handle(request: ContentRequest): Promise<unknown> {
           return readPage();
         case "inspect":
           return inspect((request.input as { selector: string }).selector);
+        case "find_site_features":
+          return findSiteFeatures();
         case "apply_change":
-          return apply((request.input as { change: Change }).change);
+          return mutate(() => apply((request.input as { change: Change }).change));
         case "revert_change":
           return revert((request.input as { id: string }).id);
       }
       break;
+    case "useSiteControl":
+      return mutate(async () => {
+        if ((await load()).paused) return { status: "unavailable", error: "Adaptations are paused." };
+        return applySiteControl(request.input, request.userMessage);
+      });
     case "list":
       return activeChanges() satisfies ActiveChange[];
     case "busy":
       return setBusy(request.on);
+    case "frictionPrompt":
+      if (request.origin !== origin) return;
+      return ensureOverlay().showToast("Make text bigger on every site?", [], false, undefined, {
+        label: "Yes, remember",
+        run: async () => void (await send({ kind: "frictionAccept" })),
+      });
     case "toast":
       return ensureOverlay().showToast(request.text, request.undoIds);
     case "readAloud":
@@ -104,8 +132,10 @@ for (const type of ["keydown", "keyup", "keypress"] as const) {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.paused) {
-    if (changes.paused.newValue) void revertAll();
-    else void restore(true);
+    void mutate(async () => {
+      if (changes.paused.newValue) await revertAll();
+      else await restore(true);
+    }).catch(() => undefined);
   }
   if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
 });
@@ -117,7 +147,7 @@ function whenReady(callback: () => void) {
 
 (async () => {
   const state = await load();
-  const restored = state.paused ? 0 : await restore(false);
+  const restored = state.paused ? 0 : await mutate(() => restore(false));
   whenReady(() => {
     void send({ kind: "pageReady", origin, restored });
     if (state.floatingButton) ensureOverlay().setFab(true);

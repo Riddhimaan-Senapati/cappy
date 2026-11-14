@@ -36,7 +36,26 @@ export interface ApplyOutcome {
   note?: string;
 }
 
+export type SiteControl = { id: string; name: string } & (
+  | { kind: "toggle"; on: boolean }
+  | { kind: "select"; selected: number; options: { index: number; label: string }[] }
+);
+
+export interface SiteControlInput {
+  controlId: string;
+  value: number | boolean;
+  summary: string;
+  reason: string;
+}
+
+export type SiteControlOutcome =
+  | { status: "applied"; change: ActiveChange }
+  | { status: "already-set" }
+  | { status: "unavailable"; error: string };
+
 export interface TabTools {
+  find_site_features: { input: Record<string, never>; output: SiteControl[] };
+  use_site_control: { input: SiteControlInput; output: SiteControlOutcome };
   read_page: { input: Record<string, never>; output: PageOutline };
   inspect: { input: { selector: string }; output: { count: number; samples: InspectedElement[] } };
   apply_change: { input: { change: Change }; output: ApplyOutcome };

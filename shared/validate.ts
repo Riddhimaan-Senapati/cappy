@@ -18,7 +18,7 @@ export const REMOVABLE_ATTRIBUTES = ["autoplay", "loop", "tabindex", "aria-hidde
 
 
 const DOM_OPS = new Set(["addLabel", "setAttribute", "removeAttribute", "pauseMedia"]);
-const BLOCKS = new Set(["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter"]);
+const BLOCKS = new Set(["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter", "formFixer"]);
 
 const FORBIDDEN_CSS: Array<[RegExp, string]> = [
   [/url\s*\(/i, "url() can load outside resources"],
@@ -64,6 +64,11 @@ export function validateChange(change: Change): string | null {
     if (op.op === "setAttribute" && op.value.length > LIMITS.attrChars) return "attribute value too long";
   }
   if (change.block && !BLOCKS.has(change.block.name)) return `unknown block "${change.block.name}"`;
+  if (change.block?.name === "formFixer") {
+    const { minTargetPx, addLabels, clearErrors, oneQuestionMode } = change.block;
+    if (!Number.isInteger(minTargetPx) || minTargetPx < 24 || minTargetPx > 64) return "form target size must be 24 to 64 whole pixels";
+    if ([addLabels, clearErrors, oneQuestionMode].some((option) => typeof option !== "boolean")) return "form options must be boolean";
+  }
   if (change.block?.name === "contentFilter") {
     const { keywords, itemSelector } = change.block;
     if (!Array.isArray(keywords) || keywords.length < 1 || keywords.length > 12) return "filter needs 1 to 12 keywords";

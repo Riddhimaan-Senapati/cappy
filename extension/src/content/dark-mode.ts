@@ -1,17 +1,13 @@
-import type { BlockCall } from "../../../shared/adaptation.js";
 import { OWN_ATTR } from "./dom.js";
 
-export type DarkStrategy = "class" | "media" | "toggle" | "invert";
+export type DarkStrategy = "class" | "media" | "invert";
 export type DarkOutcome = DarkStrategy | "already-dark" | "none";
-type DarkCall = Extract<BlockCall, { name: "darkMode" }>;
 
-const STRATEGY_ORDER: readonly DarkStrategy[] = ["class", "media", "toggle", "invert"];
+const STRATEGY_ORDER: readonly DarkStrategy[] = ["class", "media", "invert"];
 const STORAGE_KEY = "darkModeStrategy";
 const STORAGE_HOSTS_MAX = 200;
 const DARK_LUMINANCE = 0.2;
 const MAX_SWITCH_TRIES = 4;
-const MAX_TOGGLE_TRIES = 3;
-const TOGGLE_SETTLE_MS = 300;
 const STYLE_MARK = "dark-mode";
 
 const INVERT_CSS = `
@@ -36,14 +32,9 @@ const THEME_TOKENS: ReadonlyArray<{ token: ThemeToken; pattern: RegExp }> = [
   attrToken("theme", "dark"),
 ];
 
-const TOGGLE_SELECTOR = "button, [role=button], [role=switch], [aria-pressed], input[type=checkbox]";
-const TOGGLE_NAME = /dark|night|theme|appearance/i;
-const SETTINGS_NAME = /setting|preference|customi[sz]e/i;
-
 const OUTCOME_NOTES: Record<DarkOutcome, string> = {
   class: "Used the site's own dark theme",
   media: "Used the site's dark mode setting (prefers-color-scheme)",
-  toggle: "Clicked the site's own dark mode toggle",
   invert: "The site has no dark theme, so the colors were inverted",
   "already-dark": "The page is already dark",
   none: "Could not darken this page",
@@ -54,8 +45,8 @@ export function darkOutcomeNote(outcome: DarkOutcome): string {
 }
 
 // Tries the site's own dark theme before inverting colors. Every step is undoable.
-export function applyDarkMode(cfg: DarkCall, doc: Document = document): { undo: () => void; note: Promise<string> } {
-  const session = new DarkSession(cfg, doc);
+export function applyDarkMode(doc: Document = document): { undo: () => void; note: Promise<string> } {
+  const session = new DarkSession(doc);
   const note = session
     .run()
     .catch((err: unknown) => {
@@ -96,20 +87,16 @@ export class Journal {
 
 class DarkSession {
   private readonly undos: Array<() => void> = [];
-  private readonly toggled: HTMLElement[] = [];
   private cancelled = false;
   private undone = false;
 
-  constructor(
-    private readonly cfg: DarkCall,
-    private readonly doc: Document,
-  ) {}
+  constructor(private readonly doc: Document) {}
 
   async run(): Promise<DarkOutcome> {
     if (isAlreadyDark(readTone(this.doc))) return "already-dark";
     const host = this.doc.location?.hostname ?? "";
     const remembered = await readRemembered(host);
-    for (const strategy of strategyOrder(remembered, this.cfg.allowSiteControls)) {
+    for (const strategy of strategyOrder(remembered)) {
       if (this.cancelled) return "none";
       if (await this.attempt(strategy)) {
         if (!this.cancelled) await rememberStrategy(host, strategy);
@@ -123,9 +110,6 @@ class DarkSession {
     if (this.undone) return;
     this.undone = true;
     this.cancelled = true;
-    if (this.toggled.length > 0 && isAlreadyDark(readTone(this.doc))) {
-      for (const el of this.toggled) if (el.isConnected) el.click();
-    }
     for (const undo of this.undos.reverse()) undo();
     this.undos.length = 0;
   }
@@ -133,7 +117,6 @@ class DarkSession {
   private attempt(strategy: DarkStrategy): Promise<boolean> {
     if (strategy === "class") return Promise.resolve(this.tryThemeSwitches());
     if (strategy === "media") return Promise.resolve(this.tryDarkMedia());
-    if (strategy === "toggle") return this.tryToggles();
     this.injectInvert();
     return Promise.resolve(true);
   }
@@ -165,25 +148,6 @@ class DarkSession {
       return true;
     }
     journal.unwind();
-    return false;
-  }
-
-  private async tryToggles(): Promise<boolean> {
-    if (!this.cfg.allowSiteControls) return false;
-    const before = readTone(this.doc);
-    const candidates = findToggleCandidates(this.doc, isVisible).slice(0, MAX_TOGGLE_TRIES);
-    for (const el of candidates) {
-      if (this.cancelled) return false;
-      el.click();
-      await sleep(TOGGLE_SETTLE_MS);
-      if (!this.cancelled && isDarkened(before, readTone(this.doc))) {
-        this.toggled.push(el);
-        return true;
-      }
-      el.click();
-      if (this.cancelled) return false;
-      await sleep(TOGGLE_SETTLE_MS);
-    }
     return false;
   }
 
@@ -292,39 +256,6 @@ function isOurStyle(node: Element | ProcessingInstruction | null): boolean {
   return node instanceof Element && node.getAttribute(OWN_ATTR) === STYLE_MARK;
 }
 
-export function accessibleName(el: Element): string {
-  const label = el.getAttribute("aria-label")?.trim();
-  if (label) return label;
-  const labelledBy = el.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const text = labelledBy
-      .split(/\s+/)
-      .map((id) => el.ownerDocument.getElementById(id)?.textContent?.trim() ?? "")
-      .join(" ")
-      .trim();
-    if (text) return text;
-  }
-  const text = el.textContent?.replace(/\s+/g, " ").trim();
-  if (text) return text;
-  return el.getAttribute("title")?.trim() ?? "";
-}
-
-export function findToggleCandidates(doc: Document, isShown: (el: Element) => boolean): HTMLElement[] {
-  return Array.from(doc.querySelectorAll<HTMLElement>(TOGGLE_SELECTOR)).filter((el) => {
-    if (el.hasAttribute("href") || el.tagName === "A") return false;
-    if (el.tagName === "BUTTON" && el.closest("form") && (el.getAttribute("type") ?? "submit") === "submit") return false;
-    if ((el as HTMLButtonElement).disabled) return false;
-    const name = accessibleName(el);
-    return TOGGLE_NAME.test(name) && !SETTINGS_NAME.test(name) && isShown(el);
-  });
-}
-
-function isVisible(el: Element): boolean {
-  const win = el.ownerDocument.defaultView;
-  if (!win) return false;
-  return el.getClientRects().length > 0 && win.getComputedStyle(el).visibility !== "hidden";
-}
-
 const RGBA_RE = /rgba?\(\s*([\d.]+)(?:,|\s)+([\d.]+)(?:,|\s)+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)/i;
 
 export function parseRgba(css: string): Rgba | undefined {
@@ -354,8 +285,8 @@ export function isDarkened(before: Tone, after: Tone): boolean {
   return after.text === undefined || after.text > after.background;
 }
 
-export function strategyOrder(remembered: DarkStrategy | undefined, allowSiteControls: boolean): DarkStrategy[] {
-  const base = STRATEGY_ORDER.filter((s) => s !== "toggle" || allowSiteControls);
+export function strategyOrder(remembered: DarkStrategy | undefined): DarkStrategy[] {
+  const base = [...STRATEGY_ORDER];
   if (!remembered || !base.includes(remembered)) return [...base];
   return [remembered, ...base.filter((s) => s !== remembered)];
 }
@@ -434,8 +365,4 @@ async function rememberStrategy(host: string, strategy: DarkStrategy): Promise<v
   } catch (err) {
     console.warn("could not remember dark mode strategy", err);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

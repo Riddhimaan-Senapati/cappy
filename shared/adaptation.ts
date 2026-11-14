@@ -3,7 +3,7 @@ import { REMOVABLE_ATTRIBUTES, SAFE_ATTRIBUTES } from "./validate.js";
 
 export { LIMITS, scanCss, validateChange } from "./validate.js";
 
-export const BLOCK_NAMES = ["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter"] as const;
+export const BLOCK_NAMES = ["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter", "formFixer"] as const;
 export type BlockName = (typeof BLOCK_NAMES)[number];
 
 // Schemas avoid min/max keywords so they map cleanly onto LLM structured-output formats; limits are enforced in validateChange.
@@ -33,7 +33,14 @@ export const BlockCall = z.discriminatedUnion("name", [
   z.object({ name: z.literal("stopMotion") }),
   z.object({
     name: z.literal("darkMode"),
-    allowSiteControls: z.boolean().describe("true lets it click the site's own dark mode toggle when the site has one."),
+    allowSiteControls: z.boolean().describe("Legacy compatibility flag. Set false. Use find_site_features and use_site_control for native theme controls."),
+  }),
+  z.object({
+    name: z.literal("formFixer"),
+    minTargetPx: z.number().describe("Minimum width and height in pixels for form controls, from 24 to 64."),
+    addLabels: z.boolean().describe("Add visible labels to unnamed form controls when the page supplies enough information."),
+    clearErrors: z.boolean().describe("Show readable inline explanations for native validation errors."),
+    oneQuestionMode: z.boolean().describe("Show one field at a time on simple forms. Enable only when requested."),
   }),
   z.object({
     name: z.literal("contentFilter"),

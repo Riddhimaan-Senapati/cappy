@@ -38,6 +38,35 @@ export const tools: AgentTool[] = [
   }),
 
   defineTool({
+    name: "find_site_features",
+    description: "Find reversible native display and content controls on this page. Returns current states and option indices. The control ids are valid only for the latest discovery on this page.",
+    schema: z.object({}),
+    async run(_input, session) {
+      session.progress("Looking for site controls");
+      return { text: untrusted(await session.callTab("find_site_features", {})) };
+    },
+  }),
+
+  defineTool({
+    name: "use_site_control",
+    description: "Use a control discovered by find_site_features to satisfy the current chat request. Give a desired on/off state for a toggle or the returned option index for a select. Verifies the state and returns an undo id when the setting changes.",
+    schema: z.object({
+      controlId: z.string(),
+      value: z.union([z.boolean(), z.number()]),
+      summary: z.string(),
+      reason: z.string(),
+    }),
+    async run(input, session) {
+      if (session.blockedReason) return { text: "BLOCKED: no changes allowed on this page." };
+      if (session.request.trigger !== "chat") return { text: "Site controls require a chat request." };
+      session.progress("Using a site control");
+      const outcome = await session.callTab("use_site_control", input);
+      if (outcome.status === "applied") session.appliedIds.add(outcome.change.id);
+      return { text: JSON.stringify(outcome) };
+    },
+  }),
+
+  defineTool({
     name: "inspect",
     description:
       "Inspect elements matching a CSS selector: count, up to 5 samples with text, size, computed styles and attributes. Use it to target changes precisely.",
@@ -76,8 +105,9 @@ export const tools: AgentTool[] = [
     schema: z.object({ id: z.string() }),
     async run({ id }, session) {
       session.progress(`Undoing ${id}`);
-      session.appliedIds.delete(id);
-      return { text: JSON.stringify(await session.callTab("revert_change", { id })) };
+      const outcome = await session.callTab("revert_change", { id });
+      if (outcome.ok) session.appliedIds.delete(id);
+      return { text: JSON.stringify(outcome) };
     },
   }),
 

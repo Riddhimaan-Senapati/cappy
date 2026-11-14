@@ -3,10 +3,8 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import {
   Journal,
-  accessibleName,
   applyThemeSwitch,
   darkMediaRuleTexts,
-  findToggleCandidates,
   isDarkQuery,
   isDarkened,
   parseRgba,
@@ -25,8 +23,6 @@ beforeEach(() => {
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.removeAttribute("style");
 });
-
-const shown = () => true;
 
 describe("luminance math", () => {
   it("parses rgb, rgba and percent alpha", () => {
@@ -104,37 +100,6 @@ describe("theme selector detection", () => {
   });
 });
 
-describe("toggle candidates", () => {
-  it("finds dark-mode toggles by accessible name and skips navigation, submit and settings buttons", () => {
-    document.body.innerHTML = `
-      <button aria-label="Toggle dark mode">x</button>
-      <button role="switch" title="Night mode"></button>
-      <button>Dark</button>
-      <button aria-label="Theme settings">s</button>
-      <button>Subscribe</button>
-      <a href="/theme">Dark theme</a>
-      <form><button>Appearance</button></form>
-      <form><button type="button">Theme</button></form>
-      <button disabled>Dark</button>
-    `;
-    const names = findToggleCandidates(document, shown).map(accessibleName);
-    assert.deepEqual(names, ["Toggle dark mode", "Night mode", "Dark", "Theme"]);
-  });
-
-  it("the accessible name prefers aria-label, then labelledby, then text, then title", () => {
-    document.body.innerHTML = `
-      <span id="lbl">Appearance</span>
-      <button aria-label="One">Two</button>
-      <button aria-labelledby="lbl">x</button>
-      <button title="Dark"></button>
-    `;
-    const [a, b, c] = Array.from(document.querySelectorAll("button"));
-    assert.equal(accessibleName(a!), "One");
-    assert.equal(accessibleName(b!), "Appearance");
-    assert.equal(accessibleName(c!), "Dark");
-  });
-});
-
 describe("undo restores what was changed", () => {
   it("a class switch restores the html class, attributes and inline style exactly", () => {
     document.documentElement.setAttribute("class", "light  brand");
@@ -169,10 +134,8 @@ describe("undo restores what was changed", () => {
 });
 
 describe("strategy order", () => {
-  it("tries the remembered strategy first and never toggles without site controls", () => {
-    assert.deepEqual(strategyOrder(undefined, true), ["class", "media", "toggle", "invert"]);
-    assert.deepEqual(strategyOrder("invert", true), ["invert", "class", "media", "toggle"]);
-    assert.deepEqual(strategyOrder(undefined, false), ["class", "media", "invert"]);
-    assert.deepEqual(strategyOrder("toggle", false), ["class", "media", "invert"]);
+  it("tries the remembered strategy first", () => {
+    assert.deepEqual(strategyOrder(undefined), ["class", "media", "invert"]);
+    assert.deepEqual(strategyOrder("invert"), ["invert", "class", "media"]);
   });
 });

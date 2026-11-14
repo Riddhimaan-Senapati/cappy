@@ -76,6 +76,17 @@ export function planStubRun(input: StubInput): StubPlan {
     done.push("turned on dark mode");
   }
 
+  if (/\bmake this form easier\b/i.test(message)) {
+    calls.push({
+      name: "apply_change",
+      input: { change: change({
+        id: "easier-form", summary: "More accessible form", reason, scope: "site",
+        block: { name: "formFixer", minTargetPx: 44, addLabels: true, clearErrors: true, oneQuestionMode: /one question at a time/i.test(message) },
+      }) },
+    });
+    done.push("made the form easier to use");
+  }
+
   if (INVERT.test(message)) {
     calls.push({ name: "apply_change", input: { change: change({ id: "invert-page", summary: "Inverted colors", reason, scope: "site", css: "html { filter: invert(1) hue-rotate(180deg); }" }) } });
     done.push("inverted the colors");
@@ -132,6 +143,19 @@ export function createStubProvider(): AgentProvider {
       await toolNamed("read_page").run({}, session);
       if (session.blockedReason) return "This page contains text that tries to instruct me, so I didn't change anything.";
 
+      if (trigger === "chat" && /^turn on dark mode[.!?]?$/i.test(message.trim())) {
+        const controls = await session.callTab("find_site_features", {});
+        const toggle = controls.find((control) => control.kind === "toggle" && /^(?:toggle )?dark mode$/i.test(control.name));
+        if (toggle) {
+          const result = await toolNamed("use_site_control").run({
+            controlId: toggle.id,
+            value: true,
+            summary: "Dark mode",
+            reason: "Request: turn on dark mode",
+          }, session);
+          if (/"status":"(?:applied|already-set)"/.test(result.text)) return "Turned on the site's dark mode.";
+        }
+      }
       const plan = planStubRun({ trigger, message, profile, page });
       const rejected: string[] = [];
       for (const call of plan.calls) {

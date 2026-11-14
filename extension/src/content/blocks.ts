@@ -2,6 +2,7 @@ import type { BlockCall } from "../../../shared/adaptation.js";
 import { applyContentFilter } from "./content-filter.js";
 import { OWN_ATTR, textElements } from "./dom.js";
 import { applyDarkMode } from "./dark-mode.js";
+import { applyFormFixer } from "./form-fixer.js";
 
 type Undo = () => void;
 type Matrix3 = [number, number, number][];
@@ -167,12 +168,12 @@ export function applyBlock(block: BlockCall): LiveBlock {
     case "stopMotion":
       return stopMotion();
     case "darkMode": {
-      const dark = applyDarkMode(block);
+      const dark = applyDarkMode();
       return { undo: dark.undo, note: dark.note };
     }
     case "contentFilter":
       return contentFilter(block);
-    case "darkMode":
-      throw new Error(`block ${block.name} is not implemented yet`);
+    case "formFixer":
+      return applyFormFixer(block);
   }
 }
