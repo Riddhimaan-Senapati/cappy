@@ -15,6 +15,7 @@ export interface RunRequest {
   profile: string[];
   active: ActiveChange[];
   page: PageOutline;
+  clientTime?: { iso: string; timeZone: string };
 }
 
 export interface InspectedElement {
@@ -29,6 +30,7 @@ export interface ApplyOutcome {
   ok: boolean;
   error?: string;
   matched: Record<string, number>;
+  waitingForSchedule?: boolean;
   before: PageStats;
   after: PageStats;
 }

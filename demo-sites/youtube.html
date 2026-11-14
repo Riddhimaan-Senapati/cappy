@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video site (fixture)</title>
+<style>
+  body { margin: 0; font-family: system-ui, sans-serif; color: #0f0f0f; background: #fff; }
+  ytd-masthead { display: block; padding: 8px 16px; border-bottom: 1px solid #ddd; }
+  ytd-masthead a { margin-right: 12px; color: #065fd4; font-size: 13px; }
+  ytd-app { display: flex; }
+  ytd-guide-renderer { display: block; width: 180px; padding: 8px; border-right: 1px solid #ddd; }
+  ytd-guide-renderer a { display: block; font-size: 13px; color: #0f0f0f; text-decoration: none; padding: 4px 0; }
+  #content { flex: 1; padding: 16px; }
+  ytd-rich-grid-renderer { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  ytd-rich-section-renderer { display: block; margin: 16px 0; }
+  ytd-rich-section-renderer > h2 { font-size: 18px; margin: 0 0 8px; }
+  ytd-rich-section-renderer > div { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  ytd-rich-item-renderer { display: block; }
+  .thumb { background: #ccc; aspect-ratio: 16 / 9; border-radius: 8px; }
+  #video-title { font-size: 14px; margin: 6px 0 2px; }
+  .channel { font-size: 12px; color: #606060; display: block; }
+  .meta { font-size: 12px; color: #606060; }
+</style>
+</head>
+<body>
+<ytd-app>
+  <ytd-masthead><a href="#">Menu 01</a> <a href="#">Menu 02</a> <a href="#">Menu 03</a> <a href="#">Menu 04</a> <a href="#">Menu 05</a> <a href="#">Menu 06</a> <a href="#">Menu 07</a> <a href="#">Menu 08</a> <a href="#">Menu 09</a> <a href="#">Menu 10</a> <a href="#">Menu 11</a> <a href="#">Menu 12</a> <a href="#">Menu 13</a> <a href="#">Menu 14</a> <a href="#">Menu 15</a> <a href="#">Menu 16</a> <a href="#">Menu 17</a> <a href="#">Menu 18</a> <a href="#">Menu 19</a> <a href="#">Menu 20</a> <a href="#">Menu 21</a> <a href="#">Menu 22</a> <a href="#">Menu 23</a> <a href="#">Menu 24</a> <a href="#">Menu 25</a> <a href="#">Menu 26</a> <a href="#">Menu 27</a> <a href="#">Menu 28</a> <a href="#">Menu 29</a> <a href="#">Menu 30</a> <a href="#">Menu 31</a> <a href="#">Menu 32</a> <a href="#">Menu 33</a> <a href="#">Menu 34</a> <a href="#">Menu 35</a> <a href="#">Menu 36</a> <a href="#">Menu 37</a> <a href="#">Menu 38</a> <a href="#">Menu 39</a> <a href="#">Menu 40</a></ytd-masthead>
+  <ytd-guide-renderer><a href="#">Guide 01</a> <a href="#">Guide 02</a> <a href="#">Guide 03</a> <a href="#">Guide 04</a> <a href="#">Guide 05</a> <a href="#">Guide 06</a> <a href="#">Guide 07</a> <a href="#">Guide 08</a> <a href="#">Guide 09</a> <a href="#">Guide 10</a> <a href="#">Guide 11</a> <a href="#">Guide 12</a> <a href="#">Guide 13</a> <a href="#">Guide 14</a> <a href="#">Guide 15</a> <a href="#">Guide 16</a> <a href="#">Guide 17</a> <a href="#">Guide 18</a> <a href="#">Guide 19</a> <a href="#">Guide 20</a> <a href="#">Guide 21</a> <a href="#">Guide 22</a> <a href="#">Guide 23</a> <a href="#">Guide 24</a> <a href="#">Guide 25</a> <a href="#">Guide 26</a> <a href="#">Guide 27</a> <a href="#">Guide 28</a> <a href="#">Guide 29</a> <a href="#">Guide 30</a> <a href="#">Guide 31</a> <a href="#">Guide 32</a> <a href="#">Guide 33</a> <a href="#">Guide 34</a> <a href="#">Guide 35</a> <a href="#">Guide 36</a> <a href="#">Guide 37</a> <a href="#">Guide 38</a> <a href="#">Guide 39</a> <a href="#">Guide 40</a> <a href="#">Guide 41</a> <a href="#">Guide 42</a> <a href="#">Guide 43</a> <a href="#">Guide 44</a> <a href="#">Guide 45</a> <a href="#">Guide 46</a> <a href="#">Guide 47</a> <a href="#">Guide 48</a> <a href="#">Guide 49</a> <a href="#">Guide 50</a> <a href="#">Guide 51</a> <a href="#">Guide 52</a> <a href="#">Guide 53</a> <a href="#">Guide 54</a> <a href="#">Guide 55</a> <a href="#">Guide 56</a> <a href="#">Guide 57</a> <a href="#">Guide 58</a> <a href="#">Guide 59</a> <a href="#">Guide 60</a> <a href="#">Guide 61</a> <a href="#">Guide 62</a> <a href="#">Guide 63</a> <a href="#">Guide 64</a> <a href="#">Guide 65</a> <a href="#">Guide 66</a> <a href="#">Guide 67</a> <a href="#">Guide 68</a> <a href="#">Guide 69</a> <a href="#">Guide 70</a> <a href="#">Guide 71</a> <a href="#">Guide 72</a> <a href="#">Guide 73</a> <a href="#">Guide 74</a> <a href="#">Guide 75</a> <a href="#">Guide 76</a> <a href="#">Guide 77</a> <a href="#">Guide 78</a> <a href="#">Guide 79</a> <a href="#">Guide 80</a></ytd-guide-renderer>
+  <div id="content">
+    <div id="primary">
+      <ytd-rich-section-renderer>
+        <h2>Podcasts</h2>
+        <div>
+      <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Hard Fork Podcast: AI weekly roundup podcast"><div class="thumb"></div><h3 id="video-title">Hard Fork Podcast: AI weekly roundup</h3><a class="channel" href="#">Podcast network</a><span class="meta">Podcast · new</span></ytd-rich-item-renderer>
+      <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Serial Season 2 podcast, episode 1 podcast"><div class="thumb"></div><h3 id="video-title">Serial Season 2 podcast, episode 1</h3><a class="channel" href="#">Podcast network</a><span class="meta">Podcast · new</span></ytd-rich-item-renderer>
+      <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="The Mel Robbins Podcast: Confidence podcast"><div class="thumb"></div><h3 id="video-title">The Mel Robbins Podcast: Confidence</h3><a class="channel" href="#">Podcast network</a><span class="meta">Podcast · new</span></ytd-rich-item-renderer>
+      <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Science Friday Podcast: Octopus minds podcast"><div class="thumb"></div><h3 id="video-title">Science Friday Podcast: Octopus minds</h3><a class="channel" href="#">Podcast network</a><span class="meta">Podcast · new</span></ytd-rich-item-renderer>
+        </div>
+      </ytd-rich-section-renderer>
+      <ytd-rich-grid-renderer id="grid">
+    <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Lex Fridman Podcast #400 - Full Episode podcast"><div class="thumb"></div><h3 id="video-title">Lex Fridman Podcast #400 - Full Episode</h3><a class="channel" href="#">Lex Fridman</a><span class="meta">Podcast · 3:12:04 · 2 days ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">How to cook pasta in 10 minutes</h3><a class="channel" href="#">Chef Anna</a><span class="meta">1.2M views · 1 week ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Huberman Lab Podcast: Sleep tools podcast"><div class="thumb"></div><h3 id="video-title">Huberman Lab Podcast: Sleep tools</h3><a class="channel" href="#">Huberman Lab</a><span class="meta">Podcast · 2:01:00 · 3 days ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Rust in 100 seconds</h3><a class="channel" href="#">Fireship</a><span class="meta">3.4M views · 2 years ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="The Daily Podcast: Election recap podcast"><div class="thumb"></div><h3 id="video-title">The Daily Podcast: Election recap</h3><a class="channel" href="#">The Daily</a><span class="meta">Podcast · 25:10 · 5 hours ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Morning stretch routine</h3><a class="channel" href="#">Yoga With Mo</a><span class="meta">800K views · 4 months ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Crime Scene Files: Full Episode 12 podcast"><div class="thumb"></div><h3 id="video-title">Crime Scene Files: Full Episode 12</h3><a class="channel" href="#">Narrative Hour</a><span class="meta">Full Episode · 48:00 · 1 week ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Build a bookshelf from one board</h3><a class="channel" href="#">Woodworks</a><span class="meta">500K views · 3 weeks ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Sourdough for beginners</h3><a class="channel" href="#">Bread Lab</a><span class="meta">2M views · 8 months ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Top 10 films of the year</h3><a class="channel" href="#">Film Corner</a><span class="meta">210K views · 2 weeks ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Learn Spanish in 5 minutes</h3><a class="channel" href="#">Language Pals</a><span class="meta">900K views · 1 year ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Trail running tips</h3><a class="channel" href="#">Outdoors TV</a><span class="meta">120K views · 6 days ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Ocean life for kids</h3><a class="channel" href="#">Blue Planet Kids</a><span class="meta">3M views · 2 years ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Electric bikes compared</h3><a class="channel" href="#">Gear Guy</a><span class="meta">300K views · 5 months ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Watercolor basics</h3><a class="channel" href="#">Art Desk</a><span class="meta">75K views · 1 month ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Podcast clip: Startup founder Q&amp;A podcast"><div class="thumb"></div><h3 id="video-title">Podcast clip: Startup founder Q&amp;A</h3><a class="channel" href="#">Venture Talk</a><span class="meta">Podcast · 12:44 · 1 day ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Chess opening traps</h3><a class="channel" href="#">Chess Central</a><span class="meta">400K views · 9 months ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Minimal desk setup 2026</h3><a class="channel" href="#">Setup Studio</a><span class="meta">1.1M views · 2 months ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Night photography guide</h3><a class="channel" href="#">Lens Life</a><span class="meta">260K views · 7 months ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Weekly news roundup</h3><a class="channel" href="#">Global Desk</a><span class="meta">90K views · 4 hours ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Bike repair 101</h3><a class="channel" href="#">Fix It Shop</a><span class="meta">640K views · 1 year ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-podcast="true" aria-label="Podcast: Fermentation deep dive podcast"><div class="thumb"></div><h3 id="video-title">Podcast: Fermentation deep dive</h3><a class="channel" href="#">Kitchen Science</a><span class="meta">Podcast · 1:05:00 · 2 weeks ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Intro to Kubernetes</h3><a class="channel" href="#">Cloud Academy</a><span class="meta">1.5M views · 3 years ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item"><div class="thumb"></div><h3 id="video-title">Houseplant care for winter</h3><a class="channel" href="#">Green Thumb</a><span class="meta">220K views · 10 days ago</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-shorts="true" aria-label="Shorts: 30-second pasta hack"><div class="thumb"></div><h3 id="video-title">Shorts: 30-second pasta hack</h3><a class="channel" href="#">Chef Anna</a><span class="meta">Shorts · 2M views</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-shorts="true" aria-label="Shorts: Desk stretch in 20 seconds"><div class="thumb"></div><h3 id="video-title">Shorts: Desk stretch in 20 seconds</h3><a class="channel" href="#">Yoga With Mo</a><span class="meta">Shorts · 800K views</span></ytd-rich-item-renderer>
+    <ytd-rich-item-renderer class="item" data-shorts="true" aria-label="Shorts: Rust borrow checker in one clip"><div class="thumb"></div><h3 id="video-title">Shorts: Rust borrow checker in one clip</h3><a class="channel" href="#">Fireship</a><span class="meta">Shorts · 3.1M views</span></ytd-rich-item-renderer>
+      </ytd-rich-grid-renderer>
+    </div>
+  </div>
+</ytd-app>
+<script>
+  setTimeout(function () {
+    var grid = document.getElementById("grid");
+    grid.insertAdjacentHTML("beforeend", "<ytd-rich-item-renderer class=\"item\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Carbonara from scratch</h3><a class=\"channel\" href=\"#\">Chef Anna</a><span class=\"meta\">400K views \u00b7 just now</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-podcast=\"true\" aria-label=\"Acquired Podcast: Nvidia origin story podcast\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Acquired Podcast: Nvidia origin story</h3><a class=\"channel\" href=\"#\">Acquired</a><span class=\"meta\">Podcast \u00b7 2:45:00 \u00b7 just now</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Beginner yoga flow</h3><a class=\"channel\" href=\"#\">Yoga With Mo</a><span class=\"meta\">90K views \u00b7 just now</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Retro console repair</h3><a class=\"channel\" href=\"#\">Fix It Shop</a><span class=\"meta\">70K views \u00b7 just now</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-podcast=\"true\" aria-label=\"Ologies Podcast: Mycology podcast\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Ologies Podcast: Mycology</h3><a class=\"channel\" href=\"#\">Alie Ward</a><span class=\"meta\">Podcast \u00b7 1:10:00 \u00b7 just now</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Vegan lasagna test kitchen</h3><a class=\"channel\" href=\"#\">Bread Lab</a><span class=\"meta\">15K views \u00b7 just now</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Desk plant tour</h3><a class=\"channel\" href=\"#\">Green Thumb</a><span class=\"meta\">22K views \u00b7 just now</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-podcast=\"true\" aria-label=\"Pivot Podcast clip: AI pricing podcast\" data-late=\"true\"><div class=\"thumb\"></div><h3 id=\"video-title\">Pivot Podcast clip: AI pricing</h3><a class=\"channel\" href=\"#\">Pivot</a><span class=\"meta\">Podcast \u00b7 18:30 \u00b7 just now</span></ytd-rich-item-renderer>");
+  }, 1500);
+  setTimeout(function () {
+    var grid = document.getElementById("grid");
+    grid.insertAdjacentHTML("beforeend", "<ytd-rich-item-renderer class=\"item\" data-shorts=\"true\" data-late-shorts=\"true\" aria-label=\"Shorts: quick sourdough score\"><div class=\"thumb\"></div><h3 id=\"video-title\">Shorts: quick sourdough score</h3><a class=\"channel\" href=\"#\">Bread Lab</a><span class=\"meta\">Shorts \u00b7 900K views</span></ytd-rich-item-renderer><ytd-rich-item-renderer class=\"item\" data-shorts=\"true\" data-late-shorts=\"true\" aria-label=\"Shorts: pick a lens in 15 seconds\"><div class=\"thumb\"></div><h3 id=\"video-title\">Shorts: pick a lens in 15 seconds</h3><a class=\"channel\" href=\"#\">Lens Life</a><span class=\"meta\">Shorts \u00b7 120K views</span></ytd-rich-item-renderer>");
+  }, 2500);
+</script>
+</body>
+</html>

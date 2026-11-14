@@ -1,5 +1,5 @@
 import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js";
-import { validateChange } from "../../../shared/validate.js";
+import { isScheduleActive, validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
@@ -8,13 +8,20 @@ import { computeStats } from "./outline.js";
 type Undo = () => void;
 type Reapply = (roots: Element[]) => void;
 
-interface Applied {
-  change: ActiveChange;
+interface Live {
   undo: Undo[];
   reapply: Reapply[];
 }
 
+// live is null while the change's schedule is off; the change stays registered so it can switch on without a reload.
+interface Applied {
+  change: ActiveChange;
+  live: Live | null;
+}
+
 const applied = new Map<string, Applied>();
+const SCHEDULE_TICK_MS = 30_000;
+let scheduleTimer: ReturnType<typeof setInterval> | undefined;
 let generatedIds = 0;
 const BASE_CSS = `
 .ba-label { display: block !important; font: 600 0.95rem/1.3 system-ui, sans-serif !important; margin: 0.6em 0 0.25em !important; color: inherit !important; }
@@ -128,14 +135,84 @@ function liveOp(op: DomOp): LiveOp {
   return { run, undo: () => [...undoSteps].reverse().forEach((step) => step()) };
 }
 
+function unwind(live: Live) {
+  [...live.undo].reverse().forEach((undo) => undo());
+  live.undo = [];
+  live.reapply = [];
+}
+
+// Builds every live step of a change. A failure unwinds the partial build and rethrows.
+function materialize(change: Change, matched: Record<string, number>): Live {
+  const live: Live = { undo: [], reapply: [] };
+  try {
+    if (change.css) live.undo.push(applyCss(change, matched));
+    for (const op of change.dom ?? []) {
+      const dom = liveOp(op);
+      matched[`${op.op} ${op.selector}`] = dom.run([document]);
+      live.undo.push(dom.undo);
+      live.reapply.push((roots) => void dom.run(roots));
+    }
+    if (change.block) {
+      const block = applyBlock(change.block);
+      live.undo.push(block.undo);
+      if (block.reapply) live.reapply.push(block.reapply);
+      if (block.matched && change.block.name === "contentFilter") {
+        matched[`contentFilter ${change.block.itemSelector ?? "all item groups"}`] = block.matched();
+      }
+    }
+  } catch (caught) {
+    unwind(live);
+    throw caught;
+  }
+  return live;
+}
+
 function revertNow(id: string): boolean {
   const entry = applied.get(id);
   if (!entry) return false;
-  [...entry.undo].reverse().forEach((undo) => undo());
+  if (entry.live) unwind(entry.live);
   applied.delete(id);
   stopObservingIfIdle();
+  manageScheduleTimer();
   return true;
 }
+
+function manageScheduleTimer() {
+  const scheduled = [...applied.values()].some((entry) => entry.change.schedule);
+  if (scheduled && scheduleTimer === undefined) scheduleTimer = setInterval(() => syncSchedules(), SCHEDULE_TICK_MS);
+  if (!scheduled && scheduleTimer !== undefined) {
+    clearInterval(scheduleTimer);
+    scheduleTimer = undefined;
+  }
+}
+
+// Switches scheduled changes on or off to match the clock. Runs on a timer, on visibilitychange and after each apply.
+function syncSchedules() {
+  const now = new Date();
+  const due = [...applied.values()].filter((entry) => entry.change.schedule && isScheduleActive(entry.change.schedule, now) !== (entry.live !== null));
+  if (due.length) {
+    void transition(() => {
+      for (const entry of due) {
+        if (applied.get(entry.change.id) !== entry) continue;
+        if (entry.live) {
+          unwind(entry.live);
+          entry.live = null;
+          continue;
+        }
+        try {
+          entry.live = materialize(entry.change, {});
+        } catch {
+          // stays off; the next tick retries
+        }
+      }
+      if ([...applied.values()].some((entry) => entry.live?.reapply.length)) startObserving();
+      stopObservingIfIdle();
+    }, true);
+  }
+  manageScheduleTimer();
+}
+
+document.addEventListener("visibilitychange", () => syncSchedules());
 
 async function transition(update: () => void, animate: boolean) {
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -154,7 +231,7 @@ function flush() {
   if (!roots.length) return;
   const effective = roots.length > 300 ? [document.documentElement] : roots;
   for (const entry of applied.values()) {
-    for (const reapply of entry.reapply) {
+    for (const reapply of entry.live?.reapply ?? []) {
       try {
         reapply(effective);
       } catch {
@@ -182,7 +259,7 @@ function startObserving() {
 }
 
 function stopObservingIfIdle() {
-  if (observer && ![...applied.values()].some((entry) => entry.reapply.length)) {
+  if (observer && ![...applied.values()].some((entry) => entry.live?.reapply.length)) {
     observer.disconnect();
     observer = null;
     pendingRoots = new Set();
@@ -197,32 +274,26 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
 
   const matched: Record<string, number> = {};
   let error: string | undefined;
+  let waiting = false;
 
   await transition(() => {
     revertNow(change.id);
-    const entry: Applied = { change: { ...change, appliedAt: Date.now() }, undo: [], reapply: [] };
-    try {
-      if (change.css) entry.undo.push(applyCss(change, matched));
-      for (const op of change.dom ?? []) {
-        const live = liveOp(op);
-        matched[`${op.op} ${op.selector}`] = live.run([document]);
-        entry.undo.push(live.undo);
-        entry.reapply.push((roots) => void live.run(roots));
+    const entry: Applied = { change: { ...change, appliedAt: Date.now() }, live: null };
+    waiting = change.schedule != null && !isScheduleActive(change.schedule, new Date());
+    if (!waiting) {
+      try {
+        entry.live = materialize(change, matched);
+      } catch (caught) {
+        error = caught instanceof Error ? caught.message : String(caught);
+        return;
       }
-      if (change.block) {
-        const block = applyBlock(change.block);
-        entry.undo.push(block.undo);
-        if (block.reapply) entry.reapply.push(block.reapply);
-      }
-      applied.set(change.id, entry);
-      if (entry.reapply.length) startObserving();
-    } catch (caught) {
-      [...entry.undo].reverse().forEach((step) => step());
-      error = caught instanceof Error ? caught.message : String(caught);
     }
+    applied.set(change.id, entry);
+    if (entry.live?.reapply.length) startObserving();
+    manageScheduleTimer();
   }, animate);
 
-  return { ok: !error, error, matched, before, after: computeStats() };
+  return { ok: !error, error, matched, before, after: computeStats(), ...(waiting ? { waitingForSchedule: true } : {}) };
 }
 
 export async function revertChange(id: string, animate = true): Promise<boolean> {
