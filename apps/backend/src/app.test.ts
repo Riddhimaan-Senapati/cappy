@@ -11,6 +11,7 @@ import { stubAdapter } from "./stub-adapter";
 import { stubLlm } from "./stub-llm";
 import { stubRequester } from "./requester";
 import { stubVerifier } from "./verifier";
+import { stubPreferenceCompiler } from "./preferences";
 
 const outline = { title: "Survey", headings: ["Survey"], forms: 1, images: 0, videos: 0, canvases: 0 };
 const profile = Profile.parse({
@@ -20,7 +21,7 @@ const profile = Profile.parse({
 });
 const adaptRequest = AdaptRequest.parse({ url: "https://www.w3.org/survey", outline, profile });
 
-const deps: AppDeps = { adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier };
+const deps: AppDeps = { adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier, compilePreference: stubPreferenceCompiler };
 const app = createApp(deps);
 
 function post(path: string, body: unknown) {
@@ -37,6 +38,7 @@ function appWithAdapter(response: unknown) {
     llm: stubLlm,
     requester: stubRequester,
     verifier: stubVerifier,
+    compilePreference: stubPreferenceCompiler,
   });
 }
 
@@ -122,6 +124,7 @@ describe("POST /adapt", () => {
       llm: stubLlm,
       requester: stubRequester,
       verifier: stubVerifier,
+      compilePreference: stubPreferenceCompiler,
     });
     const res = await failing.request("/adapt", {
       method: "POST",

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Adapter } from "../adapter";
 import { buildAdaptPrompt, parseAdaptText, responseJsonSchema } from "../gemini-adapter";
 import type { LlmClient } from "../llm";
+import { buildPreferencePrompt, parsePreferenceText, preferenceResponseJsonSchema, type PreferenceCompiler } from "../preferences";
 import { buildRequestPrompt, type Requester } from "../requester";
 import { buildVerifyPrompt, type Verifier } from "../verifier";
 import { responses, type InputMessage, type InputPart, type StructuredSchema } from "./client";
@@ -26,6 +27,17 @@ const ADAPT_SCHEMA: StructuredSchema = {
 };
 ADAPT_SCHEMA.schema = toStrictSchema(ADAPT_SCHEMA.schema) as Record<string, unknown>;
 
+const PREFERENCE_SCHEMA: StructuredSchema = {
+  name: "preference_change",
+  schema: {
+    type: "object",
+    properties: { result: preferenceResponseJsonSchema() },
+    required: ["result"],
+    additionalProperties: false,
+  },
+};
+PREFERENCE_SCHEMA.schema = toStrictSchema(PREFERENCE_SCHEMA.schema) as Record<string, unknown>;
+
 const VERIFY_SCHEMA: StructuredSchema = {
   name: "adaptation_verdict",
   schema: toStrictSchema(jsonSchemaOf(VerifyResponse)) as Record<string, unknown>,
@@ -48,6 +60,11 @@ async function adaptationFromPrompt(prompt: string) {
 export const chatgptAdapter: Adapter = (req) => adaptationFromPrompt(buildAdaptPrompt(req));
 
 export const chatgptRequester: Requester = (body: RequestBody) => adaptationFromPrompt(buildRequestPrompt(body));
+
+export const chatgptPreferenceCompiler: PreferenceCompiler = async (req) => {
+  const text = await responses({ input: [{ role: "user", content: buildPreferencePrompt(req) }], schema: PREFERENCE_SCHEMA });
+  return parsePreferenceText(unwrapResult(text));
+};
 
 export const chatgptVerifier: Verifier = async (req) => {
   const parts: InputPart[] = [

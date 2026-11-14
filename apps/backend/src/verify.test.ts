@@ -5,6 +5,7 @@ import { stubAdapter } from "./stub-adapter";
 import { stubLlm } from "./stub-llm";
 import { stubRequester } from "./requester";
 import { splitDataUrl, stubVerifier, type Verifier } from "./verifier";
+import { stubPreferenceCompiler } from "./preferences";
 import { toGeminiSchema } from "./gemini-adapter";
 import { z } from "zod";
 
@@ -23,7 +24,7 @@ const verifyBody = (axeBefore: number, axeAfter: number) => ({
 });
 
 function appWith(verifier: Verifier) {
-  return createApp({ adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier });
+  return createApp({ adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier, compilePreference: stubPreferenceCompiler });
 }
 
 function post(path: string, payload: unknown, instance = appWith(stubVerifier)) {

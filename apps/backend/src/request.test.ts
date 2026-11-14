@@ -5,6 +5,7 @@ import { stubAdapter } from "./stub-adapter";
 import { stubLlm } from "./stub-llm";
 import { stubRequester } from "./requester";
 import { stubVerifier } from "./verifier";
+import { stubPreferenceCompiler } from "./preferences";
 
 const outline = { title: "Survey", headings: ["Survey"], forms: 1, images: 0, videos: 0, canvases: 0 };
 const injected = {
@@ -25,7 +26,7 @@ function body(request: string, extra: Record<string, unknown> = {}) {
   return { url: "https://www.w3.org/", outline, profile, request, ...extra };
 }
 
-const app = createApp({ adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier });
+const app = createApp({ adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier, compilePreference: stubPreferenceCompiler });
 
 function post(path: string, payload: unknown, instance = app) {
   return instance.request(path, {
@@ -46,6 +47,7 @@ describe("injection pre-pass", () => {
       llm: stubLlm,
       requester: stubRequester,
       verifier: stubVerifier,
+      compilePreference: stubPreferenceCompiler,
     };
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     const res = await post(
@@ -69,6 +71,7 @@ describe("injection pre-pass", () => {
         return { kind: "none", reason: "x" };
       },
       verifier: stubVerifier,
+      compilePreference: stubPreferenceCompiler,
     };
     const warn = spyOn(console, "warn").mockImplementation(() => {});
     const res = await post("/request", body("make the text bigger", { outline: injected }), createApp(counting));
@@ -148,6 +151,7 @@ describe("POST /request", () => {
       adapter: stubAdapter,
       llm: stubLlm,
       verifier: stubVerifier,
+      compilePreference: stubPreferenceCompiler,
       requester: async () =>
         ({
           kind: "adaptation",
@@ -170,6 +174,7 @@ describe("POST /request", () => {
       adapter: stubAdapter,
       llm: stubLlm,
       verifier: stubVerifier,
+      compilePreference: stubPreferenceCompiler,
       requester: async () => {
         throw new Error("upstream down");
       },

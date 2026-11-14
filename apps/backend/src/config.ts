@@ -2,12 +2,13 @@ import type { ThinkingLevel } from "@google/genai";
 import type { AppDeps } from "./app";
 import { geminiAdapter } from "./gemini-adapter";
 import { geminiLlm } from "./gemini-llm";
+import { geminiPreferenceCompiler, stubPreferenceCompiler } from "./preferences";
 import { geminiRequester, stubRequester } from "./requester";
 import { stubAdapter } from "./stub-adapter";
 import { stubLlm } from "./stub-llm";
 import { geminiVerifier, stubVerifier } from "./verifier";
 import { chatgptSignedIn } from "./chatgpt/auth";
-import { chatgptAdapter, chatgptLlm, chatgptRequester, chatgptVerifier } from "./chatgpt/providers";
+import { chatgptAdapter, chatgptLlm, chatgptPreferenceCompiler, chatgptRequester, chatgptVerifier } from "./chatgpt/providers";
 
 export type Env = Record<string, string | undefined>;
 
@@ -22,12 +23,19 @@ function thinkingFrom(value: string | undefined): ThinkingLevel {
   return ((THINKING_LEVELS as readonly string[]).includes(v ?? "") ? v : "LOW") as ThinkingLevel;
 }
 
-const STUB_DEPS: AppDeps = { adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier };
+const STUB_DEPS: AppDeps = {
+  adapter: stubAdapter,
+  llm: stubLlm,
+  requester: stubRequester,
+  verifier: stubVerifier,
+  compilePreference: stubPreferenceCompiler,
+};
 const CHATGPT_DEPS: AppDeps = {
   adapter: chatgptAdapter,
   llm: chatgptLlm,
   requester: chatgptRequester,
   verifier: chatgptVerifier,
+  compilePreference: chatgptPreferenceCompiler,
 };
 
 export function depsFromEnv(env: Env, signedIn: () => boolean = () => chatgptSignedIn()): AppDeps {
@@ -49,6 +57,7 @@ export function depsFromEnv(env: Env, signedIn: () => boolean = () => chatgptSig
     llm: geminiLlm(apiKey, chatModel, thinkingFrom(env.GEMINI_CHAT_THINKING)),
     requester: geminiRequester(apiKey, adaptModel, adaptThinking),
     verifier: geminiVerifier(apiKey, verifyModel),
+    compilePreference: geminiPreferenceCompiler(apiKey, adaptModel, thinkingFrom("LOW")),
   };
 }
 
