@@ -9,6 +9,8 @@ export interface AppliedSummary {
 
 export type UiEvent =
   | { type: "start"; runId: string; trigger: Trigger; message: string }
+  | { type: "queued"; runId: string; message: string }
+  | { type: "cancelled"; runId: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
@@ -44,7 +46,10 @@ export type BackgroundRequest =
   | { kind: "openShortcuts" }
   | { kind: "status" }
   | { kind: "setKey"; provider: string; key: string | null }
-  | { kind: "chatgptLogin" };
+  | { kind: "chatgptLogin" }
+  | { kind: "chatgptLogout" }
+  | { kind: "stopRun" }
+  | { kind: "dequeue"; runId: string };
 
 export type DebugPortMessage =
   | { type: "status"; status: StatusInfo }

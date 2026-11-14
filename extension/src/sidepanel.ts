@@ -82,6 +82,12 @@ function onEvent(event: UiEvent) {
     case "blocked":
       run.steps.append(h("li", "bad", `Blocked: ${event.reason}`));
       break;
+    case "queued":
+      run.tag.textContent = "queued";
+      break;
+    case "cancelled":
+      run.steps.append(h("li", "warn", "Stopped"));
+      break;
     case "error":
       run.steps.append(h("li", "bad", `Error: ${event.message}`));
       break;

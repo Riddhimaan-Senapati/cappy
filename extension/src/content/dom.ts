@@ -105,8 +105,14 @@ function effectiveBackground(element: Element | null): Rgba {
   return [255, 255, 255, 1];
 }
 
-export function contrastRatio(element: Element): number {
+export function contrastInfo(element: Element): { ratio: number; color: string; background: string } {
   const foreground = parseColor(getComputedStyle(element).color) ?? [0, 0, 0, 1];
-  const [light, dark] = [luminance(foreground), luminance(effectiveBackground(element))].sort((a, b) => b - a);
-  return (light + 0.05) / (dark + 0.05);
+  const background = effectiveBackground(element);
+  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  const hex = ([r, g, b]: Rgba) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+  return { ratio: Math.round(((light + 0.05) / (dark + 0.05)) * 10) / 10, color: hex(foreground), background: hex(background) };
+}
+
+export function contrastRatio(element: Element): number {
+  return contrastInfo(element).ratio;
 }

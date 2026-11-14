@@ -2,8 +2,8 @@ import type { ActiveChange, Change } from "../../../shared/adaptation.js";
 import type { BackgroundRequest, ContentRequest, ContentResponse, StatusInfo } from "../messages.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, savedChangesFor } from "../storage.js";
-import { activeChanges, applyChange, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
-import { inspect, readPage } from "./outline.js";
+import { activeChanges, applyChange, changeHistory, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { inspect, listItems, readPage } from "./outline.js";
 
 const origin = location.origin;
 let overlay: OverlayUi | null = null;
@@ -52,6 +52,7 @@ async function apply(change: Change) {
   const outcome = await applyChange(change);
   const stored = activeChanges().find((active) => active.id === change.id);
   if (outcome.ok && stored) await recordApplied(origin, stored);
+  for (const id of outcome.replaced ?? []) await recordReverted(origin, id);
   return outcome;
 }
 
@@ -73,12 +74,16 @@ function ensureOverlay(): OverlayUi {
   overlay ??= new OverlayUi({
     ask: (message, fresh) => void send({ kind: "runChat", message, fresh }),
     listChanges: activeChanges,
+    history: changeHistory,
+    reapply: async (change) => void (await apply(change)),
     revert: async (id) => void (await revert(id)),
     revertAll: async () => {
       for (const change of activeChanges()) await revert(change.id);
     },
     openDebug: () => void send({ kind: "openDebug" }),
     ensureAlive,
+    stop: () => void send({ kind: "stopRun" }),
+    dequeue: (runId) => void send({ kind: "dequeue", runId }),
     settings: {
       listChanges: async () => activeChanges(),
       revert: async (id) => void (await revert(id)),
@@ -86,6 +91,7 @@ function ensureOverlay(): OverlayUi {
       openShortcuts: () => void send({ kind: "openShortcuts" }),
       setKey: (provider, key) => void send({ kind: "setKey", provider, key }),
       signIn: () => void send({ kind: "chatgptLogin" }),
+      signOut: () => void send({ kind: "chatgptLogout" }),
       getStatus: async () => ((await send({ kind: "status" })) as StatusInfo | undefined) ?? { connected: false, busy: false },
     },
   });
@@ -100,6 +106,10 @@ async function handle(request: ContentRequest): Promise<unknown> {
           return readPage();
         case "inspect":
           return inspect((request.input as { selector: string }).selector);
+        case "list_items": {
+          const input = request.input as { selector: string; keySelector: string | null };
+          return listItems(input.selector, input.keySelector);
+        }
         case "apply_change":
           return apply((request.input as { change: Change }).change);
         case "revert_change":

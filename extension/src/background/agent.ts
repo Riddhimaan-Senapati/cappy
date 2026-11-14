@@ -46,6 +46,7 @@ export class AgentClient {
   private defaultProvider: string | null = null;
   private notice: StatusInfo["notice"];
   private modelsRequested = new Set<string>();
+  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean }>>();
 
   constructor(private hooks: AgentHooks) {}
 
@@ -82,6 +83,12 @@ export class AgentClient {
   async setKey(provider: string, key: string | null) {
     await this.ensureConnected();
     this.send({ type: "setKey", provider, key });
+  }
+
+  async signOut() {
+    await this.ensureConnected();
+    this.modelsRequested.delete("chatgpt-signin");
+    this.send({ type: "chatgptLogout" });
   }
 
   async signIn() {
@@ -145,37 +152,62 @@ export class AgentClient {
   }
 
   private finish(run: Run) {
-    this.runs.delete(run.runId);
+    if (!this.runs.delete(run.runId)) return;
     if (run.trigger === "page_load") void sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
     this.setStatus({});
+    void this.next(run.tabId);
   }
 
-  private cancel(run: Run) {
-    this.send({ type: "cancel", runId: run.runId });
-    this.finish(run);
+  stopRun(tabId: number) {
+    for (const run of [...this.runs.values()].filter((existing) => existing.tabId === tabId)) {
+      this.send({ type: "cancel", runId: run.runId });
+      this.emit(run, { type: "cancelled", runId: run.runId });
+      this.finish(run);
+    }
   }
 
-  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false) {
+  dequeue(tabId: number, runId: string) {
+    const queue = this.queues.get(tabId) ?? [];
+    this.queues.set(tabId, queue.filter((item) => item.runId !== runId));
+    this.hooks.event(tabId, { type: "cancelled", runId });
+  }
+
+  private async next(tabId: number) {
+    const item = this.queues.get(tabId)?.shift();
+    if (!item) return;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (!tab) return void this.queues.delete(tabId);
+    await this.startRun(tab, "chat", item.message, item.fresh, item.runId);
+  }
+
+  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, fresh = false, queuedId?: string) {
     if (!tab.id || !tab.url?.startsWith("http")) return;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
-    const runId = crypto.randomUUID();
+    const runId = queuedId ?? crypto.randomUUID();
     const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map() };
 
-    const running = [...this.runs.values()].filter((existing) => existing.tabId === tabId);
-    if (running.length && trigger === "page_load") return;
-    for (const existing of running) this.cancel(existing);
+    const busy = [...this.runs.values()].some((existing) => existing.tabId === tabId);
+    if (busy && trigger === "page_load") return;
+    if (busy && !queuedId) {
+      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh }]);
+      return this.emit(run, { type: "queued", runId, message });
+    }
     this.emit(run, { type: "start", runId, trigger, message });
 
     const state = await load();
-    if (state.paused) return this.emit(run, { type: "error", runId, message: "Adaptations are paused. Turn them on in settings." });
+    if (state.paused) {
+      this.emit(run, { type: "error", runId, message: "Adaptations are paused. Turn them on in settings." });
+      return void this.next(tabId);
+    }
 
-    if (trigger === "chat" && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) return;
+    if (trigger === "chat" && !fresh && (await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes))) return void this.next(tabId);
 
     try {
       await this.ensureConnected();
     } catch (error) {
-      return this.emit(run, { type: "error", runId, message: error instanceof Error ? error.message : String(error) });
+      this.emit(run, { type: "error", runId, message: error instanceof Error ? error.message : String(error) });
+      return void this.next(tabId);
     }
 
     this.runs.set(runId, run);
@@ -312,6 +344,8 @@ export class AgentClient {
     if (deltas.length) this.step(run, `Verified: ${deltas.join(", ")}`, "good");
     const missed = Object.entries(outcome.matched).filter(([, count]) => count === 0).map(([selector]) => selector);
     if (missed.length) this.step(run, `Matched nothing: ${missed.slice(0, 2).join(", ")}`, "warn");
+    if (outcome.replaced?.length) this.step(run, `Replaced the earlier sort (${outcome.replaced.join(", ")})`, "good");
+    if (outcome.lowContrast?.length) this.step(run, `${outcome.lowContrast.length} low-contrast spots to fix`, "warn");
   }
 }
 

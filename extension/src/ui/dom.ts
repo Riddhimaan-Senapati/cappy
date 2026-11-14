@@ -27,6 +27,7 @@ const ICONS = {
   eye: [["path", { d: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" }], ["circle", { cx: "12", cy: "12", r: "3" }]],
   keyboard: [["rect", { x: "3", y: "6", width: "18", height: "12", rx: "2" }], ["path", { d: "M7 10h.01M11 10h.01M15 10h.01M7 14h10" }]],
   circle: [["circle", { cx: "12", cy: "12", r: "8" }]],
+  history: [["path", { d: "M3 12a9 9 0 1 0 3-6.7L3 8" }], ["path", { d: "M3 3v5h5" }], ["path", { d: "M12 7v5l3 2" }]],
 } satisfies Record<string, Shape[]>;
 
 export type IconName = keyof typeof ICONS;

@@ -50,6 +50,10 @@ export const SETTINGS_CSS = `
 .s-select:focus-visible { outline: 2px solid var(--accent); }
 .s-select option { background: #1b1b22; color: #f4f4f7; }
 .s-small { padding: 5px 11px; font-size: 12px; }
+.s-acts { display: flex; align-items: center; gap: 10px; flex: none; }
+.s-quiet { color: var(--faint) !important; font-weight: 500 !important; }
+.s-quiet:hover { color: var(--muted) !important; }
+.s-danger { color: var(--bad) !important; }
 .s-on { font-size: 11.5px; font-weight: 600; color: var(--good); }
 .s-active { border-color: rgba(74, 222, 128, 0.22); }
 .s-error { color: var(--bad) !important; }

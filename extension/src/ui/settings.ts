@@ -12,6 +12,7 @@ export interface SettingsContext {
   getStatus(): Promise<StatusInfo>;
   setKey(provider: string, key: string | null): void;
   signIn(): void;
+  signOut(): void;
 }
 
 function toggle(label: string, sub: string, checked: boolean, onChange: (value: boolean) => void) {
@@ -64,6 +65,8 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   root.classList.add("s");
   let draft = "";
   let editingKey: string | null = null;
+  let confirming: string | null = null;
+  let confirmTimer: ReturnType<typeof setTimeout> | undefined;
   let keyDraft = "";
   let disposed = false;
 
@@ -79,12 +82,36 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           ? "Use your ChatGPT Plus or Pro plan"
           : "Paste an API key to use it";
       let action: Node;
-      if (active) action = h("span", "s-on", "In use");
-      else if (provider.ready) {
-        const use = h("button", "s-btn s-small", "Use");
-        use.type = "button";
-        use.addEventListener("click", () => save({ provider: provider.id }));
-        action = use;
+      if (provider.ready) {
+        const isSignin = provider.setup === "signin";
+        const armed = confirming === provider.id;
+        const disconnect = h("button", `s-link${armed ? " s-danger" : " s-quiet"}`, armed ? (isSignin ? "Confirm sign out" : "Confirm remove") : isSignin ? "Sign out" : "Remove key");
+        disconnect.type = "button";
+        disconnect.setAttribute("aria-label", armed ? `Confirm: disconnect ${provider.label}` : `Disconnect ${provider.label}`);
+        disconnect.addEventListener("click", () => {
+          clearTimeout(confirmTimer);
+          if (!armed) {
+            confirming = provider.id;
+            confirmTimer = setTimeout(() => {
+              confirming = null;
+              queue();
+            }, 4000);
+            return queue();
+          }
+          confirming = null;
+          if (isSignin) ctx.signOut();
+          else ctx.setKey(provider.id, null);
+          if (state.provider === provider.id) void save({ provider: null });
+        });
+        let primary: Node;
+        if (active) primary = h("span", "s-on", "In use");
+        else {
+          const use = h("button", "s-btn s-small", "Use");
+          use.type = "button";
+          use.addEventListener("click", () => save({ provider: provider.id }));
+          primary = use;
+        }
+        action = h("div", "s-acts", "", [disconnect, primary]);
       } else {
         const setup = h("button", "s-btn s-small", provider.setup === "signin" ? "Sign in" : editingKey === provider.id ? "Cancel" : "Add key");
         setup.type = "button";

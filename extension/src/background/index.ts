@@ -99,6 +99,15 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "chatgptLogin":
       void agent.signIn().catch(() => undefined);
       break;
+    case "stopRun":
+      if (sender.tab?.id) agent.stopRun(sender.tab.id);
+      break;
+    case "dequeue":
+      if (sender.tab?.id) agent.dequeue(sender.tab.id, request.runId);
+      break;
+    case "chatgptLogout":
+      void agent.signOut().catch(() => undefined);
+      break;
   }
   return false;
 });

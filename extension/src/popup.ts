@@ -36,5 +36,6 @@ renderSettings(root, {
   openShortcuts: () => void chrome.tabs.create({ url: "chrome://extensions/shortcuts" }),
   setKey: (provider, key) => void chrome.runtime.sendMessage({ kind: "setKey", provider, key } satisfies BackgroundRequest),
   signIn: () => void chrome.runtime.sendMessage({ kind: "chatgptLogin" } satisfies BackgroundRequest),
+  signOut: () => void chrome.runtime.sendMessage({ kind: "chatgptLogout" } satisfies BackgroundRequest),
   getStatus: async () => (await chrome.runtime.sendMessage({ kind: "status" } satisfies BackgroundRequest)) as StatusInfo,
 });

@@ -73,6 +73,39 @@ export const OVERLAY_CSS = `
 .link { all: unset; flex: none; cursor: pointer; color: var(--accent); font-size: 12px; font-weight: 550; padding: 1px 4px; border-radius: 5px; }
 .link:hover { background: rgba(255, 255, 255, 0.08); }
 .settings { padding: 10px; }
+.thread { display: flex; flex-direction: column; gap: 4px; padding: 6px 6px 8px; }
+.card { border-radius: 10px; }
+.card.enter { animation: rise 0.34s var(--spring) both; }
+.card.active, .card.open { display: flex; flex-direction: column; gap: 10px; padding: 8px 8px 10px; }
+.card.active { background: rgba(255, 255, 255, 0.025); }
+.ask-line .link { flex: none; }
+.stop { color: rgba(255, 255, 255, 0.42) !important; }
+.stop:hover { color: var(--bad) !important; }
+.quiet { color: rgba(255, 255, 255, 0.38) !important; }
+.mini-card { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 0 8px; border-radius: 8px; cursor: pointer; font-size: 12.5px; color: rgba(255, 255, 255, 0.55); }
+.mini-card:hover { background: rgba(255, 255, 255, 0.05); color: rgba(255, 255, 255, 0.8); }
+.mini-card:focus-visible { outline: 2px solid var(--accent); }
+.mini-card .ico { color: var(--good); }
+.mini-card.error .ico { color: var(--bad); }
+.mini-card.blocked .ico { color: var(--warn); }
+.mini-card .q, .card.queued .q { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mini-card .meta { font-size: 11.5px; color: rgba(255, 255, 255, 0.3); }
+.card.queued { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 0 6px 0 8px; border: 1px dashed rgba(255, 255, 255, 0.1); font-size: 12.5px; color: rgba(255, 255, 255, 0.5); }
+.card.queued .next { font-size: 10px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--accent); }
+.x { all: unset; flex: none; cursor: pointer; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 6px; color: rgba(255, 255, 255, 0.35); }
+.x:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.x:focus-visible { outline: 2px solid var(--accent); }
+@keyframes rise { from { opacity: 0; transform: translateY(10px) scale(0.98); } }
+.empty { padding: 14px 12px; font-size: 13px; color: rgba(255, 255, 255, 0.4); }
+.hrow { height: auto; min-height: 44px; padding: 7px 10px; align-items: center; }
+.hmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.hmain .ht { font-size: 13px; color: rgba(255, 255, 255, 0.86); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
+.hmain .hr { font-size: 11.5px; color: rgba(255, 255, 255, 0.36); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hrow.off .ht { color: rgba(255, 255, 255, 0.42); }
+.mini { position: relative; width: 26px; height: 15px; flex: none; border-radius: 999px; background: rgba(255, 255, 255, 0.14); transition: background 0.2s var(--ease); }
+.mini::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #fff; transition: transform 0.25s var(--spring); }
+.mini.on { background: var(--grad); }
+.mini.on::after { transform: translateX(11px); }
 
 .hints { display: flex; gap: 14px; padding: 7px 16px 9px; font-size: 11.5px; color: rgba(255, 255, 255, 0.3); border-top: 1px solid rgba(255, 255, 255, 0.05); }
 .hints[hidden] { display: none; }
