@@ -11,6 +11,7 @@
     "typecheck": "bun run --filter '*' typecheck",
     "e2e": "cd apps/extension && bunx wxt build && cd ../.. && bun scripts/e2e-gate.ts",
     "bench:gemini": "bun scripts/bench-gemini.ts",
+    "chatgpt:login": "cd apps/backend && bun src/chatgpt/auth.ts login",
     "e2e:build": "cd apps/extension && bunx wxt build",
     "e2e:injection": "bun scripts/e2e-injection.ts",
     "e2e:companion": "bun scripts/e2e-companion.ts",

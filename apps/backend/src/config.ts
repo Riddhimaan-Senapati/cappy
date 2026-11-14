@@ -6,6 +6,8 @@ import { geminiRequester, stubRequester } from "./requester";
 import { stubAdapter } from "./stub-adapter";
 import { stubLlm } from "./stub-llm";
 import { geminiVerifier, stubVerifier } from "./verifier";
+import { chatgptSignedIn } from "./chatgpt/auth";
+import { chatgptAdapter, chatgptLlm, chatgptRequester, chatgptVerifier } from "./chatgpt/providers";
 
 export type Env = Record<string, string | undefined>;
 
@@ -20,9 +22,24 @@ function thinkingFrom(value: string | undefined): ThinkingLevel {
   return ((THINKING_LEVELS as readonly string[]).includes(v ?? "") ? v : "LOW") as ThinkingLevel;
 }
 
-export function depsFromEnv(env: Env): AppDeps {
+const STUB_DEPS: AppDeps = { adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier };
+const CHATGPT_DEPS: AppDeps = {
+  adapter: chatgptAdapter,
+  llm: chatgptLlm,
+  requester: chatgptRequester,
+  verifier: chatgptVerifier,
+};
+
+export function depsFromEnv(env: Env, signedIn: () => boolean = () => chatgptSignedIn()): AppDeps {
+  const provider = env.LLM_PROVIDER?.trim().toLowerCase();
+  if (provider === "stub") return STUB_DEPS;
+  if (provider === "chatgpt") {
+    if (signedIn()) return CHATGPT_DEPS;
+    console.log("LLM_PROVIDER=chatgpt but no ChatGPT credentials were found; run bun run chatgpt:login. Using stubs.");
+    return STUB_DEPS;
+  }
   const apiKey = env.GEMINI_API_KEY?.trim();
-  if (!apiKey) return { adapter: stubAdapter, llm: stubLlm, requester: stubRequester, verifier: stubVerifier };
+  if (!apiKey) return STUB_DEPS;
   const adaptModel = env.GEMINI_ADAPT_MODEL?.trim() || DEFAULT_ADAPT_MODEL;
   const chatModel = env.GEMINI_CHAT_MODEL?.trim() || DEFAULT_CHAT_MODEL;
   const verifyModel = env.GEMINI_VERIFY_MODEL?.trim() || DEFAULT_VERIFY_MODEL;
