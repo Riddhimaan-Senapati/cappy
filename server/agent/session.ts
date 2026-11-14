@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { WebSocket } from "ws";
-import type { RunRequest, ServerMessage, TabToolName, TabTools, Tier, ToolResultMessage } from "../../shared/protocol.js";
+import type { RunRequest, ServerMessage, TabToolName, TabTools, Tier, TokenUsage, ToolResultMessage } from "../../shared/protocol.js";
 
 const TOOL_TIMEOUT_MS = 15_000;
 
@@ -36,6 +36,10 @@ export class AgentSession {
 
   send(message: ServerMessage) {
     if (!this.closed) this.socket.send(JSON.stringify(message));
+  }
+
+  reportUsage(usage: TokenUsage, model: string) {
+    if (this.socket.readyState === 1) this.socket.send(JSON.stringify({ type: "usage", usage, model, runId: this.request.runId } satisfies ServerMessage));
   }
 
   progress(text: string) {

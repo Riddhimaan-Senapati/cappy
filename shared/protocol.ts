@@ -1,5 +1,13 @@
 import type { ActiveChange, Change, ChatTurn, PageOutline, PageStats } from "./adaptation.js";
 
+export interface TokenUsage {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export type UsageReporter = (usage: TokenUsage) => void;
+
 export type Trigger = "chat" | "page_load";
 export type Tier = "fast" | "frontier";
 export type Routing = "auto" | Tier;
@@ -209,6 +217,7 @@ export interface CancelMessage {
 export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage | SuggestMessage;
 export type ServerMessage =
   | ToolCallMessage
+  | { type: "usage"; usage: TokenUsage; runId?: string; requestId?: string; model: string }
   | AgentEvent
   | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
   | { type: "notice"; level: "info" | "error"; text: string }

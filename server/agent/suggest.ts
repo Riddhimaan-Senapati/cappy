@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { describeActivity } from "./activity.js";
-import type { FrictionCount, SuggestMessage, Suggestion, SuggestionFeedback } from "../../shared/protocol.js";
+import type { FrictionCount, SuggestMessage, Suggestion, SuggestionFeedback, UsageReporter } from "../../shared/protocol.js";
 import { detectInjection } from "../safety.js";
 import type { AgentProvider } from "./providers/types.js";
 
@@ -67,9 +67,9 @@ export function buildSuggestUser(message: SuggestMessage): string {
   ].join("\n\n");
 }
 
-export async function suggestFor(provider: AgentProvider, message: SuggestMessage): Promise<Suggestion | null> {
+export async function suggestFor(provider: AgentProvider, message: SuggestMessage, reportUsage: UsageReporter): Promise<Suggestion | null> {
   if (detectInjection(message.page)) return null;
   const model = message.models?.fast || provider.models.fast;
-  const raw = await provider.complete(SYSTEM, buildSuggestUser(message), model);
+  const raw = await provider.complete(SYSTEM, buildSuggestUser(message), model, reportUsage);
   return parseSuggestion(raw);
 }

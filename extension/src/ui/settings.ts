@@ -2,7 +2,8 @@ import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
 import { load, save, type StoredState } from "../storage.js";
-import { h, icon } from "./dom.js";
+import { usageCard, USAGE_CSS } from "./usage.js";
+import { adoptStyles, h, icon } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 
 let voicesRequest: Promise<string[]> | null = null;
@@ -140,6 +141,7 @@ function statusCard(status: StatusInfo) {
 
 export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => void {
   root.classList.add("s");
+  adoptStyles(root.getRootNode() as Document | ShadowRoot, USAGE_CSS);
   let draft = "";
   let editingKey: string | null = null;
   let confirming: string | null = null;
@@ -375,6 +377,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     verificationStatus.setAttribute("role", "status");
 
     root.replaceChildren(
+      usageCard(state.usage),
       ...providerSection(status, state),
       section(
         "General",

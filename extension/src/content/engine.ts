@@ -486,3 +486,7 @@ export function setBusy(on: boolean) {
   clearTimeout(busyTimer);
   if (on) busyTimer = setTimeout(() => document.documentElement.classList.remove("ba-busy"), 8000);
 }
+
+export function engineStatus() {
+  return { observing: observer !== null, liveChanges: [...applied.values()].filter((entry) => (entry.live?.reapply.length ?? 0) > 0).length };
+}

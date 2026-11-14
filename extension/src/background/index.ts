@@ -1,6 +1,6 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { TargetElement } from "../../../shared/protocol.js";
-import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "../messages.js";
+import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
 import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, type RequestSession } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
@@ -109,11 +109,22 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restored: number) {
   const state = await load();
   const adaptedHere = restored > 0 && (state.siteChanges[origin]?.length ?? 0) > 0;
-  if (!state.proactive || state.paused || !state.profile.length || adaptedHere || !tab.id) return;
+  if (!tab.id) return;
+  const tabId = tab.id;
+  const note = (text: string) => sendToTab(tabId, { kind: "activity", text }).catch(() => undefined);
+  const skipReason = state.paused ? "adaptations are paused" : !state.proactive ? "Act on page load is off" : !state.profile.length ? "profile is empty" : adaptedHere ? "saved site changes were restored" : null;
+  if (skipReason) {
+    await note(`Automatic page adaptation skipped: ${skipReason}.`);
+    return;
+  }
   const key = JSON.stringify([tab.id, origin, state.profile]);
   const { proactiveSeen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
-  if (proactiveSeen.includes(key)) return;
+  if (proactiveSeen.includes(key)) {
+    await note("Automatic page adaptation skipped: already checked this site and profile in this tab during this browser session.");
+    return;
+  }
   if (await agent.startRun(tab, "page_load", "")) {
+    await note("Automatic page adaptation started: enabled, profile present, no saved site adaptation, first check for this site and profile in this tab.");
     const { proactiveSeen: seen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
     await chrome.storage.session.set({ proactiveSeen: [...seen.filter((entry) => entry !== key).slice(-100), key] });
   }
@@ -159,7 +170,7 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       void agent.signIn().catch(() => undefined);
       break;
     case "suggest":
-      void agent.suggest(request.page, request.applied, request.friction).then(sendResponse);
+      void agent.suggest(request.page, request.applied, request.friction, sender.tab?.id).then(sendResponse);
       return true;
     case "stopRun":
       if (sender.tab?.id) agent.stopRun(sender.tab.id);
@@ -180,6 +191,17 @@ chrome.runtime.onConnect.addListener((port) => {
   void agent.getStatus().then((status) => port.postMessage({ type: "status", status } satisfies DebugPortMessage));
   void agent.ensureConnected().catch(() => undefined);
   port.onMessage.addListener(async (request: DebugPortRequest) => {
+    if (request.type === "inspect") {
+      try {
+        const tab = await activeTab();
+        if (!tab?.id || !tab.url?.startsWith("http")) throw new Error("Select a web page to inspect.");
+        const snapshot = await sendToTab<PageInspection>(tab.id, { kind: "inspectPage" });
+        port.postMessage({ type: "inspection", snapshot } satisfies DebugPortMessage);
+      } catch (error) {
+        port.postMessage({ type: "inspection", error: error instanceof Error ? error.message : String(error) } satisfies DebugPortMessage);
+      }
+      return;
+    }
     if (request.type === "chat") await submitChat(await activeTab(), request.message, true, false, request.thread);
   });
   port.onDisconnect.addListener(() => debugPorts.delete(port));
