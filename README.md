@@ -31,25 +31,21 @@ Most sites decide what you see and in what order. Here you can change that on th
 ## How it works
 
 ```mermaid
-flowchart LR
-  subgraph ext[Chrome extension]
-    UI[Bar, voice, camera,<br/>friction sensors]
-    CS[Content script<br/>reads page, applies and<br/>verifies changes]
-    SW[Service worker<br/>queue, tool calls]
-    ST[(chrome.storage<br/>profile, saved changes,<br/>activity counts)]
+sequenceDiagram
+  actor You
+  participant Ext as Extension<br/>bar, voice, camera
+  participant Agent as Local server<br/>agent + safety
+  participant Page as Live page<br/>content script
+  You->>Ext: "make this red" while pointing
+  Ext->>Agent: request, pointed element, page outline, profile
+  loop until the change verifies
+    Note over Agent: CSS scan, op allowlist, injection check
+    Agent->>Page: apply_change
+    Page-->>Agent: matched counts, before/after stats
   end
-  subgraph srv[Local server]
-    AG[Agent loop<br/>Claude, OpenAI, Gemini]
-    SF[Safety<br/>CSS scan, op allowlist,<br/>injection check]
-  end
-  UI -- request + pointed element --> SW
-  SW <-- WebSocket --> AG
-  AG -- tool call --> SW
-  SW -- read_page, apply_change --> CS
-  CS -- matched counts, before/after stats --> SW
-  AG --- SF
-  CS --- ST
-  SW --- ST
+  Agent-->>Ext: reply
+  Ext-->>You: result with Undo
+  Note over Page: saved changes replay on the next visit, no model call
 ```
 
 Each request runs as one tool-use loop. The agent reads an outline of the page, applies a change, looks at how many elements matched and how the accessibility stats moved, then keeps, fixes or reverts the change. Saved changes replay on page load without a model call. API keys stay on the local server and never ship in the extension.
