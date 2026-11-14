@@ -51,6 +51,27 @@ export type BlockConfig = z.infer<typeof BlockConfig>;
 export type BlockName = BlockConfig["block"];
 export type BlockOf<N extends BlockName> = Extract<BlockConfig, { block: N }>;
 
+export const SnapshotId = z.string().regex(/^n\d{1,4}$/, "snapshot id like n12").brand<"SnapshotId">();
+export type SnapshotId = z.infer<typeof SnapshotId>;
+
+export const STYLE_PROPERTIES = [
+  "color", "background-color", "font-size", "font-family", "font-weight", "line-height", "letter-spacing",
+  "text-align", "text-decoration", "display", "visibility", "opacity", "filter", "max-width", "width",
+  "min-height", "padding", "margin", "gap", "border", "border-radius", "outline", "order",
+] as const;
+
+export const SnapshotOp = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("hide"), ids: z.array(SnapshotId).min(1).max(50) }).strict(),
+  z
+    .object({
+      op: z.literal("style"),
+      ids: z.array(SnapshotId).min(1).max(50),
+      styles: z.partialRecord(z.enum(STYLE_PROPERTIES), z.string().max(120)),
+    })
+    .strict(),
+]);
+export type SnapshotOp = z.infer<typeof SnapshotOp>;
+
 export const AdaptationId = z.string().min(1).max(64).brand<"AdaptationId">();
 export type AdaptationId = z.infer<typeof AdaptationId>;
 
@@ -60,7 +81,8 @@ export const Adaptation = z
     sites: z.array(HostPattern).min(1).max(10),
     reason: z.object({ text: z.string().min(1).max(160), needId: NeedId }).strict(),
     blocks: z.array(BlockConfig).max(4),
-    css: z.string().max(4000).optional(),
+    css: z.string().max(6000).optional(),
+    ops: z.array(SnapshotOp).max(20).optional(),
   })
   .strict()
   .superRefine((a, ctx) => {
@@ -68,13 +90,22 @@ export const Adaptation = z
     if (new Set(names).size !== names.length) {
       ctx.addIssue({ code: "custom", path: ["blocks"], message: "each block may appear once" });
     }
-    if (a.blocks.length === 0 && !a.css) {
+    if (a.blocks.length === 0 && !a.css && !a.ops?.length) {
       ctx.addIssue({ code: "custom", path: ["blocks"], message: "adaptation changes nothing" });
     }
     if (a.css) {
       const scan = scanCss(a.css);
       if (!scan.ok) ctx.addIssue({ code: "custom", path: ["css"], message: scan.reason });
     }
+    a.ops?.forEach((op, i) => {
+      if (op.op !== "style") return;
+      for (const [prop, value] of Object.entries(op.styles)) {
+        const scan = scanCss(`${prop}: ${value}`);
+        if (!scan.ok || /[;{}]/.test(value ?? "")) {
+          ctx.addIssue({ code: "custom", path: ["ops", i, "styles", prop], message: scan.ok ? "style value must be one value" : scan.reason });
+        }
+      }
+    });
   });
 export type Adaptation = z.infer<typeof Adaptation>;
 
@@ -85,4 +116,8 @@ export function matchesHost(pattern: HostPattern, host: string): boolean {
     return h === base || h.endsWith(`.${base}`);
   }
   return h === pattern;
+}
+
+export function opsTargetKnownIds(adaptation: Adaptation, known: ReadonlySet<string>): boolean {
+  return (adaptation.ops ?? []).every((op) => op.ids.every((id) => known.has(id)));
 }

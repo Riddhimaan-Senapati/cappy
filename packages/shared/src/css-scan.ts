@@ -9,6 +9,8 @@ const FORBIDDEN: ReadonlyArray<readonly [RegExp, string]> = [
   [/-moz-binding|behavior\s*:/i, "binding properties can execute code"],
   [/\\/, "escape sequences can hide forbidden tokens"],
   [/<\/?style|<script/i, "markup is not allowed in CSS"],
+  [/@font-face/i, "@font-face can load outside fonts"],
+  [/content\s*:\s*(?!\s*(none|normal|""|'')\s*[;}!]|\s*(none|normal|""|'')\s*$)/i, "content text could fake page text"],
 ];
 
 export function scanCss(css: string): CssScan {

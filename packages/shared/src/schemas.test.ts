@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { Adaptation, matchesHost, HostPattern, scanCss } from "./index";
+import { Adaptation, matchesHost, HostPattern, opsTargetKnownIds, scanCss } from "./index";
 
 const valid = {
   id: "a1",
@@ -27,4 +27,21 @@ test("host matching", () => {
   expect(matchesHost(p, "www.w3.org")).toBe(true);
   expect(matchesHost(p, "w3.org")).toBe(true);
   expect(matchesHost(p, "evilw3.org")).toBe(false);
+});
+
+test("model-written css and snapshot ops", () => {
+  const base = { id: "a2", sites: ["example.com"], reason: { text: "Invert for light sensitivity", needId: "n1" }, blocks: [] };
+  expect(Adaptation.safeParse({ ...base, css: "html { filter: invert(1) hue-rotate(180deg); }" }).success).toBe(true);
+  expect(Adaptation.safeParse({ ...base, css: "p::after { content: 'Click here'; }" }).success).toBe(false);
+  expect(Adaptation.safeParse({ ...base, css: "@font-face { font-family: x; src: local(a); }" }).success).toBe(false);
+  expect(Adaptation.safeParse({ ...base, ops: [{ op: "hide", ids: ["n3", "n9"] }] }).success).toBe(true);
+  expect(Adaptation.safeParse({ ...base, ops: [{ op: "hide", ids: ["#ad"] }] }).success).toBe(false);
+  expect(Adaptation.safeParse({ ...base, ops: [{ op: "style", ids: ["n3"], styles: { color: "red; background: url(x)" } }] }).success).toBe(false);
+  expect(Adaptation.safeParse({ ...base, ops: [{ op: "style", ids: ["n3"], styles: { onclick: "x" } }] }).success).toBe(false);
+});
+
+test("ops must target ids the page actually had", () => {
+  const a = Adaptation.parse({ id: "a3", sites: ["example.com"], reason: { text: "Hide ads", needId: "n1" }, blocks: [], ops: [{ op: "hide", ids: ["n3"] }] });
+  expect(opsTargetKnownIds(a, new Set(["n1", "n3"]))).toBe(true);
+  expect(opsTargetKnownIds(a, new Set(["n1"]))).toBe(false);
 });

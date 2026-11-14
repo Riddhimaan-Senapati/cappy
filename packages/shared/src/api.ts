@@ -1,5 +1,15 @@
 import { z } from "zod";
-import { Adaptation } from "./adaptation";
+import { Adaptation, SnapshotId } from "./adaptation";
+
+export const OutlineElement = z
+  .object({
+    id: SnapshotId,
+    tag: z.string().max(20),
+    role: z.string().max(40).optional(),
+    text: z.string().max(120),
+  })
+  .strict();
+export type OutlineElement = z.infer<typeof OutlineElement>;
 import { Profile } from "./profile";
 
 export const PageOutline = z
@@ -11,6 +21,7 @@ export const PageOutline = z
     videos: z.number().int().nonnegative(),
     canvases: z.number().int().nonnegative(),
     text: z.string().max(6000).optional(),
+    elements: z.array(OutlineElement).max(300).optional(),
   })
   .strict();
 export type PageOutline = z.infer<typeof PageOutline>;
