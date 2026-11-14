@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { statChanges } from "../../utils/page-stats";
 import { Verification, VERIFICATION_KEY } from "../../utils/state";
+import { useStored } from "./hooks";
 
 const STATE_LABELS: Record<Verification["state"], string> = {
   proposed: "Proposed",
@@ -23,47 +24,18 @@ const parseVerification = (raw: unknown) => {
   return parsed.success ? parsed.data : undefined;
 };
 
-function useVerification(): Verification | undefined {
-  const [value, setValue] = useState<Verification | undefined>(undefined);
-  useEffect(() => {
-    let alive = true;
-    void chrome.storage.session.get(VERIFICATION_KEY).then((stored: Record<string, unknown>) => {
-      if (alive) setValue(parseVerification(stored[VERIFICATION_KEY]));
-    });
-    const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
-      if (area === "session" && VERIFICATION_KEY in changes) {
-        setValue(parseVerification(changes[VERIFICATION_KEY]?.newValue));
-      }
-    };
-    chrome.storage.onChanged.addListener(onChanged);
-    return () => {
-      alive = false;
-      chrome.storage.onChanged.removeListener(onChanged);
-    };
-  }, []);
-  return value;
-}
-
+// Rendered inside the agent bubble of the latest run; renders nothing until a change has been checked.
 export function VerifyPanel() {
-  const verification = useVerification();
+  const v = useStored("session", VERIFICATION_KEY, parseVerification);
   const [showBefore, setShowBefore] = useState(false);
+  if (!v) return null;
 
-  if (!verification) {
-    return (
-      <section className="card" aria-labelledby="h-did-it-help">
-        <h2 id="h-did-it-help">Did it help?</h2>
-        <p>No change has been checked yet.</p>
-      </section>
-    );
-  }
-
-  const v = verification;
   const shot = showBefore ? v.before : v.after;
   const changes = v.statsBefore && v.statsAfter ? statChanges(v.statsBefore, v.statsAfter) : [];
 
   return (
-    <section className="card" aria-labelledby="h-did-it-help">
-      <h2 id="h-did-it-help">Did it help?</h2>
+    <section className="verify" aria-labelledby="h-did-it-help">
+      <h4 id="h-did-it-help">Did it help?</h4>
       <p>
         <strong>{STATE_LABELS[v.state]}</strong>
         {v.attempt === 2 && <span className="muted"> (second try)</span>}
@@ -75,10 +47,10 @@ export function VerifyPanel() {
       )}
       {v.notes && <p className="muted">{v.notes}</p>}
       <p>
-        <strong>Issues:</strong> {v.axeBefore} -&gt; {v.axeAfter ?? "pending"}
+        <strong>Issues:</strong> {v.axeBefore} → {v.axeAfter ?? "pending"}
       </p>
       {changes.length > 0 && (
-        <ul>
+        <ul className="verify-stats">
           {changes.map((change) => (
             <li key={change.label}>
               {change.label} {change.before} → {change.after}
@@ -86,25 +58,14 @@ export function VerifyPanel() {
           ))}
         </ul>
       )}
-
-      <div className="row">
-        <button
-          type="button"
-          aria-pressed={showBefore}
-          disabled={!v.before}
-          onClick={() => setShowBefore((prev) => !prev)}
-        >
+      <div className="toggle-row">
+        <button type="button" aria-pressed={showBefore} disabled={!v.before} onClick={() => setShowBefore((prev) => !prev)}>
           Before
         </button>
         <span className="muted">Showing {showBefore ? "before" : "after"}</span>
       </div>
-
       {shot ? (
-        <img
-          src={shot}
-          alt={showBefore ? "Page before the change" : "Page after the change"}
-          style={{ width: "100%", marginTop: 8, border: "1px solid #c7c7cc", borderRadius: 6 }}
-        />
+        <img className="verify-shot" src={shot} alt={showBefore ? "Page before the change" : "Page after the change"} />
       ) : (
         <p className="muted">{showBefore ? "No before screenshot." : "The after screenshot is not ready yet."}</p>
       )}

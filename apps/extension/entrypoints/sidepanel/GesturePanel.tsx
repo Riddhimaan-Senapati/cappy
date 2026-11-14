@@ -22,6 +22,7 @@ function isTypingTarget(target: EventTarget | null): boolean {
 
 export function GesturePanel() {
   const [enabled, setEnabled] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [status, setStatus] = useState<"off" | "loading" | "watching">("off");
   const [lastAction, setLastAction] = useState<GestureAction | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +71,7 @@ export function GesturePanel() {
       if (autoEnabledFor.current === last.adaptationId) return;
       autoEnabledFor.current = last.adaptationId;
       setEnabled(true);
+      setExpanded(true);
     };
     void chrome.storage.session.get(KEYS.last).then((stored) => check(stored[KEYS.last]));
     const onChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
@@ -102,23 +104,26 @@ export function GesturePanel() {
         : "Gestures are off.";
 
   return (
-    <section className="card" aria-labelledby="h-gesture-scrolling">
-      <h2 id="h-gesture-scrolling">Gesture scrolling</h2>
-      <p className="muted">Keep this side panel open while gestures are on. Raise an open palm to scroll down, a fist to scroll up, or swipe your hand left to go back.</p>
+    <details className="card gesture" open={expanded} onToggle={(event) => setExpanded(event.currentTarget.open)}>
+      <summary>Gesture scrolling</summary>
+      <p className="muted">
+        Keep this side panel open while gestures are on. Raise an open palm to scroll down, a fist to scroll up, or swipe
+        your hand left to go back.
+      </p>
       <button type="button" aria-pressed={enabled} onClick={() => setEnabled((on) => !on)}>
         {enabled ? "Gesture scrolling on" : "Enable gesture scrolling"}
       </button>
       <video
         ref={videoRef}
+        className="camera"
         muted
         playsInline
         aria-label="Camera preview for gesture scrolling"
         hidden={!enabled}
-        style={{ width: "100%", maxWidth: 320, marginTop: 8, transform: "scaleX(-1)", borderRadius: 8 }}
       />
       <p aria-live="polite">{label}</p>
       <p className="muted">Keys: J scrolls down, K scrolls up, when this panel has focus.</p>
-      {error && <p role="alert">{error}</p>}
-    </section>
+      {error && <p role="alert" className="error">{error}</p>}
+    </details>
   );
 }

@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
-import { EMPTY_PROFILE, NeedKind, Profile, type Need } from "@browser-agent/shared";
+import { useState } from "react";
+import { EMPTY_PROFILE, Need, NeedId, NeedKind, Profile } from "@browser-agent/shared";
 import { KEYS, saveProfile } from "../../utils/state";
+import { guessNeedKind } from "../../utils/ui-need";
+import { parseFlag, useStored } from "./hooks";
 
 export const KIND_LABELS: Record<NeedKind, string> = {
   color_vision: "Color vision",
@@ -21,114 +23,153 @@ const DEMO_PROFILE = Profile.parse({
   ],
 });
 
-function useStoredProfile(): Profile {
-  const [profile, setProfile] = useState<Profile>(EMPTY_PROFILE);
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      const stored = await chrome.storage.local.get(KEYS.profile);
-      const parsed = Profile.safeParse(stored[KEYS.profile]);
-      if (alive) setProfile(parsed.success ? parsed.data : EMPTY_PROFILE);
-    };
-    void load();
-    const onChanged = (changes: Record<string, unknown>, area: string) => {
-      if (area === "local" && KEYS.profile in changes) void load();
-    };
-    chrome.storage.onChanged.addListener(onChanged);
-    return () => {
-      alive = false;
-      chrome.storage.onChanged.removeListener(onChanged);
-    };
-  }, []);
-  return profile;
-}
+const MAX_NEEDS = 20;
+const MAX_DETAIL = 200;
+
+const parseProfile = (raw: unknown): Profile | undefined => {
+  const parsed = Profile.safeParse(raw);
+  return parsed.success ? parsed.data : undefined;
+};
 
 export function ProfileEditor() {
-  const profile = useStoredProfile();
+  const profile = useStored("local", KEYS.profile, parseProfile) ?? EMPTY_PROFILE;
+  const proactive = useStored("local", "proactive", parseFlag) ?? true;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const [newNeed, setNewNeed] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const commit = (needs: Need[]) => {
-    void saveProfile({ version: profile.version + 1, summary: profile.summary, needs });
-  };
+  const commit = (needs: Need[]) => saveProfile({ version: profile.version + 1, summary: profile.summary, needs });
 
-  const startEdit = (need: Need) => {
-    setEditingId(need.id);
-    setDraft(need.detail);
+  const add = () => {
+    const detail = newNeed.trim();
+    if (!detail) return;
+    if (detail.length > MAX_DETAIL) return setError(`Keep a need under ${MAX_DETAIL} characters.`);
+    if (profile.needs.length >= MAX_NEEDS) return setError(`A profile holds up to ${MAX_NEEDS} needs. Remove one first.`);
+    const need: Need = {
+      id: NeedId.parse(crypto.randomUUID()),
+      kind: guessNeedKind(detail),
+      detail,
+      source: "onboarding",
+    };
     setError(null);
+    setNewNeed("");
+    void commit([...profile.needs, need]);
   };
 
   const saveEdit = (need: Need) => {
     const detail = draft.trim();
-    if (detail.length === 0 || detail.length > 200) {
-      setError("Describe the need in 1 to 200 characters.");
+    if (detail.length === 0 || detail.length > MAX_DETAIL) {
+      setError(`Describe the need in 1 to ${MAX_DETAIL} characters.`);
       return;
     }
-    commit(profile.needs.map((n) => (n.id === need.id ? { ...n, detail } : n)));
+    setError(null);
     setEditingId(null);
+    void commit(profile.needs.map((n) => (n.id === need.id ? { ...n, detail } : n)));
   };
 
   return (
-    <>
-      {profile.summary ? <p>{profile.summary}</p> : <p>No profile yet.</p>}
-      {profile.needs.length > 0 && (
-        <ul className="needs">
-          {profile.needs.map((need) => (
-            <li key={need.id}>
-              {editingId === need.id ? (
-                <form
-                  className="need-edit"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    saveEdit(need);
+    <section className="card" aria-labelledby="h-profile">
+      <div className="card-head">
+        <h2 id="h-profile">Your profile</h2>
+        <label className="mini">
+          <input
+            type="checkbox"
+            checked={proactive}
+            onChange={(event) => void chrome.storage.local.set({ proactive: event.currentTarget.checked })}
+          />
+          Act on page load
+        </label>
+      </div>
+
+      {profile.needs.length > 0 ? (
+        <ul className="chips" aria-label="Your needs">
+          {profile.needs.map((need) => {
+            const label = KIND_LABELS[need.kind];
+            if (editingId === need.id) {
+              return (
+                <li key={need.id} className="chip editing">
+                  <form
+                    className="need-edit"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      saveEdit(need);
+                    }}
+                  >
+                    <label htmlFor={`edit-${need.id}`}>{label} detail</label>
+                    <input id={`edit-${need.id}`} type="text" value={draft} maxLength={MAX_DETAIL} onChange={(e) => setDraft(e.target.value)} />
+                    <div className="row">
+                      <button type="submit" className="small">Save</button>
+                      <button type="button" className="small ghost" onClick={() => setEditingId(null)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                </li>
+              );
+            }
+            return (
+              <li key={need.id} className="chip">
+                <span className="chip-text">
+                  <span className="chip-kind">{label}</span> {need.detail}
+                </span>
+                <button
+                  type="button"
+                  className="icon edit"
+                  aria-label={`Edit ${label} need: ${need.detail}`}
+                  onClick={() => {
+                    setEditingId(need.id);
+                    setDraft(need.detail);
+                    setError(null);
                   }}
                 >
-                  <label htmlFor={`edit-${need.id}`}>{KIND_LABELS[need.kind]} detail</label>
-                  <input
-                    id={`edit-${need.id}`}
-                    type="text"
-                    value={draft}
-                    maxLength={200}
-                    onChange={(e) => setDraft(e.target.value)}
-                  />
-                  <div className="row">
-                    <button type="submit">Save</button>
-                    <button type="button" className="secondary" onClick={() => setEditingId(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <>
-                  <strong>{KIND_LABELS[need.kind]}:</strong> {need.detail}
-                  <div className="row">
-                    <button type="button" className="secondary" onClick={() => startEdit(need)}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() => commit(profile.needs.filter((n) => n.id !== need.id))}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                </>
-              )}
-            </li>
-          ))}
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className="icon"
+                  aria-label={`Remove ${label} need: ${need.detail}`}
+                  onClick={() => void commit(profile.needs.filter((n) => n.id !== need.id))}
+                >
+                  ✕
+                </button>
+              </li>
+            );
+          })}
         </ul>
+      ) : (
+        <p className="empty">No needs yet. Tell me in the chat, or add one below.</p>
       )}
-      {error && <p role="alert">{error}</p>}
-      <div className="row">
-        <button type="button" onClick={() => void saveProfile(DEMO_PROFILE)}>
+
+      {error && <p role="alert" className="error">{error}</p>}
+
+      <form
+        className="inline-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          add();
+        }}
+      >
+        <input
+          aria-label="Add a need"
+          placeholder="Add a need, e.g. light sensitive"
+          value={newNeed}
+          maxLength={MAX_DETAIL}
+          onChange={(event) => setNewNeed(event.target.value)}
+        />
+        <button type="submit" disabled={newNeed.trim().length === 0}>
+          Add
+        </button>
+      </form>
+
+      <div className="row-links">
+        <button type="button" className="link" onClick={() => void saveProfile(DEMO_PROFILE)}>
           Load demo profile
         </button>
-        <button type="button" className="secondary" onClick={() => void saveProfile(EMPTY_PROFILE)}>
-          Clear profile
+        <button type="button" className="link" onClick={() => void saveProfile(EMPTY_PROFILE)}>
+          Clear
         </button>
       </div>
-    </>
+    </section>
   );
 }
