@@ -149,6 +149,12 @@ export const OVERLAY_CSS = `
 .hints[hidden] { display: none; }
 .hints b { font-weight: 600; color: rgba(255, 255, 255, 0.5); }
 .hints .link { font-size: 11.5px; }
+.point-pill { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 2147483646; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100vw - 32px)); padding: 9px 14px; border-radius: 999px; background: rgba(23, 23, 28, 0.94); border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4); color: var(--text); font-size: 13px; animation: rise 0.3s var(--spring) both; }
+.point-pill .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #f87171; animation: blink 1.1s infinite; }
+.point-pill .heard { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.point-pill .hint { color: rgba(255, 255, 255, 0.55); }
+.point-pill .aim { flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 6px; font-size: 12px; color: #dfe3ff; background: rgba(139, 155, 255, 0.16); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .point-pill, .point-pill .dot { animation: none; } }
 .options { display: flex; flex-direction: column; gap: 4px; margin-left: 24px; }
 .options-q { font-size: 12.5px; color: rgba(255, 255, 255, 0.6); margin-bottom: 2px; }
 .option { display: flex; align-items: center; gap: 6px; }

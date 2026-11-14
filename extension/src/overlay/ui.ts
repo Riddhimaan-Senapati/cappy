@@ -40,7 +40,7 @@ export class OverlayUi {
         this.hideNudge();
         this.bringToFront();
       }
-    });
+    }, (status) => this.showPointStatus(status));
     this.fab.type = "button";
     this.fab.setAttribute("aria-label", "Open adaptive agent");
     this.fab.append(this.fabOrb);
@@ -50,6 +50,26 @@ export class OverlayUi {
     this.shadow.append(this.fab);
     document.documentElement.append(this.host);
     this.bringToFront();
+  }
+
+  private pointPill: HTMLElement | null = null;
+
+  // Listening without the bar: a small pill shows what was heard and what the user is pointing at.
+  private showPointStatus(status: { text: string; label?: string } | null) {
+    if (!status) {
+      this.pointPill?.remove();
+      this.pointPill = null;
+      return;
+    }
+    if (!this.pointPill) {
+      this.pointPill = h("div", "point-pill");
+      this.pointPill.setAttribute("role", "status");
+      this.pointPill.setAttribute("aria-live", "polite");
+      this.shadow.append(this.pointPill);
+      this.bringToFront();
+    }
+    const heard = status.text ? h("span", "heard", status.text) : h("span", "hint", "Listening. Point at something and say what to change.");
+    this.pointPill.replaceChildren(h("span", "dot"), heard, ...(status.label ? [h("span", "aim", "", [icon("target", 12), document.createTextNode(status.label)])] : []));
   }
 
   bringToFront() {

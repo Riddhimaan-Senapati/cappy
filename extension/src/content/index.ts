@@ -1,6 +1,7 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange, Change } from "../../../shared/adaptation.js";
-import type { FrictionKind, Suggestion } from "../../../shared/protocol.js";
+import type { FrictionKind, Suggestion, TargetElement } from "../../../shared/protocol.js";
+import type { PointedCandidate } from "../voice/point.js";
 import { recordFeedback } from "../feedback.js";
 import { recordFriction } from "../friction-log.js";
 import { startSensors } from "./sensors.js";
@@ -37,15 +38,50 @@ function clearTarget() {
   targetElement = null;
 }
 
-function selectTarget(element: Element) {
+// Same snapshot the inspect tool returns, so the model sees a selected element the way it sees any inspected one.
+function describeTarget(element: Element): TargetElement {
+  const selector = uniqueSelector(element);
+  const styles = inspect(selector).samples[0]?.styles;
+  return { selector, label: describeElement(element), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 160), styles };
+}
+
+function markTarget(element: Element) {
   clearTarget();
   ensureBaseStyle();
   targetElement = element;
   element.setAttribute("data-ba-target", "");
-  // Same snapshot the inspect tool returns, so the model sees a selected element the way it sees any inspected one.
-  const selector = uniqueSelector(element);
-  const styles = inspect(selector).samples[0]?.styles;
-  ensureOverlay().spotlight.showWithTarget({ selector, label: describeElement(element), text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 160), styles });
+}
+
+function selectTarget(element: Element) {
+  markTarget(element);
+  ensureOverlay().spotlight.showWithTarget(describeTarget(element));
+}
+
+// Point and speak: the camera pointer first, since pointing with a finger is deliberate, then whatever the mouse rests on.
+let mouseAt: { x: number; y: number } | null = null;
+const pointedElements = new Map<string, Element>();
+
+function pageElementAt(x: number, y: number): Element | null {
+  const element = document.elementFromPoint(x, y);
+  if (!element || element === document.documentElement || element === document.body || element.closest("[data-ba]")) return null;
+  return element;
+}
+
+function pointed(): PointedCandidate<TargetElement> | null {
+  const fromCamera = camera?.pointedElement() ?? null;
+  const element = fromCamera ?? (mouseAt ? pageElementAt(mouseAt.x, mouseAt.y) : null);
+  if (!element) return null;
+  const target = describeTarget(element);
+  pointedElements.set(target.selector, element);
+  if (pointedElements.size > 8) pointedElements.delete(pointedElements.keys().next().value!);
+  return { value: target, deliberate: Boolean(fromCamera) };
+}
+
+// Pinch-and-hold selects; with camera control on, listening starts right away so the user can just say what to change.
+async function selectByGesture(element: Element) {
+  selectTarget(element);
+  const { camera: settings } = await load();
+  if (settings.speakAfterSelect !== false) await ensureOverlay().spotlight.startVoice().catch(reportExtensionError);
 }
 
 let tornDown = false;
@@ -85,7 +121,7 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
   camera = new CameraController(settings, {
     notify: (text) => ensureOverlay().showToast(text, []),
     turnOff: () => void load().then((state) => save({ camera: { ...state.camera, enabled: false } })),
-    select: selectTarget,
+    select: (element) => void selectByGesture(element),
     hasSelection: () => Boolean(targetElement) || picker.isActive,
     cancel: () => {
       const hadSomething = Boolean(targetElement) || Boolean(overlay?.spotlight.isOpen()) || picker.isActive;
@@ -236,6 +272,11 @@ function ensureOverlay(): OverlayUi {
     dequeue: (runId) => void send({ kind: "dequeue", runId }),
     clearTarget,
     pick: () => picker.start(),
+    pointed,
+    markTarget: (selector) => {
+      const element = pointedElements.get(selector);
+      if (element?.isConnected) markTarget(element);
+    },
     listChanges: activeChanges,
     history: changeHistory,
     reapply: async (change) => void (await mutate(() => apply(change))),
@@ -311,7 +352,7 @@ async function handle(request: ContentRequest): Promise<unknown> {
     case "readAloud":
       return readPageAloud();
     case "startVoice":
-      return ensureOverlay().spotlight.startVoice();
+      return ensureOverlay().spotlight.startPointVoice();
     case "pickElement":
       overlay?.spotlight.hide();
       return picker.start();
@@ -345,6 +386,7 @@ function start() {
   });
 
   stopSensors = startSensors((kind) => void onFriction(kind).catch(() => undefined));
+  addEventListener("pointermove", (event) => (mouseAt = event.pointerType === "mouse" ? { x: event.clientX, y: event.clientY } : mouseAt), { capture: true, passive: true });
   addEventListener("contextmenu", (event) => (lastContextElement = event.composedPath()[0] instanceof Element ? (event.composedPath()[0] as Element) : null), true);
 
   for (const type of KEY_EVENTS) {

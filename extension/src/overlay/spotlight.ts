@@ -10,6 +10,7 @@ import { renderSettings, type SettingsContext } from "../ui/settings.js";
 import { paintMic, liveRegion, micButton } from "../voice/button.js";
 import { VoiceController } from "../voice/controller.js";
 import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
+import { chooseTarget, type PointedCandidate } from "../voice/point.js";
 
 export interface SpotlightDeps {
   ask(message: string, fresh: boolean, interrupt?: boolean, thread?: string, target?: TargetElement): void;
@@ -17,6 +18,8 @@ export interface SpotlightDeps {
   dequeue(runId: string): void;
   clearTarget(): void;
   pick(): void;
+  pointed(): PointedCandidate<TargetElement> | null;
+  markTarget(selector: string): void;
   listChanges(): ActiveChange[];
   history(): Array<{ change: ActiveChange; active: boolean }>;
   reapply(change: ActiveChange): Promise<void>;
@@ -124,7 +127,7 @@ export class Spotlight {
   private voiceBase = "";
   private voice = new VoiceController({
     onState: (state) => this.onVoiceState(state),
-    onInterim: (text) => (this.input.value = joinVoiceText(this.voiceBase, text)),
+    onInterim: (text) => this.onVoiceInterim(text),
     onFinal: (text) => this.onVoiceFinal(text),
   });
 
@@ -132,6 +135,7 @@ export class Spotlight {
     private shadow: ShadowRoot,
     private deps: SpotlightDeps,
     private onToggle: (open: boolean) => void,
+    private onPointStatus: (status: { text: string; label?: string } | null) => void = () => undefined,
   ) {
     this.bar.setAttribute("role", "dialog");
     this.bar.setAttribute("aria-label", "Adaptive agent");
@@ -1289,13 +1293,65 @@ export class Spotlight {
     this.voice.receive(event);
   }
 
+  private pointMode = false;
+  private pointStart: PointedCandidate<TargetElement> | null = null;
+  private pointTimer: number | undefined;
+
+  // With the bar closed, listen without covering the page, so the user can point while speaking.
+  async startPointVoice() {
+    if (this.opened) return this.startVoice();
+    if (this.voice.active) return this.voice.stop();
+    window.clearTimeout(this.pointTimer);
+    this.pointMode = true;
+    this.pointStart = null;
+    this.voiceBase = "";
+    this.onPointStatus({ text: "" });
+    await this.voice.start();
+  }
+
+  private endPointMode() {
+    window.clearTimeout(this.pointTimer);
+    this.pointMode = false;
+    this.pointStart = null;
+    this.onPointStatus(null);
+  }
+
+  private onVoiceInterim(text: string) {
+    if (!this.pointMode) return void (this.input.value = joinVoiceText(this.voiceBase, text));
+    this.pointStart ??= this.deps.pointed();
+    this.onPointStatus({ text, label: (this.pointStart ?? this.deps.pointed())?.value.label });
+  }
+
   private onVoiceState(state: VoiceState) {
     paintMic(this.mic, state);
+    // Cloud transcription can finish after recording stops, so give the final text a moment before giving up.
+    if (this.pointMode && (state.phase === "idle" || state.phase === "error")) {
+      window.clearTimeout(this.pointTimer);
+      this.pointTimer = window.setTimeout(() => this.endPointMode(), state.phase === "error" ? 0 : 6000);
+      if (state.phase === "error") this.onPointStatus({ text: voiceStatusText(state) });
+    }
     if (this.opened) this.live.textContent = voiceStatusText(state);
     this.live.classList.toggle("sr-only", state.phase !== "error");
   }
 
   private onVoiceFinal(text: string) {
+    if (this.pointMode) {
+      const start = this.pointStart;
+      this.endPointMode();
+      const value = text.trim();
+      if (!value) return;
+      const target = chooseTarget(value, start, this.deps.pointed());
+      void this.show(this.working ? "run" : "list").then(() => {
+        if (target) {
+          this.deps.markTarget(target.selector);
+          this.setTarget(target);
+        }
+        if (this.cache?.voiceAutoSend ?? true) return this.ask(value, false);
+        this.input.value = value;
+        this.onInput();
+      });
+      return;
+    }
     if (!this.opened) return;
     const value = joinVoiceText(this.voiceBase, text);
     this.voiceBase = "";

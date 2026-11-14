@@ -55,6 +55,7 @@ export interface CameraSettings {
   headScroll: boolean;
   pointer: boolean;
   swipeNav?: boolean;
+  speakAfterSelect?: boolean;
   dwellMs: number;
 }
 

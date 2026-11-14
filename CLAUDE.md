@@ -30,6 +30,7 @@ Chrome extension                                        Local Node server (holds
 - The server is required for new requests: it keeps API keys and credentials out of the extension and runs the provider SDKs. Saved changes, undo and settings work without it.
 - One run = one tool-use loop. The page outline is sent with the request, so the model can act on its first turn.
 - A request sent while a tab is busy is queued in the service worker. The queue drains in order only after a successful reply. Send now (Ctrl/Cmd+Enter) cancels the running request instead (the server aborts the model call); Stop cancels it and keeps the queue and any applied changes.
+- Point and speak: with the bar closed, the dictation shortcut listens without covering the page. The element under the camera air pointer (deliberate) or the mouse (only when the request says "this", "that", "here") becomes the request's target, so "make this red" changes that element (`extension/src/voice/point.ts`). With camera control, pinch-and-hold selects and starts listening.
 - Reopening a saved request continues its session: follow-ups carry up to four earlier successful prompt-and-reply pairs from it.
 - Saved changes replay on page load with no model call. Repeating the same request on a site is served from storage; Shift+Enter asks the model again.
 - DOM ops and text scaling re-apply to content added later (a MutationObserver in `extension/src/content/engine.ts`). CSS keeps applying on its own.

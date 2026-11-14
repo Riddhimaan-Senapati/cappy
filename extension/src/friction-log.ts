@@ -94,7 +94,16 @@ export function shouldNudge(log: FrictionEntry[], host: string, nudgedAt: number
   return nudgedAt === undefined || now - nudgedAt >= GATE.cooldownMs;
 }
 
-export async function recordFriction(host: string, kind: FrictionKind, now = Date.now()): Promise<{ summary: FrictionCount[]; nudge: boolean }> {
+let writes: Promise<unknown> = Promise.resolve();
+
+// Events often arrive a millisecond apart (two zoom steps); serializing the read-modify-write keeps both.
+export function recordFriction(host: string, kind: FrictionKind, now = Date.now()): Promise<{ summary: FrictionCount[]; nudge: boolean }> {
+  const result = writes.then(() => writeFriction(host, kind, now));
+  writes = result.catch(() => undefined);
+  return result;
+}
+
+async function writeFriction(host: string, kind: FrictionKind, now: number): Promise<{ summary: FrictionCount[]; nudge: boolean }> {
   const target = host.toLowerCase();
   const state = await load();
   const frictionLog = addRecent(state.frictionLog, { host: target, kind, at: now }, now);
