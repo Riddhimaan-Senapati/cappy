@@ -33,7 +33,7 @@ const parseProfile = (raw: unknown): Profile | undefined => {
 
 export function ProfileEditor() {
   const profile = useStored("local", KEYS.profile, parseProfile) ?? EMPTY_PROFILE;
-  const proactive = useStored("local", "proactive", parseFlag) ?? true;
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [newNeed, setNewNeed] = useState("");
@@ -72,14 +72,8 @@ export function ProfileEditor() {
     <section className="card" aria-labelledby="h-profile">
       <div className="card-head">
         <h2 id="h-profile">Your profile</h2>
-        <label className="mini">
-          <input
-            type="checkbox"
-            checked={proactive}
-            onChange={(event) => void chrome.storage.local.set({ proactive: event.currentTarget.checked })}
-          />
-          Act on page load
-        </label>
+        <StoredToggle storageKey="proactive" fallback={true} label="Act on page load" />
+        <StoredToggle storageKey="askBeforeRemember" fallback={false} label="Ask before remembering" />
       </div>
 
       {profile.needs.length > 0 ? (
@@ -171,5 +165,26 @@ export function ProfileEditor() {
         </button>
       </div>
     </section>
+  );
+}
+
+// Updates on click and writes through to storage, so the checkbox never lags behind the storage round trip.
+function StoredToggle({ storageKey, fallback, label }: { storageKey: string; fallback: boolean; label: string }) {
+  const stored = useStored("local", storageKey, parseFlag);
+  const [checked, setChecked] = useState<boolean | undefined>(undefined);
+  const value = checked ?? stored ?? fallback;
+  return (
+    <label className="mini">
+      <input
+        type="checkbox"
+        checked={value}
+        onChange={(event) => {
+          const next = event.currentTarget.checked;
+          setChecked(next);
+          void chrome.storage.local.set({ [storageKey]: next });
+        }}
+      />
+      {label}
+    </label>
   );
 }

@@ -77,7 +77,15 @@ export function App() {
     }
     setBusy(true);
     try {
-      absorb(await companion.send(text));
+      const view = await companion.send(text);
+      absorb(view);
+      const { askBeforeRemember } = await chrome.storage.local.get("askBeforeRemember");
+      if (view.pending && askBeforeRemember !== true) {
+        const next = await companion.decide(true);
+        absorb(next);
+        await saveProfile(next.profile);
+        addEntry("system", `Remembered: ${view.pending.need.detail}. Remove it from Your profile if that is wrong.`);
+      }
     } catch {
       addEntry("system", "The companion did not answer. Try again.");
     } finally {

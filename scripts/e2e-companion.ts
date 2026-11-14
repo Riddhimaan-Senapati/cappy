@@ -21,6 +21,7 @@ try {
   context = await launchWithExtension(userDataDir);
   const worker = await getWorker(context);
   const panelUrl = `chrome-extension://${extensionIdFrom(worker)}/sidepanel.html`;
+  await worker.evaluate(() => chrome.storage.local.set({ askBeforeRemember: true }));
 
   const panel = await context.newPage();
   await panel.goto(panelUrl);

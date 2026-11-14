@@ -86,7 +86,7 @@ button:disabled { opacity: 0.5; cursor: default; }
   gap: 8px;
   flex-shrink: 0;
 }
-.card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 4px 8px; }
 .mini { font-size: 12px; color: var(--muted); display: flex; gap: 4px; align-items: center; min-height: 32px; }
 .mini input { accent-color: var(--accent); width: 16px; height: 16px; margin: 0; }
 
