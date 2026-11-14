@@ -29,7 +29,7 @@ const COLOR_TYPES = [
 ];
 
 const SETUP_LINES = new Set([...NEEDS.map((need) => need.line), ...COLOR_TYPES.map((type) => type.line)].filter(Boolean));
-const STEPS = ["Welcome", "Connect AI", "Your needs", "How to use it"];
+const STEPS = ["Welcome", "Connect AI", "Your needs", "Your shortcut", "Voice and hands-free", "Things to try"];
 
 const CSS = `
 html, body { margin: 0; min-height: 100%; }
@@ -39,7 +39,7 @@ body { background: radial-gradient(ellipse at 15% 0%, rgba(110,168,255,0.12), tr
 .w-logo { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--grad); color: #0d0d12; }
 .w-top b { font-size: 15px; font-weight: 650; }
 .w-top small { display: block; color: var(--muted); font-size: 12px; }
-.w-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 26px; }
+.w-steps { display: grid; gap: 6px; margin-bottom: 26px; }
 .w-step { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; }
 .w-step i { display: block; height: 100%; width: 0; background: var(--grad); transition: width 0.5s var(--ease); }
 .w-step.done i, .w-step.now i { width: 100%; }
@@ -82,12 +82,17 @@ body { background: radial-gradient(ellipse at 15% 0%, rgba(110,168,255,0.12), tr
 .w-server b { font-size: 13.5px; }
 .w-server p { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
 code, kbd { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12.5px; padding: 2px 7px; border-radius: 7px; background: rgba(255,255,255,0.08); border: 1px solid var(--line); color: var(--text); white-space: nowrap; }
-.w-keys { display: grid; gap: 8px; }
-.w-key { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; background: var(--raise); }
-.w-key .what { flex: 1; }
-.w-key .what b { display: block; font-size: 13.5px; font-weight: 600; }
-.w-key .what small { color: var(--muted); font-size: 12.5px; }
-.w-opts { margin-top: 16px; }
+.w-shortcut { display: grid; gap: 8px; }
+.w-key-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 14px; background: var(--raise); }
+.w-key-row .what { flex: 1; }
+.w-key-row .what b { display: block; font-size: 13.5px; font-weight: 600; }
+.w-key-row .what small { color: var(--muted); font-size: 12.5px; }
+kbd.w-big { font-size: 15px; padding: 6px 12px; border-radius: 9px; box-shadow: 0 2px 0 rgba(255,255,255,0.08); }
+.w-unset { color: var(--faint); font-size: 12.5px; }
+.w-tried { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px 14px; border-radius: 12px; border: 1px dashed var(--line); color: var(--faint); font-size: 13px; }
+.w-tried.on { border-style: solid; border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.08); color: var(--good); animation: w-in 0.35s var(--ease); }
+.w-row-note { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.w-row-note small { flex: 1; color: var(--muted); font-size: 12.5px; }
 .w-done { text-align: center; padding: 12px 0 4px; }
 .w-done .badge { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 18px; display: grid; place-items: center; background: var(--grad); color: #0d0d12; animation: w-pop 0.6s var(--spring); }
 @keyframes w-pop { from { transform: scale(0.4); opacity: 0; } }
@@ -153,11 +158,12 @@ function welcomeStep(): Node[] {
   const point = (name: IconName, title: string, sub: string) => h("li", "", "", [icon(name, 18), h("div", "", "", [h("b", "", title), h("small", "", sub)])]);
   return [
     h("h1", "", "", [document.createTextNode("Every website, "), h("em", "", "adapted to you")]),
-    h("p", "w-lead", "Tell it what you need in plain words and it changes the page you are on: colors, text, clutter, motion, focus. You can always undo."),
+    h("p", "w-lead", "Tell it what you need in plain words and it changes the page you are on. A few minutes of setup and it works on every site."),
     h("ul", "w-points", "", [
-      point("sparkle", "Say what you need", "\"Make this easier to read\", \"dim this page\", \"hide clickbait\"."),
-      point("shield", "Your keys stay on your computer", "A small local server talks to the AI. The model never runs code on your pages."),
-      point("undo", "Nothing is permanent", "Every change can be undone, and you can pause everything from settings."),
+      point("sparkle", "Say what you need", "\"Make this easier to read\", \"dim this page\", \"make the form easier\"."),
+      point("eye", "Your feed, your rules", "Hide or dim kinds of content, sort what a site recommends, or set rules for certain hours."),
+      point("target", "Point and speak", "Point at something with the mouse or your hand and say what to change."),
+      point("shield", "Safe by design", "Your keys stay on your computer, the AI never runs code on pages, and everything can be undone."),
     ]),
   ];
 }
@@ -184,7 +190,7 @@ function aiStep(): Node[] {
       action = button("s-btn s-small", editingKey === provider.id ? "Cancel" : "Add key", () => {
         editingKey = editingKey === provider.id ? null : provider.id;
         keyDraft = "";
-        render();
+        void render();
       });
     }
     const sub = provider.ready ? "Ready" : provider.setup === "signin" ? "Use your ChatGPT plan" : "Paste an API key";
@@ -205,7 +211,7 @@ function aiStep(): Node[] {
       if (!status.activeProvider) void save({ provider: provider.id });
       editingKey = null;
       keyDraft = "";
-      render();
+      void render();
     });
     queueMicrotask(() => input.focus());
     return h("div", "s-sec", "", [row, form]);
@@ -219,7 +225,7 @@ function needsStep(): Node[] {
     const card = button("w-need", "", () => {
       if (chosen.has(need.id)) chosen.delete(need.id);
       else chosen.add(need.id);
-      render();
+      void render();
     }, [icon(need.icon, 18), h("div", "", "", [h("b", "", need.title), h("small", "", need.sub)])]);
     card.setAttribute("aria-pressed", String(chosen.has(need.id)));
     return card;
@@ -235,7 +241,7 @@ function needsStep(): Node[] {
             COLOR_TYPES.map((type) => {
               const option = button("", type.label, () => {
                 colorType = type.id;
-                render();
+                void render();
               });
               option.setAttribute("aria-pressed", String((colorType ?? "unsure") === type.id));
               return option;
@@ -262,31 +268,103 @@ function needsStep(): Node[] {
 
 async function shortcutFor(name: string) {
   const commands = await chrome.commands.getAll().catch(() => []);
-  return commands.find((command) => command.name === name)?.shortcut || "not set";
+  return commands.find((command) => command.name === name)?.shortcut || "";
 }
 
 let shortcuts = { bar: "Ctrl+Shift+Space", voice: "" };
-void Promise.all([shortcutFor("toggle-spotlight"), shortcutFor("start-voice")]).then(([bar, voice]) => {
-  shortcuts = { bar, voice };
-  if (step === 3) render();
-});
+let pressed: string | null = null;
 
-function basicsStep(state: StoredState): Node[] {
-  const key = (keys: string, title: string, sub: string) => h("div", "w-key", "", [h("kbd", "", keys), h("div", "what", "", [h("b", "", title), h("small", "", sub)])]);
+async function readShortcuts() {
+  const [bar, voice] = await Promise.all([shortcutFor("toggle-spotlight"), shortcutFor("start-voice")]);
+  const changed = bar !== shortcuts.bar || voice !== shortcuts.voice;
+  shortcuts = { bar, voice };
+  if (changed) void render();
+}
+
+chrome.runtime.onMessage.addListener((message: { kind?: string; command?: string }) => {
+  if (message?.kind !== "welcomeShortcut" || !message.command) return;
+  pressed = message.command;
+  if (STEPS[step] === "Your shortcut" && !finished) void render();
+});
+// Shortcuts can only be changed on Chrome's own page, so pick up the new ones when the user comes back.
+addEventListener("focus", () => void readShortcuts());
+
+function shortcutStep(): Node[] {
+  const keys = (shortcut: string) => (shortcut ? h("kbd", "w-big", shortcut) : h("span", "w-unset", "Not set"));
+  const change = button("s-btn s-small", "Change", () => void chrome.tabs.create({ url: "chrome://extensions/shortcuts" }));
+  const tried = pressed === "toggle-spotlight" ? "That's it. On a website, this opens the bar." : pressed === "start-voice" ? "That's the voice shortcut. On a website, it opens the bar and listens." : "";
   return [
-    h("h1", "", "How to use it"),
-    h("p", "w-lead", "Open the bar on any page and say what you need. It shows each change as it happens."),
-    h("div", "w-keys", "", [
-      key(shortcuts.bar, "Open the bar", "Type a request, or pick a suggestion."),
-      ...(shortcuts.voice && shortcuts.voice !== "not set" ? [key(shortcuts.voice, "Talk instead", "Opens the bar and listens.")] : []),
-      h("div", "w-key", "", [icon("target", 18), h("div", "what", "", [h("b", "", "Change one thing"), h("small", "", "Use the target button in the bar, click an element, then say what to change about it.")])]),
-      key("Ctrl+Z", "Undo", "Undoes the last request. Ctrl+Shift+Z puts it back."),
-      key("Tab", "Harder request?", "While typing, Tab switches to the stronger model."),
+    h("h1", "", "Your shortcut"),
+    h("p", "w-lead", "This is how you call the agent on any page. Try it now: press it while this page is open."),
+    h("div", "w-shortcut", "", [
+      h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Open the bar"), h("small", "", "Type a request or pick a suggestion")]), keys(shortcuts.bar)]),
+      h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Talk instead"), h("small", "", "Opens the bar and listens")]), keys(shortcuts.voice)]),
     ]),
-    h("div", "s-sec w-opts", "", [
+    h("div", `w-tried${tried ? " on" : ""}`, "", tried ? [icon("check", 16), document.createTextNode(tried)] : [document.createTextNode("Waiting for you to press it...")]),
+    h("div", "w-row-note", "", [h("small", "", "Prefer different keys? Chrome lets you set them on its shortcuts page."), change]),
+  ];
+}
+
+let micState: "unknown" | "granted" | "denied" | "asking" = "unknown";
+void navigator.permissions
+  ?.query({ name: "microphone" as PermissionName })
+  .then((result) => {
+    micState = result.state === "granted" ? "granted" : result.state === "denied" ? "denied" : "unknown";
+    result.addEventListener("change", () => {
+      micState = result.state === "granted" ? "granted" : result.state === "denied" ? "denied" : "unknown";
+      void render();
+    });
+  })
+  .catch(() => undefined);
+
+async function allowMicrophone() {
+  micState = "asking";
+  void render();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((track) => track.stop());
+    micState = "granted";
+  } catch {
+    micState = "denied";
+  }
+  void render();
+}
+
+function handsFreeStep(state: StoredState): Node[] {
+  const micAction =
+    micState === "granted"
+      ? h("span", "s-on", "Allowed")
+      : micState === "asking"
+        ? h("span", "s-tag", "Answer the prompt above")
+        : button("s-btn s-small", micState === "denied" ? "Try again" : "Allow", () => void allowMicrophone());
+  const micNote = micState === "denied" ? [h("div", "s-note s-error", "Blocked. Click the icon at the right of the address bar to allow the microphone, then try again.")] : [];
+  return [
+    h("h1", "", "Voice and hands-free"),
+    h("p", "w-lead", "Optional. Talk to it instead of typing, have it read replies aloud, or control pages with your hand through the camera."),
+    h("div", "s-sec", "", [
+      h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Only listens after you press the mic button or the voice shortcut")]), micAction]),
+      ...micNote,
+      toggleRow("Read replies aloud", "Speaks what the agent changed", state.speakReplies, (value) => void save({ speakReplies: value })),
+      toggleRow("Camera control", "Point to hover, pinch to click, hold a pinch to select, palm to scroll", state.camera.enabled, (value) => void save({ camera: { ...state.camera, enabled: value } })),
+      toggleRow("Floating button", "A small button on pages that opens the bar", state.floatingButton, (value) => void save({ floatingButton: value })),
       toggleRow("Adapt pages when they open", "Applies what clearly fits your needs on new sites", state.proactive, (value) => void save({ proactive: value })),
-      toggleRow("Floating button", "A small button on pages to open the bar with a click", state.floatingButton, (value) => void save({ floatingButton: value })),
-      toggleRow("Camera control", "Point, scroll and select with hand gestures (optional)", state.camera.enabled, (value) => void save({ camera: { ...state.camera, enabled: value } })),
+    ]),
+  ];
+}
+
+function tipsStep(): Node[] {
+  const tip = (name: IconName, title: string, sub: string) => h("li", "", "", [icon(name, 18), h("div", "", "", [h("b", "", title), h("small", "", sub)])]);
+  return [
+    h("h1", "", "Things to try"),
+    h("p", "w-lead", "A few things people use every day. Each works by asking in the bar."),
+    h("ul", "w-points", "", [
+      tip("eye", "Hide, dim or sort what you see", "\"Hide gaming videos\", \"dim anything about crypto\", \"sort by newest\". Filters keep working as you scroll."),
+      tip("history", "Rules for certain times", "\"Hide Shorts on weekdays 9 to 5\", \"dark mode after 10pm\"."),
+      tip("target", "Change one thing", "Click the target in the bar, or point with your hand, then say \"make this bigger\"."),
+      tip("undo", "Undo anything", "Ctrl+Z undoes the last request, Ctrl+Shift+Z brings it back. History lists every change."),
+      tip("bookmark", "Save what you repeat", "Save a request as a command and run it on any site, or on every site automatically."),
+      tip("shield", "It asks before remembering", "When it learns a preference, you choose: this site, all sites, or neither."),
+      tip("settings", "Profiles", "Different setups for different people or tasks. Switch them in settings."),
     ]),
   ];
 }
@@ -299,7 +377,7 @@ function doneView(): Node[] {
     h("div", "w-done", "", [
       h("div", "badge", "", [icon("check", 26)]),
       h("h1", "", "You're set"),
-      h("p", "w-lead", "", [document.createTextNode("Go to any website and press "), h("kbd", "", shortcuts.bar), document.createTextNode(" to start.")]),
+      h("p", "w-lead", "", shortcuts.bar ? [document.createTextNode("Go to any website and press "), h("kbd", "", shortcuts.bar), document.createTextNode(" to start.")] : [document.createTextNode("Go to any website and click the extension icon to start.")]),
       h("div", "w-nav", "", [...demo, button("w-primary", "Close", () => globalThis.close())]),
     ]),
   ];
@@ -317,18 +395,21 @@ async function render() {
       return bar;
     }),
   );
+  progress.style.gridTemplateColumns = `repeat(${STEPS.length}, 1fr)`;
   progress.setAttribute("aria-label", finished ? "Setup complete" : `Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`);
 
-  const body = finished ? doneView() : [welcomeStep, aiStep, needsStep, () => basicsStep(state)][step]();
+  const views = [welcomeStep, aiStep, needsStep, shortcutStep, () => handsFreeStep(state), tipsStep];
+  const body = finished ? doneView() : views[step]();
   const ready = (status.providers ?? []).some((provider) => provider.ready);
-  const nextLabel = step === 0 ? "Get started" : step === 1 && !ready ? "Skip for now" : step === STEPS.length - 1 ? "Finish" : "Continue";
+  const skipping = (step === 1 && !ready) || (step === 4 && micState !== "granted" && !state.camera.enabled && !state.speakReplies);
+  const nextLabel = step === 0 ? "Get started" : skipping ? "Skip for now" : step === STEPS.length - 1 ? "Finish" : "Continue";
   const nav = finished
     ? []
     : [
         h("div", "w-nav", "", [
-          step > 0 ? button("w-btn", "Back", () => go(step - 1)) : null,
+          step > 0 ? button("w-btn", "Back", () => void go(step - 1)) : null,
           h("div", "grow"),
-          button(step === 1 && !ready ? "w-btn" : "w-primary", nextLabel, () => go(step + 1)),
+          button(skipping ? "w-btn" : "w-primary", nextLabel, () => void go(step + 1)),
         ]),
       ];
 
@@ -343,7 +424,7 @@ async function render() {
 }
 
 async function go(next: number) {
-  if (step === 2) await saveNeeds();
+  if (STEPS[step] === "Your needs") await saveNeeds();
   if (next >= STEPS.length) {
     finished = true;
     await save({ onboarded: true });
@@ -360,4 +441,5 @@ async function refresh() {
 }
 
 setInterval(() => void refresh(), 2500);
+await readShortcuts();
 await render();

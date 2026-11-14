@@ -81,8 +81,15 @@ async function injectContent(tabId: number) {
   await chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT] });
 }
 
+// The setup page has no content script; it shows that the shortcut worked instead.
+function onWelcomePage(tab: chrome.tabs.Tab | undefined, command: string) {
+  if (!tab?.url?.startsWith(chrome.runtime.getURL("welcome.html"))) return false;
+  void chrome.runtime.sendMessage({ kind: "welcomeShortcut", command }).catch(() => undefined);
+  return true;
+}
+
 async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
-  if (!tab?.id) return;
+  if (!tab?.id || onWelcomePage(tab, "toggle-spotlight")) return;
   try {
     await sendToTab(tab.id, { kind: "toggleSpotlight" });
     return;
@@ -117,6 +124,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command === "toggle-spotlight") await toggleSpotlight(tab ?? (await activeTab()));
   if (command === "start-voice") {
     const target = tab ?? (await activeTab());
+    if (onWelcomePage(target, "start-voice")) return;
     if (target?.id !== undefined) await sendToTab(target.id, { kind: "startVoice" }).catch(() => undefined);
   }
   if (command === "open-debug") {
