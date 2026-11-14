@@ -11,6 +11,7 @@ import { applyRuntimeBlocks } from "../utils/runtime-blocks";
 import { applyOps } from "../utils/apply-ops";
 import { applyContentFilters, type ContentFilterHandle } from "../utils/content-filter";
 import { findItemGroups } from "../utils/item-groups";
+import { adapterGroups, mergeGroups } from "../utils/site-adapters";
 import { buildSnapshot } from "../utils/snapshot";
 import { computePageStats } from "../utils/page-stats";
 
@@ -255,7 +256,7 @@ function buildOutline(): PageOutline {
     videos: document.querySelectorAll("video").length,
     canvases: document.querySelectorAll("canvas").length,
     elements: snapshot.elements,
-    groups: findItemGroups(document),
+    groups: mergeGroups(adapterGroups(location.hostname, document), findItemGroups(document)),
     stats: computePageStats(),
     text: buildPageText(document.body?.innerText ?? "", document.body?.textContent ?? ""),
   };
