@@ -43,9 +43,9 @@ export const tools: AgentTool[] = [
     name: "inspect",
     description:
       "Inspect elements matching a CSS selector: count, up to 5 samples with text, size, computed styles and attributes. Use it to target changes precisely.",
-    schema: z.object({ selector: z.string() }),
-    async run({ selector }, session) {
-      session.progress(`Inspecting ${selector}`);
+    schema: z.object({ selector: z.string(), label: z.string().describe("A few plain words for the user about what you are doing, without selectors, e.g. \"Looking at the video tiles\".") }),
+    async run({ selector, label }, session) {
+      session.progress(label || "Looking at the page");
       return { text: untrusted(await session.callTab("inspect", { selector })) };
     },
   }),
@@ -54,9 +54,9 @@ export const tools: AgentTool[] = [
     name: "list_items",
     description:
       "List every item matching a selector with its key text (from keySelector, or the whole item) and its full visible text. Use it to read values like view counts, dates or prices before ranking items for reorder.",
-    schema: z.object({ selector: z.string(), keySelector: z.string().nullable() }),
-    async run({ selector, keySelector }, session) {
-      session.progress(`Reading the items in ${selector}`);
+    schema: z.object({ selector: z.string(), keySelector: z.string().nullable(), label: z.string().describe("A few plain words for the user about what you are doing, without selectors, e.g. \"Looking at the video tiles\".") }),
+    async run({ selector, keySelector, label }, session) {
+      session.progress(label || "Reading the items");
       return { text: untrusted(await session.callTab("list_items", { selector, keySelector })) };
     },
   }),
@@ -88,7 +88,7 @@ export const tools: AgentTool[] = [
     description: "Undo an active change by id.",
     schema: z.object({ id: z.string() }),
     async run({ id }, session) {
-      session.progress(`Undoing ${id}`);
+      session.progress("Undoing an earlier change");
       session.appliedIds.delete(id);
       return { text: JSON.stringify(await session.callTab("revert_change", { id })) };
     },
@@ -99,7 +99,7 @@ export const tools: AgentTool[] = [
     description: "Capture the visible part of the tab to check visually that your changes look right.",
     schema: z.object({}),
     async run(_input, session) {
-      session.progress("Checking the result");
+      session.progress("Checking how it looks");
       const { dataUrl } = await session.callTab("screenshot", {});
       const [header, base64] = dataUrl.split(",");
       const mediaType = header.includes("png") ? "image/png" : "image/jpeg";
@@ -115,7 +115,7 @@ export const tools: AgentTool[] = [
       const skills = loadSkills();
       const skill = skills.find((candidate) => candidate.name === name.trim().toLowerCase());
       if (!skill) return { text: `No skill named "${name}". Available: ${skills.map((candidate) => candidate.name).join(", ")}` };
-      session.progress(`Using the ${skill.name} playbook`);
+      session.progress(`Following the ${skill.name.replace(/-/g, " ")} guide`);
       return { text: skill.body };
     },
   }),
