@@ -426,7 +426,7 @@ function start() {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || tornDown) return;
-    if (changes.activeProfileId) {
+    if (changes.activeProfileId || changes.configImportedAt) {
       accepted = null;
       suggestionCache.clear();
       clearTarget();
@@ -439,7 +439,7 @@ function start() {
         await send({ kind: "pageReady", origin, restored, profileChanged: true });
       }).catch(reportExtensionError);
     } else if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
-    if (changes.paused) {
+    if (changes.paused && !changes.configImportedAt) {
       recordActivity(changes.paused.newValue ? "Adaptations paused; reverting all active changes locally." : "Adaptations resumed; restoring saved changes locally.");
       void mutate(async () => {
         if (changes.paused.newValue) await revertAll();

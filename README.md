@@ -27,6 +27,7 @@ Most sites decide what you see and in what order. Here you can change that on th
 - Memory with consent. Each preference asks whether it applies to this site, all sites, or neither.
 - Hands-free control with an air pointer, pinch or dwell click, hand and head scrolling, and swipes for back and forward.
 - Every change can be undone from the toast or the change history, and one switch pauses all of them.
+- Import and export from Settings to move profiles, preferences, saved changes, commands, and request history between computers. Export a JSON file on one computer, then import it on the other. Import replaces the current config; API keys, sign-ins, and the local server address stay on each computer.
 
 ## How it works
 
