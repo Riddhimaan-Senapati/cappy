@@ -4,11 +4,14 @@ import {
   ADAPT_PATH,
   DEFAULT_BACKEND_URL,
   NeedId,
+  RequestBody,
   matchesHost,
+  ruleAppliesTo,
   type Adaptation,
   type AdaptationId,
   type ContentFilter,
   type Profile,
+  type Rule,
 } from "@browser-agent/shared";
 import { colorFilterSvg, compileAdaptationCss } from "@browser-agent/blocks";
 import {
@@ -38,6 +41,8 @@ import { reasonBadge } from "../utils/badge";
 import { verifyAdaptation } from "../utils/verify";
 import { describeChoice, logForTab, startRun } from "../utils/steps";
 import { hasRuntimeBlock } from "../utils/runtime-blocks";
+import { clientTime, loadClock, now } from "../utils/clock";
+import { RULES_KEY, addRulesFromAdaptation, loadRules, parseRules, rulesForHost, saveRules } from "../utils/rules";
 
 const APPLIED_KEY = KEYS.applied;
 const FRICTION_PROMPT = "Make text bigger on every site?";
@@ -70,11 +75,19 @@ export default defineBackground(() => {
     void forgetApplied(tabId);
   });
 
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !(RULES_KEY in changes)) return;
+    const change = changes[RULES_KEY];
+    void resendRules(parseRules(change?.oldValue), parseRules(change?.newValue));
+  });
+
   startFriction(promptFriction);
 });
 
 async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
+  await loadClock();
   await forgetApplied(tabId);
+  await applyRulesToTab(tabId, msg.url);
   const profile = await loadProfile();
   if (profile.needs.length === 0) return notifyDone(tabId);
 
@@ -90,7 +103,7 @@ async function handlePageReady(tabId: number, msg: PageReady): Promise<void> {
     if (restored) return;
   }
 
-  const request = AdaptRequest.safeParse({ url: msg.url, outline: msg.outline, profile });
+  const request = AdaptRequest.safeParse({ url: msg.url, outline: msg.outline, profile, clientTime: clientTime() });
   if (!request.success) {
     await setLast({ status: "error", url: msg.url, message: "Page details were not valid" });
     return notifyDone(tabId);
@@ -244,6 +257,7 @@ function hostOf(url: string | undefined): string | undefined {
 }
 
 async function handleUserRequest(text: string): Promise<void> {
+  await loadClock();
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (tab?.id === undefined) {
     await setLast({ status: "error", url: "", message: "No active tab to change" });
@@ -264,7 +278,7 @@ async function handleUserRequest(text: string): Promise<void> {
 
   await logForTab(tabId, "info", `Reading ${hostOf(reply.url) ?? "this page"}…`);
   const profile = await loadProfile();
-  const body = buildRequestBody(reply, profile, text);
+  const body = RequestBody.parse({ ...buildRequestBody(reply, profile, text), clientTime: clientTime() });
   let raw: unknown;
   await logForTab(tabId, "info", "Asked the model for a change");
   try {
@@ -280,7 +294,37 @@ async function handleUserRequest(text: string): Promise<void> {
     await setLast({ status: "error", url: reply.url, message: "Backend sent an unexpected response" });
     return;
   }
-  await applyResponse(tabId, reply.url, parsed.data, profile);
+  const applied = await applyResponse(tabId, reply.url, parsed.data, profile);
+  if (applied && parsed.data.kind === "adaptation" && (parsed.data.adaptation.filters?.length ?? 0) > 0) {
+    await rememberRules(reply.url, parsed.data.adaptation, text);
+  }
+}
+
+async function rememberRules(url: string, adaptation: Adaptation, text: string): Promise<void> {
+  const host = hostOf(url);
+  if (!host) return;
+  const next = addRulesFromAdaptation(await loadRules(), adaptation, host, text, now());
+  await saveRules(next).catch((err: unknown) => console.warn("could not save rules", err));
+}
+
+async function applyRulesToTab(tabId: number, url: string): Promise<void> {
+  const host = hostOf(url);
+  if (!host) return;
+  const rules = rulesForHost(await loadRules(), host);
+  await sendToTab(tabId, { type: "apply-rules", rules }).catch(() => undefined);
+}
+
+// Tabs are re-sent their rules when rules change, including tabs whose host lost its last rule
+// so that the removed filter stops applying there.
+async function resendRules(previous: Rule[], next: Rule[]): Promise<void> {
+  const tabs = await chrome.tabs.query({}).catch(() => []);
+  for (const tab of tabs) {
+    const host = hostOf(tab.url);
+    if (tab.id === undefined || !host) continue;
+    const affected = previous.some((r) => ruleAppliesTo(r, host)) || next.some((r) => ruleAppliesTo(r, host));
+    if (!affected) continue;
+    await sendToTab(tab.id, { type: "apply-rules", rules: rulesForHost(next, host) }).catch(() => undefined);
+  }
 }
 
 async function handleFrictionAccept(tabId: number): Promise<void> {

@@ -13,6 +13,7 @@ import { applyContentFilters, type ContentFilterHandle } from "../utils/content-
 import { findItemGroups } from "../utils/item-groups";
 import { buildSnapshot } from "../utils/snapshot";
 import { computePageStats } from "../utils/page-stats";
+import { loadClock, onClockChange } from "../utils/clock";
 
 const FILTER_ID = "adaptive-agent-filters";
 
@@ -70,6 +71,17 @@ export default defineContentScript({
       undoFilters?.();
       undoFilters = undefined;
     };
+
+    // Standing rules have their own undo, so a one-off change being removed leaves them in place.
+    let undoRules: ContentFilterHandle | undefined;
+
+    const revertRules = () => {
+      undoRules?.();
+      undoRules = undefined;
+    };
+
+    onClockChange(() => undoRules?.refresh());
+    void loadClock();
 
     const removeAdaptationUi = () => {
       banner?.remove();
@@ -207,6 +219,12 @@ export default defineContentScript({
           revertFilters();
           undoFilters = applyContentFilters(msg.filters, document);
           sendResponse({ matched: undoFilters.matched });
+          break;
+        case "apply-rules":
+          void loadClock().then(() => {
+            revertRules();
+            if (msg.rules.length > 0) undoRules = applyContentFilters(msg.rules.map((r) => r.filter), document);
+          });
           break;
         case "page-stats":
           sendResponse({ stats: computePageStats() });

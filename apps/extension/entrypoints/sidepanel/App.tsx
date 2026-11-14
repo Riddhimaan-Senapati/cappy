@@ -8,6 +8,7 @@ import { GesturePanel } from "./GesturePanel";
 import { VerifyPanel } from "./VerifyPanel";
 import { StepsTimeline } from "./StepsTimeline";
 import { SavedChanges } from "./SavedChanges";
+import { RulesCard } from "./RulesCard";
 import {
   KEYS,
   LastResult,
@@ -73,6 +74,8 @@ export function App() {
       </Section>
 
       <GesturePanel />
+
+      <RulesCard />
 
       <Section title="Saved changes">
         <SavedChanges />
