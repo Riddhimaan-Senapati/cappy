@@ -70,6 +70,11 @@ audio.post("/speech", express.json({ limit: "24kb" }), async (req, res) => {
 });
 
 audio.post("/transcribe", express.raw({ type: "audio/webm", limit: "5mb" }), async (req, res) => {
+  // The offline stub has no speech model; e2e runs get a fixed transcript so the voice pipeline can be exercised end to end.
+  if (process.env.LLM_PROVIDER === "stub") {
+    res.json({ text: process.env.STUB_TRANSCRIPT || "remove this element" });
+    return;
+  }
   const gemini = req.query.provider === "gemini";
   const apiKey = audioKey(gemini);
   if (!apiKey) { res.sendStatus(503); return; }

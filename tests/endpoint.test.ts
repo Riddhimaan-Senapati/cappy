@@ -44,6 +44,21 @@ test("a steady background hum raises the noise floor instead of counting as spee
   assert.deepEqual(run([[0.015, 4000], [0.016, 3000]]).at(-1)?.signal, { type: "stop", reason: "no-speech" });
 });
 
+test("rising microphone gain after the user stops still counts as a pause", () => {
+  const signals = run([[QUIET, 400], [LOUD, 1200], [0.04, 400], [0.06, 3000]]);
+  assert.deepEqual(signals.map(({ signal }) => signal.type), ["pause", "stop"]);
+});
+
+test("steady noise that is there from the start does not hide the pause after speech", () => {
+  const signals = run([[0.045, 2000], [0.3, 1200], [0.05, 4000]]);
+  assert.deepEqual(signals.at(-1)?.signal, { type: "stop", reason: "pause" });
+});
+
+test("a quieter second sentence still keeps listening", () => {
+  const signals = run([[LOUD, 1000], [QUIET, 500], [0.1, 1000], [QUIET, 3000]]);
+  assert.deepEqual(signals.map(({ signal }) => signal.type), ["pause", "resume", "pause", "stop"]);
+});
+
 test("while holding a pinch, pauses and silence never stop listening; only the cap does", () => {
   const signals = run([[LOUD, 800], [QUIET, 5000], [LOUD, 500], [QUIET, 12_000]], true);
   assert.ok(signals.every(({ signal }) => signal.type !== "pause"));

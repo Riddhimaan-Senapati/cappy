@@ -89,13 +89,16 @@ export interface Browser {
   close(): Promise<void>;
 }
 
-export async function launchBrowser(name: string): Promise<Browser> {
+export async function launchBrowser(name: string, options: E2EOptions = {}): Promise<Browser> {
   if (!existsSync(path.join(EXTENSION_DIR, "manifest.json"))) throw new Error(`No extension manifest at ${EXTENSION_DIR}`);
   const userDataDir = mkdtempSync(path.join(os.tmpdir(), `ba-e2e-${name}-`));
   const context = await chromium.launchPersistentContext(userDataDir, {
     channel: "chromium",
     headless: process.env.E2E_HEADED !== "1",
-    args: [`--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`, "--no-first-run", "--no-default-browser-check"],
+    args: [
+      `--disable-extensions-except=${EXTENSION_DIR}`, `--load-extension=${EXTENSION_DIR}`, "--no-first-run", "--no-default-browser-check",
+      ...(options.fakeAudio ? ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", `--use-file-for-fake-audio-capture=${options.fakeAudio}`] : []),
+    ],
   });
   let worker = context.serviceWorkers()[0];
   worker ??= await context.waitForEvent("serviceworker", { timeout: 20_000 });
@@ -216,13 +219,18 @@ export async function clickShadowButton(page: Page, label: string): Promise<void
 }
 
 // Runs one e2e test, prints PASS or FAIL, and always tears down the server and browser it created.
-export async function runE2E(name: string, body: (ctx: { server: ServerProcess; browser: Browser }) => Promise<void>) {
+export interface E2EOptions {
+  // A WAV file Chromium plays as the microphone.
+  fakeAudio?: string;
+}
+
+export async function runE2E(name: string, body: (ctx: { server: ServerProcess; browser: Browser }) => Promise<void>, options: E2EOptions = {}) {
   let server: ServerProcess | undefined;
   let browser: Browser | undefined;
   try {
     buildExtension();
     server = await startServer();
-    browser = await launchBrowser(name);
+    browser = await launchBrowser(name, options);
     await body({ server, browser });
     console.log(`PASS ${name}`);
   } catch (error) {

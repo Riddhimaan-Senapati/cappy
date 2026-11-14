@@ -1,5 +1,5 @@
 import type { ActiveChange, Change, PageOutline } from "../../../shared/adaptation.js";
-import type { Trigger } from "../../../shared/protocol.js";
+import type { TargetElement, Trigger } from "../../../shared/protocol.js";
 import type { AgentSession } from "../session.js";
 import { tools, type AgentTool } from "../tools.js";
 import type { AgentProvider } from "./types.js";
@@ -17,6 +17,7 @@ export interface StubPlan {
 }
 
 export interface StubInput {
+  target?: TargetElement;
   trigger: Trigger;
   message: string;
   profile: string[];
@@ -29,6 +30,7 @@ const DARK_MODE = /dark mode/i;
 const INVERT = /\binvert\b/i;
 const REMOVE = /\b(?:remove(?: all)?|hide)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30})\b/i;
 const COLORBLIND = /colou?r[- ]?blind/i;
+const TARGETED = /\b(?:remove|hide|delete|red)\b/i;
 const VAGUE = /^make (?:this|it|the page) easier(?: to (?:read|use|see))?[.!?]?$/i;
 const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
 const SITE_ONLY = /\b(?:only (?:on |for )?this (?:site|website|page)|(?:on |for )?this (?:site|website|page) only|(?:on|for) this (?:site|website|page))\b/i;
@@ -94,6 +96,20 @@ export function planStubRun(input: StubInput): StubPlan {
   }
 
   const message = input.message.trim();
+  if (input.target && TARGETED.test(message)) {
+    const { selector, label } = input.target;
+    const red = /\bred\b/i.test(message);
+    return {
+      calls: [{ name: "apply_change", input: { change: change({
+        id: red ? "target-red" : "target-hidden",
+        summary: red ? `Made ${label} red` : `Hid ${label}`,
+        reason: `Request: "${message.slice(0, 100)}"`,
+        scope: "site",
+        css: red ? `${selector} { color: #c00000 !important; }` : `${selector} { display: none !important; }`,
+      }) } }],
+      reply: red ? `Stub: made ${label} red.` : `Stub: hid ${label}.`,
+    };
+  }
   if (VAGUE.test(message)) {
     return {
       calls: [{ name: "offer_options", input: { question: "Which would help most?", options: [
@@ -195,7 +211,7 @@ export function createStubProvider(): AgentProvider {
           if (/"status":"(?:applied|already-set)"/.test(result.text)) return "Turned on the site's dark mode.";
         }
       }
-      const plan = planStubRun({ trigger, message, profile, page, active });
+      const plan = planStubRun({ trigger, message, profile, page, active, target: session.request.target });
       const rejected: string[] = [];
       for (const call of plan.calls) {
         const tool = toolNamed(call.name);

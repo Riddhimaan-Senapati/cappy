@@ -5,12 +5,16 @@ export const ENDPOINT = {
   maxMs: 15_000,
   minSpeechLevel: 0.02,
   floorRatio: 3,
+  // Once the user has spoken, anything below this share of their speaking level counts as a pause,
+  // so microphone gain that rises after they stop does not look like more speech.
+  peakRatio: 0.4,
   speechFrames: 2,
 };
 
 export interface EndpointState {
   startedAt: number;
   floor: number;
+  peak: number;
   heardSpeech: boolean;
   speaking: boolean;
   loudFrames: number;
@@ -20,17 +24,19 @@ export interface EndpointState {
 // "pause" starts the about-to-send countdown, "resume" cancels it, "stop" ends listening.
 export type EndpointSignal = { type: "pause"; ms: number } | { type: "resume" } | { type: "stop"; reason: "pause" | "no-speech" | "max" } | null;
 
-export const startEndpoint = (now: number): EndpointState => ({ startedAt: now, floor: 0.01, heardSpeech: false, speaking: false, loudFrames: 0, silentSince: null });
+export const startEndpoint = (now: number): EndpointState => ({ startedAt: now, floor: 0.01, peak: 0, heardSpeech: false, speaking: false, loudFrames: 0, silentSince: null });
 
 // hold: the user is holding a pinch (push-to-talk), so pauses never end listening; only release, the keyword or the cap do.
 export function stepEndpoint(state: EndpointState, level: number, now: number, hold = false, pauseMs = ENDPOINT.pauseMs): { state: EndpointState; signal: EndpointSignal } {
   if (now - state.startedAt >= ENDPOINT.maxMs) return { state, signal: { type: "stop", reason: "max" } };
-  const threshold = Math.max(ENDPOINT.minSpeechLevel, state.floor * ENDPOINT.floorRatio);
+  const threshold = Math.max(ENDPOINT.minSpeechLevel, state.floor * ENDPOINT.floorRatio, state.heardSpeech ? state.peak * ENDPOINT.peakRatio : 0);
   const loud = level >= threshold;
-  // The noise floor follows quiet frames only, slowly, so a steady fan or hum does not count as speech.
-  const floor = loud ? state.floor : state.floor * 0.95 + level * 0.05;
+  // The floor tracks quiet frames quickly and loud ones very slowly, so steady noise that was there from the start still settles into it.
+  const floor = loud ? state.floor * 0.9995 + level * 0.0005 : state.floor * 0.95 + level * 0.05;
+  // The speaking level follows the loudest recent speech and fades slowly, so a quieter later sentence still counts.
+  const peak = loud ? Math.max(level, state.peak * 0.995) : state.peak * 0.999;
   const loudFrames = loud ? state.loudFrames + 1 : 0;
-  const next: EndpointState = { ...state, floor, loudFrames };
+  const next: EndpointState = { ...state, floor, peak, loudFrames };
 
   if (loudFrames >= ENDPOINT.speechFrames) {
     const wasPaused = next.heardSpeech && next.silentSince !== null;

@@ -40,7 +40,46 @@ const speech = globalThis as unknown as { SpeechRecognition?: RecognizerConstruc
 
 let recognizer: Recognizer | null = null;
 let stopMeter: (() => void) | null = null;
+let stopSpotter: (() => void) | null = null;
 const METER_MS = 50;
+// Automatic gain raises room noise as soon as the user stops talking, which hides the pause; noise suppression helps too.
+const MIC: MediaStreamConstraints = { audio: { autoGainControl: false, noiseSuppression: true, echoCancellation: true } };
+
+// Cloud transcription returns text only at the end, so "done" is spotted live with Chrome's on-device recognizer, never its server one.
+async function spotDone(lang: string, onDone: () => void) {
+  stopSpotter?.();
+  const Ctor = speech.SpeechRecognition ?? speech.webkitSpeechRecognition;
+  if (!Ctor || !(await preferOnDevice(Ctor, lang || navigator.language))) return;
+  const spotter = new Ctor();
+  spotter.lang = lang || navigator.language;
+  spotter.continuous = true;
+  spotter.interimResults = true;
+  spotter.processLocally = true;
+  let heard = "";
+  spotter.onresult = (event) => {
+    let text = "";
+    for (let i = 0; i < event.results.length; i++) text += event.results[i][0].transcript;
+    heard = text;
+    if (stripDoneKeyword(heard).done) onDone();
+  };
+  spotter.onerror = () => undefined;
+  spotter.onend = () => undefined;
+  const stop = () => {
+    spotter.onresult = null;
+    try {
+      spotter.abort();
+    } catch {
+      // already stopped
+    }
+    if (stopSpotter === stop) stopSpotter = null;
+  };
+  stopSpotter = stop;
+  try {
+    spotter.start();
+  } catch {
+    stop();
+  }
+}
 
 function stopListening() {
   if (recording?.state === "recording") recording.stop();
@@ -135,7 +174,7 @@ async function start(requested: string, hold: boolean) {
   };
   recognizer = next;
   // The recognizer has no loudness signal of its own, so a second, local-only stream feeds the pause detector.
-  const meterStream = await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => undefined);
+  const meterStream = await navigator.mediaDevices.getUserMedia(MIC).catch(() => undefined);
   if (!current()) {
     meterStream?.getTracks().forEach((track) => track.stop());
     return;
@@ -158,10 +197,10 @@ let recordingTimer: ReturnType<typeof setTimeout> | undefined;
 let playback: AbortController | undefined;
 let player: HTMLAudioElement | undefined;
 
-async function record(provider: "openai" | "gemini", serverUrl: string, hold: boolean) {
+async function record(provider: "openai" | "gemini", serverUrl: string, hold: boolean, lang: string) {
   let stream: MediaStream | undefined;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = await navigator.mediaDevices.getUserMedia(MIC);
     const recorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
     const chunks: Blob[] = [];
     recording = recorder;
@@ -173,6 +212,7 @@ async function record(provider: "openai" | "gemini", serverUrl: string, hold: bo
     recorder.onstop = async () => {
       clearTimeout(recordingTimer);
       stopMeter?.();
+      stopSpotter?.();
       stream?.getTracks().forEach((track) => track.stop());
       if (recording !== recorder) return;
       try {
@@ -189,6 +229,10 @@ async function record(provider: "openai" | "gemini", serverUrl: string, hold: bo
     recorder.start();
     emit({ type: "listening" });
     meter(stream, hold);
+    void spotDone(lang, () => {
+      stopMeter?.();
+      if (recorder.state === "recording") recorder.stop();
+    });
     recordingTimer = setTimeout(() => {
       if (recorder.state === "recording") recorder.stop();
     }, ENDPOINT.maxMs);
@@ -252,7 +296,7 @@ chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string;
         return;
       }
       const hold = message.hold === true;
-      await (voiceProvider === "chrome" ? start(message.lang ?? "", hold) : record(voiceProvider, message.serverUrl ?? "", hold));
+      await (voiceProvider === "chrome" ? start(message.lang ?? "", hold) : record(voiceProvider, message.serverUrl ?? "", hold, message.lang ?? ""));
     }).catch(() => {
       emit({ type: "error", error: "start-failed" });
       emit({ type: "ended" });
@@ -260,6 +304,7 @@ chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string;
   }
   if (message.kind === "voiceStop") {
     stopMeter?.();
+    stopSpotter?.();
     stopListening();
   }
   if (message.kind === "speechStop") stopPlayback();

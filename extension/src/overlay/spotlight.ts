@@ -10,7 +10,7 @@ import { renderSettings, type SettingsContext } from "../ui/settings.js";
 import { paintCountdown, paintMic, liveRegion, micButton } from "../voice/button.js";
 import { VoiceController } from "../voice/controller.js";
 import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
-import { chooseTarget, type PointedCandidate } from "../voice/point.js";
+import { chooseTarget, mentionsTarget, type PointedCandidate } from "../voice/point.js";
 
 export interface SpotlightDeps {
   ask(message: string, fresh: boolean, interrupt?: boolean, thread?: string, target?: TargetElement): void;
@@ -1306,7 +1306,9 @@ export class Spotlight {
 
   // With the bar closed, listen without covering the page, so the user can point while speaking.
   async startPointVoice() {
-    if (this.opened) return this.startVoice();
+    // An open bar covers the page, so with nothing typed yet it steps aside to let the user point.
+    if (this.opened && (this.input.value.trim() || this.input.readOnly)) return this.startVoice();
+    if (this.opened) this.hide();
     if (this.voice.active) return this.voice.stop();
     window.clearTimeout(this.pointTimer);
     this.pointMode = true;
@@ -1369,6 +1371,14 @@ export class Spotlight {
       return;
     }
     if (!this.opened) return;
+    // In the bar the mouse is on the bar itself, so only the camera pointer can say which element "this" is.
+    if (!this.target && mentionsTarget(text)) {
+      const candidate = this.deps.pointed();
+      if (candidate?.deliberate) {
+        this.deps.markTarget(candidate.value.selector);
+        this.setTarget(candidate.value);
+      }
+    }
     const value = joinVoiceText(this.voiceBase, text);
     this.voiceBase = "";
     this.input.value = value;

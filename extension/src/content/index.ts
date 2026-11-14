@@ -61,14 +61,14 @@ function selectTarget(element: Element) {
 let mouseAt: { x: number; y: number } | null = null;
 const pointedElements = new Map<string, Element>();
 
+// Looks through the extension's own overlay (bar, backdrop, pill, camera cursor) to the page element underneath.
 function pageElementAt(x: number, y: number): Element | null {
-  const element = document.elementFromPoint(x, y);
-  if (!element || element === document.documentElement || element === document.body || element.closest("[data-ba]")) return null;
-  return element;
+  return document.elementsFromPoint(x, y).find((element) => element !== document.documentElement && element !== document.body && !element.closest("[data-ba]")) ?? null;
 }
 
 function pointed(): PointedCandidate<TargetElement> | null {
-  const fromCamera = camera?.pointedElement() ?? null;
+  const cameraAt = camera?.pointerPosition() ?? null;
+  const fromCamera = cameraAt ? pageElementAt(cameraAt.x, cameraAt.y) : null;
   const element = fromCamera ?? (mouseAt ? pageElementAt(mouseAt.x, mouseAt.y) : null);
   if (!element) return null;
   const target = describeTarget(element);
