@@ -4,6 +4,11 @@ import { OWN_ATTR, textElements } from "./dom.js";
 type Undo = () => void;
 type Matrix3 = [number, number, number][];
 
+export interface LiveBlock {
+  undo: Undo;
+  reapply?: (roots: Element[]) => void;
+}
+
 // Machado et al. 2009 simulation matrices at full severity.
 const SIMULATION: Record<"protanopia" | "deuteranopia" | "tritanopia", Matrix3> = {
   protanopia: [
@@ -48,7 +53,7 @@ function addStyle(css: string): Undo {
   return () => style.remove();
 }
 
-function colorblind(block: Extract<BlockCall, { name: "colorblind" }>): Undo {
+function colorblind(block: Extract<BlockCall, { name: "colorblind" }>): LiveBlock {
   const filterId = `ba-cvd-${block.type}`;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute(OWN_ATTR, "block");
@@ -66,42 +71,85 @@ function colorblind(block: Extract<BlockCall, { name: "colorblind" }>): Undo {
 
   const targets = block.scope === "page" ? "body" : "img, video, canvas, picture, svg:not([data-ba])";
   const removeStyle = addStyle(`${targets} { filter: url(#${filterId}) !important; }`);
-  return () => {
-    removeStyle();
-    svg.remove();
+  return {
+    undo: () => {
+      removeStyle();
+      svg.remove();
+    },
   };
 }
 
-function textScale(scale: number): Undo {
-  const elements = textElements();
-  const sizes = elements.map((element) => parseFloat(getComputedStyle(element).fontSize));
-  const previous = elements.map((element) => [element.style.getPropertyValue("font-size"), element.style.getPropertyPriority("font-size")]);
-  elements.forEach((element, i) => element.style.setProperty("font-size", `${(sizes[i] * scale).toFixed(1)}px`, "important"));
-  return () =>
-    elements.forEach((element, i) => {
-      const [value, priority] = previous[i];
-      if (value) element.style.setProperty("font-size", value, priority);
-      else element.style.removeProperty("font-size");
-    });
+interface ScaledRecord {
+  value: string;
+  priority: string;
+  px: number;
 }
 
-function stopMotion(): Undo {
+function textScale(scale: number): LiveBlock {
+  const scaled = new Map<HTMLElement, ScaledRecord>();
+
+  const restoreInline = (element: HTMLElement, record: ScaledRecord) => {
+    if (record.value) element.style.setProperty("font-size", record.value, record.priority);
+    else element.style.removeProperty("font-size");
+  };
+
+  const scaleElements = (elements: HTMLElement[]) => {
+    const fresh = elements.filter((element) => element.isConnected && !scaled.has(element));
+    if (!fresh.length) return;
+
+    const scaledAncestors = new Set<HTMLElement>();
+    for (const element of fresh) {
+      for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        if (scaled.has(parent)) scaledAncestors.add(parent);
+      }
+    }
+    // New nodes may inherit an already-scaled size, so measure them with ancestors temporarily unscaled to avoid scaling twice.
+    for (const ancestor of scaledAncestors) restoreInline(ancestor, scaled.get(ancestor)!);
+    const sizes = fresh.map((element) => parseFloat(getComputedStyle(element).fontSize));
+    for (const ancestor of scaledAncestors) ancestor.style.setProperty("font-size", `${scaled.get(ancestor)!.px}px`, "important");
+
+    fresh.forEach((element, i) => {
+      const px = Number((sizes[i] * scale).toFixed(1));
+      scaled.set(element, { value: element.style.getPropertyValue("font-size"), priority: element.style.getPropertyPriority("font-size"), px });
+      element.style.setProperty("font-size", `${px}px`, "important");
+    });
+  };
+
+  scaleElements(textElements());
+  return {
+    reapply: (roots) => scaleElements(textElements(1500, roots)),
+    undo: () => {
+      for (const [element, record] of scaled) restoreInline(element, record);
+      scaled.clear();
+    },
+  };
+}
+
+function stopMotion(): LiveBlock {
+  const pauseMedia = (roots: ParentNode[]) => {
+    for (const root of roots) {
+      const media = [...root.querySelectorAll<HTMLMediaElement>("video, audio")];
+      if (root instanceof HTMLMediaElement) media.push(root);
+      for (const element of media) {
+        if (!element.paused) element.pause();
+        element.autoplay = false;
+      }
+    }
+  };
   const paused = document.getAnimations().filter((animation) => animation.playState === "running");
   paused.forEach((animation) => animation.pause());
-  document.querySelectorAll<HTMLMediaElement>("video, audio").forEach((media) => {
-    if (!media.paused) media.pause();
-    media.autoplay = false;
-  });
-  const removeStyle = addStyle(
-    "*, *::before, *::after { animation-play-state: paused !important; transition: none !important; scroll-behavior: auto !important; }",
-  );
-  return () => {
-    removeStyle();
-    paused.forEach((animation) => animation.play());
+  pauseMedia([document]);
+  const removeStyle = addStyle("*, *::before, *::after { animation-play-state: paused !important; transition: none !important; scroll-behavior: auto !important; }");
+  return {
+    reapply: pauseMedia,
+    undo: () => {
+      removeStyle();
+      paused.forEach((animation) => animation.play());
+    },
   };
 }
 
-export function applyBlock(block: BlockCall): Undo {
+export function applyBlock(block: BlockCall): LiveBlock {
   switch (block.name) {
     case "colorblind":
       return colorblind(block);

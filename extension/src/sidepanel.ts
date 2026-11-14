@@ -1,346 +1,117 @@
-import type { ActiveChange, Change, PageStats } from "../../shared/adaptation.js";
-import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, ToolCallMessage, Trigger } from "../../shared/protocol.js";
-import type { ContentEvent, ContentRequest, ContentResponse } from "./messages.js";
-import { load, save } from "./storage.js";
+import type { DebugPortMessage, DebugPortRequest, StatusInfo, UiEvent } from "./messages.js";
+import { adoptStyles, h } from "./ui/dom.js";
+import { TOKENS } from "./ui/theme.js";
 
-const $ = <T extends HTMLElement>(selector: string) => document.querySelector(selector) as T;
+const CSS = `
+html, body { margin: 0; height: 100%; background: #121217; }
+body { display: flex; flex-direction: column; gap: 10px; padding: 14px; font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
+h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
+.head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+.dot.on { background: var(--good); } .dot.off { background: var(--bad); }
+.timeline { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
+.run { padding: 12px; border-radius: 14px; background: var(--raise); border: 1px solid var(--line); animation: rise 0.3s var(--spring); }
+.run .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.run .msg { flex: 1; font-weight: 600; }
+.tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: var(--raise2); color: var(--muted); }
+.tag.fast { color: #bfe3ff; background: rgba(110, 168, 255, 0.2); } .tag.frontier { color: #ead9ff; background: rgba(167, 139, 250, 0.24); }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.steps .good { color: var(--good); } .steps .warn { color: var(--warn); } .steps .bad { color: var(--bad); }
+.reply { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.tools { max-height: 24%; overflow: auto; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
+.tools div { display: flex; gap: 8px; } .tools .bad { color: var(--bad); } .tools .ms { color: var(--faint); min-width: 54px; }
+form { display: flex; gap: 8px; }
+textarea { flex: 1; resize: none; padding: 10px 12px; border-radius: 12px; background: var(--raise); border: 1px solid var(--line); color: var(--text); font: inherit; outline: none; }
+textarea:focus { border-color: var(--accent); }
+button { padding: 0 16px; border: 0; border-radius: 12px; background: var(--grad); color: #0d0d12; font-weight: 650; cursor: pointer; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+`;
 
-const ui = {
-  status: $("#status"),
-  pause: $<HTMLInputElement>("#pause"),
-  proactive: $<HTMLInputElement>("#proactive"),
-  profile: $("#profile"),
-  profileForm: $<HTMLFormElement>("#profile-form"),
-  profileInput: $<HTMLInputElement>("#profile-input"),
-  changes: $("#changes"),
-  log: $("#log"),
-  form: $<HTMLFormElement>("#composer"),
-  input: $<HTMLTextAreaElement>("#message"),
-  send: $<HTMLButtonElement>("#send"),
-  suggestions: $("#suggestions"),
-};
+adoptStyles(document, TOKENS + CSS);
 
-function h<K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text = "", children: Node[] = []) {
-  const element = document.createElement(tag);
-  if (className) element.className = className;
-  if (text) element.textContent = text;
-  element.append(...children);
-  return element;
+const statusDot = h("span", "dot");
+const statusText = h("span", "", "Connecting");
+const timeline = h("div", "timeline");
+const tools = h("div", "tools");
+const input = h("textarea");
+input.rows = 2;
+input.placeholder = "Debug chat: runs on the active tab, always asks the AI fresh";
+const form = h("form", "", "", [input, h("button", "", "Send")]);
+
+document.body.append(
+  h("div", "head", "", [h("h1", "", "Debug"), h("div", "status", "", [statusDot, statusText])]),
+  timeline,
+  tools,
+  form,
+);
+
+const runs = new Map<string, { card: HTMLElement; steps: HTMLElement; tag: HTMLElement }>();
+
+function setStatus(status: StatusInfo) {
+  statusDot.className = `dot ${status.connected ? "on" : "off"}`;
+  statusText.textContent = status.connected ? `${status.provider ?? "agent"}${status.models ? ` · ${status.models.fast} / ${status.models.frontier}` : ""}` : (status.error ?? "Server offline");
 }
 
-let socket: WebSocket | null = null;
-let currentRun: { runId: string; tabId: number; windowId: number; trigger: Trigger; steps: HTMLElement; appliedIds: string[]; summaries: string[] } | null = null;
-const proactiveDone = new Set<string>();
-
-async function activeTab() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab;
-}
-
-async function sendToTab<T>(tabId: number, request: ContentRequest): Promise<T> {
-  const response: ContentResponse | undefined = await chrome.tabs.sendMessage(tabId, request);
-  if (!response) throw new Error("No response from page. Reload the tab after installing the extension.");
-  if (!response.ok) throw new Error(response.error);
-  return response.result as T;
-}
-
-function connect(url: string) {
-  ui.status.textContent = "Connecting…";
-  ui.status.dataset.state = "connecting";
-  socket = new WebSocket(url);
-  socket.onmessage = (event) => onServerMessage(JSON.parse(event.data) as ServerMessage);
-  socket.onclose = () => {
-    ui.status.textContent = "Server offline · retrying";
-    ui.status.dataset.state = "offline";
-    if (currentRun) finishRun();
-    setTimeout(() => connect(url), 3000);
-  };
-}
-
-function sendToServer(message: ClientMessage) {
-  socket?.send(JSON.stringify(message));
-}
-
-async function captureScreenshot(windowId: number): Promise<string> {
-  const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 70 });
-  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
-  const scale = Math.min(1, 1280 / bitmap.width);
-  const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
-  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  const blob = await canvas.convertToBlob({ type: "image/jpeg", quality: 0.7 });
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return `data:image/jpeg;base64,${btoa(binary)}`;
-}
-
-async function runTool(message: ToolCallMessage) {
-  if (!currentRun || message.runId !== currentRun.runId) return;
-  const run = currentRun;
-  try {
-    let result: unknown;
-    if (message.name === "screenshot") {
-      if (run.trigger === "page_load") await sendToTab(run.tabId, { kind: "busy", on: false });
-      result = { dataUrl: await captureScreenshot(run.windowId) };
-    } else {
-      result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input });
-    }
-    if (message.name === "apply_change") {
-      const change = (message.input as { change: Change }).change;
-      const outcome = result as ApplyOutcome;
-      if (run.trigger === "page_load") await sendToTab(run.tabId, { kind: "busy", on: false });
-      if (outcome.ok) {
-        run.appliedIds.push(change.id);
-        run.summaries.push(change.summary);
-      }
-      renderOutcome(run.steps, change, outcome);
-    }
-    sendToServer({ type: "toolResult", callId: message.callId, ok: true, result });
-  } catch (error) {
-    sendToServer({ type: "toolResult", callId: message.callId, ok: false, error: error instanceof Error ? error.message : String(error) });
+function ensureRun(event: Extract<UiEvent, { runId: string }>, message = "") {
+  let run = runs.get(event.runId);
+  if (!run) {
+    const tag = h("span", "tag", "");
+    const steps = h("ul", "steps");
+    const card = h("div", "run", "", [h("div", "top", "", [h("span", "msg", message || "Run"), tag]), steps]);
+    timeline.prepend(card);
+    run = { card, steps, tag };
+    runs.set(event.runId, run);
   }
+  return run;
 }
 
-const STAT_LABELS: Record<keyof PageStats, string> = {
-  inputsWithoutLabel: "unlabeled inputs",
-  smallTargets: "small targets",
-  smallText: "small text",
-  lowContrastText: "low-contrast text",
-  imagesWithoutAlt: "images without alt",
-  runningAnimations: "animations",
-  visibleAdsOrPopups: "ads/popups",
-};
-
-function renderOutcome(steps: HTMLElement, change: Change, outcome: ApplyOutcome) {
-  if (!outcome.ok) {
-    steps.append(h("li", "step bad", `Failed: ${outcome.error}`));
-    return;
-  }
-  const deltas = (Object.keys(STAT_LABELS) as Array<keyof PageStats>)
-    .filter((key) => outcome.before[key] !== outcome.after[key])
-    .map((key) => `${STAT_LABELS[key]} ${outcome.before[key]} → ${outcome.after[key]}`);
-  const zero = Object.entries(outcome.matched).filter(([, count]) => count === 0).map(([selector]) => selector);
-  if (deltas.length) steps.append(h("li", "step good", `Verified: ${deltas.join(", ")}`));
-  if (zero.length) steps.append(h("li", "step warn", `Matched nothing: ${zero.slice(0, 3).join(", ")}`));
-}
-
-function onServerMessage(message: ServerMessage) {
-  switch (message.type) {
-    case "hello":
-      ui.status.textContent = `${message.provider} · ${message.model}`;
-      ui.status.dataset.state = "online";
-      return;
-    case "tool":
-      void runTool(message);
-      return;
-  }
-  if (!currentRun || message.runId !== currentRun.runId) return;
-  switch (message.type) {
-    case "progress":
-      currentRun.steps.append(h("li", "step", message.text));
+function onEvent(event: UiEvent) {
+  const run = ensureRun(event, event.type === "start" ? (event.message || "Page-load check") : "");
+  switch (event.type) {
+    case "start":
+      run.tag.textContent = event.trigger === "chat" ? "chat" : "page load";
       break;
-    case "warning":
-      currentRun.steps.append(h("li", "step bad", message.text));
+    case "tier":
+      run.tag.className = `tag ${event.tier}`;
+      run.tag.textContent = `${event.tier} · ${event.model}`;
       break;
-    case "profile":
-      void addProfileLines(message.lines);
-      currentRun.steps.append(h("li", "step good", `Remembered: ${message.lines.join("; ")}`));
+    case "step":
+      run.steps.append(h("li", event.tone, event.text));
       break;
-    case "done":
-      void onDone(message.reply);
+    case "blocked":
+      run.steps.append(h("li", "bad", `Blocked: ${event.reason}`));
       break;
     case "error":
-      currentRun.steps.append(h("li", "step bad", `Error: ${message.message}`));
-      finishRun();
+      run.steps.append(h("li", "bad", `Error: ${event.message}`));
+      break;
+    case "done":
+      if (event.reply) run.card.append(h("div", "reply", event.reply));
+      if (event.fromCache) run.steps.append(h("li", "good", "Served from saved request"));
       break;
   }
-  scrollLog();
 }
 
-async function onDone(reply: string) {
-  const run = currentRun!;
-  if (reply) {
-    addBubble("assistant", reply);
-    const state = await load();
-    await save({ history: [...state.history, { role: "assistant" as const, text: reply }].slice(-20) });
+const port = chrome.runtime.connect({ name: "debug" });
+port.onMessage.addListener((message: DebugPortMessage) => {
+  if (message.type === "status") setStatus(message.status);
+  else if (message.type === "event") onEvent(message.event);
+  else {
+    tools.append(h("div", message.ok ? "" : "bad", "", [h("span", "ms", `${message.ms}ms`), h("span", "", `${message.name} ${message.detail}`.slice(0, 120))]));
+    tools.scrollTop = tools.scrollHeight;
   }
-  if (run.trigger === "page_load" && run.appliedIds.length) {
-    await sendToTab(run.tabId, { kind: "toast", text: `Adapted for you: ${run.summaries.join(", ")}.`, undoIds: run.appliedIds }).catch(() => undefined);
-  }
-  if (run.trigger === "page_load" && !run.appliedIds.length && !reply) run.steps.closest(".bubble")?.remove();
-  finishRun();
-}
-
-function finishRun() {
-  if (currentRun?.trigger === "page_load") void sendToTab(currentRun.tabId, { kind: "busy", on: false }).catch(() => undefined);
-  currentRun?.steps.classList.add("done");
-  currentRun = null;
-  ui.send.disabled = false;
-  void renderChanges();
-}
-
-function addBubble(role: "user" | "assistant" | "system", text: string) {
-  const bubble = h("div", `bubble ${role}`, "", [h("p", "", text)]);
-  ui.log.append(bubble);
-  scrollLog();
-  return bubble;
-}
-
-function scrollLog() {
-  ui.log.scrollTop = ui.log.scrollHeight;
-}
-
-async function startRun(trigger: Trigger, message: string) {
-  if (currentRun || socket?.readyState !== WebSocket.OPEN) return false;
-  const tab = await activeTab();
-  if (!tab?.id || !tab.url?.startsWith("http")) {
-    addBubble("system", "Open a regular web page to adapt it.");
-    return false;
-  }
-  const state = await load();
-  if (state.paused) {
-    addBubble("system", "Adaptations are paused. Turn them back on first.");
-    return false;
-  }
-
-  let active: ActiveChange[] = [];
-  try {
-    active = await sendToTab<ActiveChange[]>(tab.id, { kind: "list" });
-  } catch (error) {
-    addBubble("system", error instanceof Error ? error.message : String(error));
-    return false;
-  }
-
-  if (trigger === "chat") {
-    addBubble("user", message);
-    await save({ history: [...state.history, { role: "user" as const, text: message }].slice(-20) });
-  }
-
-  const steps = h("ul", "steps");
-  ui.log.append(h("div", "bubble agent", "", [h("p", "label", trigger === "page_load" ? "Checking this page for you" : "Working on it"), steps]));
-  currentRun = { runId: crypto.randomUUID(), tabId: tab.id, windowId: tab.windowId, trigger, steps, appliedIds: [], summaries: [] };
-  ui.send.disabled = true;
-  if (trigger === "page_load") await sendToTab(tab.id, { kind: "busy", on: true }).catch(() => undefined);
-
-  const request: RunRequest = {
-    type: "run",
-    runId: currentRun.runId,
-    trigger,
-    message,
-    history: state.history.slice(-8),
-    profile: state.profile,
-    active,
-  };
-  sendToServer(request);
-  scrollLog();
-  return true;
-}
-
-async function addProfileLines(lines: string[]) {
-  const state = await load();
-  await save({ profile: [...state.profile, ...lines.filter((line) => !state.profile.includes(line))] });
-  await renderProfile();
-}
-
-async function renderProfile() {
-  const { profile } = await load();
-  ui.profile.replaceChildren(
-    ...(profile.length
-      ? profile.map((line, index) => {
-          const remove = h("button", "icon", "✕");
-          remove.setAttribute("aria-label", `Remove "${line}"`);
-          remove.addEventListener("click", async () => {
-            const state = await load();
-            await save({ profile: state.profile.filter((_, i) => i !== index) });
-            await renderProfile();
-          });
-          return h("li", "", "", [h("span", "", line), remove]);
-        })
-      : [h("li", "empty", "Tell me about your needs in the chat, or add a line below.")]),
-  );
-}
-
-async function renderChanges() {
-  const tab = await activeTab();
-  let active: ActiveChange[] = [];
-  if (tab?.id) active = await sendToTab<ActiveChange[]>(tab.id, { kind: "list" }).catch(() => []);
-  ui.changes.replaceChildren(
-    ...(active.length
-      ? active.map((change) => {
-          const undo = h("button", "link", "Undo");
-          undo.addEventListener("click", async () => {
-            await sendToTab(tab!.id!, { kind: "tool", name: "revert_change", input: { id: change.id } });
-            await renderChanges();
-          });
-          return h("li", "change", "", [
-            h("div", "change-head", "", [h("strong", "", change.summary), h("span", `scope ${change.scope}`, change.scope === "everywhere" ? "all sites" : "this site"), undo]),
-            h("p", "reason", change.reason),
-          ]);
-        })
-      : [h("li", "empty", "No changes on this page yet.")]),
-  );
-}
-
-ui.form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const text = ui.input.value.trim();
-  if (!text) return;
-  if (await startRun("chat", text)) ui.input.value = "";
 });
 
-ui.input.addEventListener("keydown", (event) => {
+form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const message = input.value.trim();
+  if (!message) return;
+  port.postMessage({ type: "chat", message } satisfies DebugPortRequest);
+  input.value = "";
+});
+input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
-    ui.form.requestSubmit();
+    form.requestSubmit();
   }
 });
-
-ui.suggestions.addEventListener("click", (event) => {
-  const button = (event.target as HTMLElement).closest("button");
-  if (!button) return;
-  ui.input.value = button.textContent ?? "";
-  ui.form.requestSubmit();
-});
-
-ui.profileForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const line = ui.profileInput.value.trim();
-  if (!line) return;
-  await addProfileLines([line]);
-  ui.profileInput.value = "";
-});
-
-ui.pause.addEventListener("change", async () => {
-  const paused = !ui.pause.checked;
-  await save({ paused });
-  const tab = await activeTab();
-  if (tab?.id) await sendToTab(tab.id, { kind: "pause", paused }).catch(() => undefined);
-  await renderChanges();
-});
-
-ui.proactive.addEventListener("change", () => save({ proactive: ui.proactive.checked }));
-
-chrome.runtime.onMessage.addListener((event: ContentEvent, sender) => {
-  void (async () => {
-    const tab = await activeTab();
-    if (sender.tab?.id !== tab?.id) return;
-    await renderChanges();
-    if (event.kind !== "pageReady") return;
-    const state = await load();
-    if (!state.proactive || state.paused || !state.profile.length || event.restored > 0 || proactiveDone.has(event.origin)) return;
-    proactiveDone.add(event.origin);
-    await startRun("page_load", "");
-  })();
-});
-
-chrome.tabs.onActivated.addListener(() => void renderChanges());
-
-(async () => {
-  const state = await load();
-  ui.pause.checked = !state.paused;
-  ui.proactive.checked = state.proactive;
-  for (const turn of state.history.slice(-6)) addBubble(turn.role, turn.text);
-  await renderProfile();
-  await renderChanges();
-  connect(state.serverUrl);
-})();

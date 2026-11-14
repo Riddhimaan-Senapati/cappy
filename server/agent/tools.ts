@@ -17,13 +17,13 @@ export interface AgentTool<Schema extends z.ZodType = z.ZodType> {
 
 const defineTool = <Schema extends z.ZodType>(tool: AgentTool<Schema>) => tool as unknown as AgentTool;
 
-const untrusted = (data: unknown) => `<untrusted_page_data>\n${JSON.stringify(data)}\n</untrusted_page_data>`;
+export const untrusted = (data: unknown) => `<untrusted_page_data>\n${JSON.stringify(data)}\n</untrusted_page_data>`;
 
 export const tools: AgentTool[] = [
   defineTool({
     name: "read_page",
     description:
-      "Read an outline of the user's current tab: title, headings, notable elements with CSS selectors, accessibility stats, base styles and a text sample. Call this first.",
+      "Re-read an outline of the user's current tab. The first outline is already in the conversation, so call this only to see the page again after you changed it or if you suspect it changed.",
     schema: z.object({}),
     async run(_input, session) {
       session.progress("Reading the page");
@@ -57,11 +57,16 @@ export const tools: AgentTool[] = [
       if (session.blockedReason) return { text: "BLOCKED: no changes allowed on this page." };
       const problem = validateChange(change);
       if (problem) {
+        session.failures++;
         session.warn(`Rejected change "${change.id}": ${problem}`);
         return { text: `REJECTED by safety layer: ${problem}. Rewrite the change within the rules.` };
       }
       session.progress(`Applying: ${change.summary}`);
-      return { text: JSON.stringify(await session.callTab("apply_change", { change })) };
+      const outcome = await session.callTab("apply_change", { change });
+      const counts = Object.values(outcome.matched);
+      if (!outcome.ok || (counts.length > 0 && counts.every((count) => count === 0))) session.failures++;
+      if (outcome.ok) session.appliedIds.add(change.id);
+      return { text: JSON.stringify(outcome) };
     },
   }),
 
@@ -71,6 +76,7 @@ export const tools: AgentTool[] = [
     schema: z.object({ id: z.string() }),
     async run({ id }, session) {
       session.progress(`Undoing ${id}`);
+      session.appliedIds.delete(id);
       return { text: JSON.stringify(await session.callTab("revert_change", { id })) };
     },
   }),

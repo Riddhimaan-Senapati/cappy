@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
+import type { Tier } from "../../../shared/protocol.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
 import { tools, type ToolOutput } from "../tools.js";
@@ -17,13 +18,20 @@ function toContent(output: ToolOutput) {
 
 export function createAnthropicProvider(): AgentProvider {
   const client = new Anthropic();
-  const model = process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5";
-  const effort = (process.env.AGENT_EFFORT ?? "low") as Effort;
+  const models: Record<Tier, string> = {
+    fast: process.env.ANTHROPIC_MODEL_FAST ?? "claude-haiku-5-5",
+    frontier: process.env.ANTHROPIC_MODEL_FRONTIER ?? process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5",
+  };
+  const efforts: Record<Tier, Effort> = { fast: "low", frontier: (process.env.AGENT_EFFORT as Effort | undefined) ?? "medium" };
 
   return {
     name: "anthropic-key",
-    model,
-    async run(session: AgentSession) {
+    models,
+    async listModels() {
+      const page = await client.models.list({ limit: 50 });
+      return page.data.map((model) => model.id);
+    },
+    async run(session: AgentSession, tier: Tier, model: string) {
       const runnableTools = tools.map((tool) =>
         betaZodTool({
           name: tool.name,
@@ -37,9 +45,8 @@ export function createAnthropicProvider(): AgentProvider {
         model,
         max_tokens: 16000,
         max_iterations: 16,
-        betas: ["server-side-fallback-2026-07-01"],
-        fallbacks: "default",
-        output_config: { effort },
+        ...(model.includes("haiku") ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
+        output_config: { effort: efforts[tier] },
         system: SYSTEM_PROMPT,
         tools: runnableTools,
         messages: [{ role: "user", content: buildUserTurn(session.request) }],

@@ -3,52 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Adaptive Agent</title>
-    <link rel="stylesheet" href="sidepanel.css" />
+    <title>Debug</title>
   </head>
   <body>
-    <header class="top">
-      <div>
-        <h1>Adaptive Agent</h1>
-        <p id="status" class="status" data-state="connecting">Connecting…</p>
-      </div>
-      <label class="switch" title="Global kill switch">
-        <input id="pause" type="checkbox" checked />
-        <span>On</span>
-      </label>
-    </header>
-
-    <section class="card">
-      <div class="card-head">
-        <h2>Your profile</h2>
-        <label class="mini"><input id="proactive" type="checkbox" checked /> Act on page load</label>
-      </div>
-      <ul id="profile" class="profile"></ul>
-      <form id="profile-form" class="inline-form">
-        <input id="profile-input" placeholder="Add a need, e.g. light sensitive" aria-label="Add a profile line" />
-        <button type="submit">Add</button>
-      </form>
-    </section>
-
-    <section class="card">
-      <h2>On this page</h2>
-      <ul id="changes" class="changes"></ul>
-    </section>
-
-    <main id="log" class="log" aria-live="polite"></main>
-
-    <div id="suggestions" class="suggestions">
-      <button type="button">I'm red-green colorblind</button>
-      <button type="button">Invert this page, it's too bright</button>
-      <button type="button">My wrist is in a cast, make this form easier</button>
-      <button type="button">Hide distractions</button>
-    </div>
-
-    <form id="composer" class="composer">
-      <textarea id="message" rows="2" placeholder="Tell me what you need on this page…" aria-label="Message"></textarea>
-      <button id="send" type="submit" aria-label="Send">↑</button>
-    </form>
-
     <script type="module" src="dist/sidepanel.js"></script>
   </body>
 </html>

@@ -1,15 +1,20 @@
 import type { ActiveChange, Change, ChatTurn, PageOutline, PageStats } from "./adaptation.js";
 
 export type Trigger = "chat" | "page_load";
+export type Tier = "fast" | "frontier";
+export type Routing = "auto" | Tier;
 
 export interface RunRequest {
   type: "run";
   runId: string;
   trigger: Trigger;
   message: string;
+  routing: Routing;
+  models?: Partial<Record<Tier, string>>;
   history: ChatTurn[];
   profile: string[];
   active: ActiveChange[];
+  page: PageOutline;
 }
 
 export interface InspectedElement {
@@ -56,10 +61,16 @@ export interface ToolResultMessage {
 
 export type AgentEvent =
   | { type: "progress"; runId: string; text: string }
+  | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "profile"; runId: string; lines: string[] }
   | { type: "warning"; runId: string; text: string }
+  | { type: "blocked"; runId: string; reason: string }
   | { type: "done"; runId: string; reply: string }
   | { type: "error"; runId: string; message: string };
 
-export type ClientMessage = RunRequest | ToolResultMessage;
-export type ServerMessage = ToolCallMessage | AgentEvent | { type: "hello"; provider: string; model: string };
+export interface PingMessage {
+  type: "ping";
+}
+
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage;
+export type ServerMessage = ToolCallMessage | AgentEvent | { type: "hello"; provider: string; models: Record<Tier, string>; available: string[] };

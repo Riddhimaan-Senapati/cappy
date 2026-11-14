@@ -16,6 +16,7 @@ export const SAFE_ATTRIBUTES = [
 
 export const REMOVABLE_ATTRIBUTES = ["autoplay", "loop", "tabindex", "aria-hidden", "disabled", "readonly"] as const;
 
+
 const DOM_OPS = new Set(["addLabel", "setAttribute", "removeAttribute", "pauseMedia"]);
 const BLOCKS = new Set(["colorblind", "textScale", "stopMotion"]);
 

@@ -2,17 +2,23 @@ import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js"
 import { validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
-import { LABELLABLE, OWN_ATTR, queryAll } from "./dom.js";
+import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
 import { computeStats } from "./outline.js";
 
 type Undo = () => void;
+type Reapply = (roots: Element[]) => void;
 
-const applied = new Map<string, { change: ActiveChange; undo: Undo[] }>();
+interface Applied {
+  change: ActiveChange;
+  undo: Undo[];
+  reapply: Reapply[];
+}
+
+const applied = new Map<string, Applied>();
 let generatedIds = 0;
-
 const BASE_CSS = `
 .ba-label { display: block !important; font: 600 0.95rem/1.3 system-ui, sans-serif !important; margin: 0.6em 0 0.25em !important; color: inherit !important; }
-@keyframes ba-pulse { 0% { box-shadow: 0 0 0 0 rgba(66, 133, 244, 0.7); } 100% { box-shadow: 0 0 0 12px rgba(66, 133, 244, 0); } }
+@keyframes ba-pulse { 0% { box-shadow: 0 0 0 0 rgba(124, 140, 255, 0.75); } 100% { box-shadow: 0 0 0 12px rgba(124, 140, 255, 0); } }
 .ba-pulse { animation: ba-pulse 0.9s ease-out 2 !important; }
 ::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.45s; animation-timing-function: ease-in-out; }
 html.ba-busy body { filter: blur(3px) saturate(0.7); transition: filter 0.3s ease; }
@@ -53,48 +59,73 @@ function applyCss(change: Change, matched: Record<string, number>): Undo {
   return () => style.remove();
 }
 
-function applyDomOp(op: DomOp, matched: Record<string, number>, touched: Element[]): Undo[] {
-  const elements = queryAll(op.selector);
-  matched[`${op.op} ${op.selector}`] = elements.length;
-  const undo: Undo[] = [];
+interface LiveOp {
+  run: (roots: ParentNode[]) => number;
+  undo: Undo;
+}
 
-  for (const element of elements) {
-    switch (op.op) {
-      case "addLabel": {
-        if (!element.matches(LABELLABLE)) break;
-        let createdId = false;
-        if (!element.id) {
-          element.id = `ba-field-${++generatedIds}`;
-          createdId = true;
+function liveOp(op: DomOp): LiveOp {
+  const seen = new WeakSet<Element>();
+  const undoSteps: Undo[] = [];
+  const labels = new WeakMap<Element, HTMLLabelElement>();
+
+  const run = (roots: ParentNode[]): number => {
+    const elements = queryIn(roots, op.selector);
+    for (const element of elements) {
+      switch (op.op) {
+        case "addLabel": {
+          if (!element.matches(LABELLABLE) || accessibleName(element)) break;
+          const existing = labels.get(element);
+          if (existing?.isConnected) break;
+          let createdId = false;
+          if (!element.id) {
+            element.id = `ba-field-${++generatedIds}`;
+            createdId = true;
+          }
+          const label = document.createElement("label");
+          label.className = "ba-label";
+          label.setAttribute(OWN_ATTR, "label");
+          label.htmlFor = element.id;
+          label.textContent = op.text;
+          element.before(label);
+          labels.set(element, label);
+          pulse([label]);
+          undoSteps.push(() => {
+            label.remove();
+            if (createdId) element.removeAttribute("id");
+          });
+          break;
         }
-        const label = document.createElement("label");
-        label.className = "ba-label";
-        label.setAttribute(OWN_ATTR, "label");
-        label.htmlFor = element.id;
-        label.textContent = op.text;
-        element.before(label);
-        touched.push(label);
-        undo.push(() => {
-          label.remove();
-          if (createdId) element.removeAttribute("id");
-        });
-        break;
-      }
-      case "setAttribute":
-      case "removeAttribute": {
-        const previous = element.getAttribute(op.name);
-        if (op.op === "setAttribute") element.setAttribute(op.name, op.value);
-        else element.removeAttribute(op.name);
-        undo.push(() => (previous === null ? element.removeAttribute(op.name) : element.setAttribute(op.name, previous)));
-        break;
-      }
-      case "pauseMedia": {
-        if (element instanceof HTMLMediaElement && !element.paused) element.pause();
-        break;
+        case "setAttribute": {
+          if (element.getAttribute(op.name) === op.value) break;
+          if (!seen.has(element)) {
+            const previous = element.getAttribute(op.name);
+            undoSteps.push(() => (previous === null ? element.removeAttribute(op.name) : element.setAttribute(op.name, previous)));
+            seen.add(element);
+          }
+          element.setAttribute(op.name, op.value);
+          break;
+        }
+        case "removeAttribute": {
+          if (!element.hasAttribute(op.name)) break;
+          if (!seen.has(element)) {
+            const previous = element.getAttribute(op.name) ?? "";
+            undoSteps.push(() => element.setAttribute(op.name, previous));
+            seen.add(element);
+          }
+          element.removeAttribute(op.name);
+          break;
+        }
+        case "pauseMedia": {
+          if (element instanceof HTMLMediaElement && !element.paused) element.pause();
+          break;
+        }
       }
     }
-  }
-  return undo;
+    return elements.length;
+  };
+
+  return { run, undo: () => [...undoSteps].reverse().forEach((step) => step()) };
 }
 
 function revertNow(id: string): boolean {
@@ -102,13 +133,60 @@ function revertNow(id: string): boolean {
   if (!entry) return false;
   [...entry.undo].reverse().forEach((undo) => undo());
   applied.delete(id);
+  stopObservingIfIdle();
   return true;
 }
 
 async function transition(update: () => void, animate: boolean) {
   const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (!animate || reduceMotion || !document.startViewTransition) return update();
+  if (!animate || reduceMotion || !document.startViewTransition || !document.body) return update();
   await document.startViewTransition(update).updateCallbackDone;
+}
+
+let observer: MutationObserver | null = null;
+let pendingRoots = new Set<Element>();
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+
+function flush() {
+  flushTimer = undefined;
+  const roots = [...pendingRoots].filter((root) => root.isConnected);
+  pendingRoots = new Set();
+  if (!roots.length) return;
+  const effective = roots.length > 300 ? [document.documentElement] : roots;
+  for (const entry of applied.values()) {
+    for (const reapply of entry.reapply) {
+      try {
+        reapply(effective);
+      } catch {
+        // a bad selector must not stop other changes from keeping up with the page
+      }
+    }
+  }
+  observer?.takeRecords();
+}
+
+function startObserving() {
+  if (observer) return;
+  observer = new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.target instanceof Element && isOwn(record.target)) continue;
+      for (const node of record.addedNodes) {
+        if (node instanceof Element && !isOwn(node)) pendingRoots.add(node);
+      }
+      const removedOwn = [...record.removedNodes].some((node) => node instanceof Element && node.hasAttribute(OWN_ATTR));
+      if (removedOwn && record.target instanceof Element) pendingRoots.add(record.target);
+    }
+    if (pendingRoots.size && flushTimer === undefined) flushTimer = setTimeout(flush, 120);
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+}
+
+function stopObservingIfIdle() {
+  if (observer && ![...applied.values()].some((entry) => entry.reapply.length)) {
+    observer.disconnect();
+    observer = null;
+    pendingRoots = new Set();
+  }
 }
 
 export async function applyChange(change: Change, animate = true): Promise<ApplyOutcome> {
@@ -118,24 +196,32 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
   if (problem) return { ok: false, error: problem, matched: {}, before, after: before };
 
   const matched: Record<string, number> = {};
-  const touched: Element[] = [];
   let error: string | undefined;
 
   await transition(() => {
     revertNow(change.id);
-    const undo: Undo[] = [];
+    const entry: Applied = { change: { ...change, appliedAt: Date.now() }, undo: [], reapply: [] };
     try {
-      if (change.css) undo.push(applyCss(change, matched));
-      for (const op of change.dom ?? []) undo.push(...applyDomOp(op, matched, touched));
-      if (change.block) undo.push(applyBlock(change.block));
-      applied.set(change.id, { change: { ...change, appliedAt: Date.now() }, undo });
+      if (change.css) entry.undo.push(applyCss(change, matched));
+      for (const op of change.dom ?? []) {
+        const live = liveOp(op);
+        matched[`${op.op} ${op.selector}`] = live.run([document]);
+        entry.undo.push(live.undo);
+        entry.reapply.push((roots) => void live.run(roots));
+      }
+      if (change.block) {
+        const block = applyBlock(change.block);
+        entry.undo.push(block.undo);
+        if (block.reapply) entry.reapply.push(block.reapply);
+      }
+      applied.set(change.id, entry);
+      if (entry.reapply.length) startObserving();
     } catch (caught) {
-      [...undo].reverse().forEach((step) => step());
+      [...entry.undo].reverse().forEach((step) => step());
       error = caught instanceof Error ? caught.message : String(caught);
     }
   }, animate);
 
-  if (animate) pulse(touched);
   return { ok: !error, error, matched, before, after: computeStats() };
 }
 
@@ -155,7 +241,11 @@ export function activeChanges(): ActiveChange[] {
   return [...applied.values()].map((entry) => entry.change);
 }
 
+let busyTimer: ReturnType<typeof setTimeout> | undefined;
+
 export function setBusy(on: boolean) {
   ensureBaseStyle();
   document.documentElement.classList.toggle("ba-busy", on);
+  clearTimeout(busyTimer);
+  if (on) busyTimer = setTimeout(() => document.documentElement.classList.remove("ba-busy"), 8000);
 }

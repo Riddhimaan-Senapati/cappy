@@ -1,18 +1,29 @@
 {
   "manifest_version": 3,
   "name": "Adaptive Browser Agent",
-  "version": "0.1.0",
-  "description": "Adapts every website to your needs.",
+  "version": "0.2.0",
+  "description": "Adapts every website to your needs. Press the shortcut on any page and say what you need.",
+  "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "storage", "tabs", "activeTab", "scripting"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "dist/background.js", "type": "module" },
+  "action": { "default_title": "Adaptive Agent settings", "default_popup": "popup.html" },
   "side_panel": { "default_path": "sidepanel.html" },
-  "action": { "default_title": "Open adaptive agent" },
+  "commands": {
+    "toggle-spotlight": {
+      "suggested_key": { "default": "Ctrl+Shift+Space", "mac": "Command+Shift+Space" },
+      "description": "Open the adaptive agent bar"
+    },
+    "open-debug": {
+      "suggested_key": { "default": "Ctrl+Shift+Y", "mac": "Command+Shift+Y" },
+      "description": "Open the debug panel"
+    }
+  },
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
       "js": ["dist/content.js"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ]
 }

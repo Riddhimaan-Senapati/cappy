@@ -1,24 +1,41 @@
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
+import type { Routing, Tier } from "../../shared/protocol.js";
+
+export interface Recipe {
+  message: string;
+  changes: ActiveChange[];
+  at: number;
+}
 
 export interface StoredState {
   profile: string[];
   history: ChatTurn[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
+  recipes: Record<string, Recipe>;
   paused: boolean;
   proactive: boolean;
+  floatingButton: boolean;
+  routing: Routing;
+  modelOverrides: Partial<Record<Tier, string>>;
   serverUrl: string;
 }
 
-const DEFAULTS: StoredState = {
+export const DEFAULTS: StoredState = {
   profile: [],
   history: [],
   globalChanges: [],
   siteChanges: {},
+  recipes: {},
   paused: false,
   proactive: true,
+  floatingButton: true,
+  routing: "auto",
+  modelOverrides: {},
   serverUrl: "ws://localhost:8787/agent",
 };
+
+const MAX_RECIPES = 60;
 
 export async function load(): Promise<StoredState> {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
@@ -51,4 +68,14 @@ export async function recordReverted(origin: string, id: string) {
     globalChanges: without(state.globalChanges, id),
     siteChanges: { ...state.siteChanges, [origin]: without(state.siteChanges[origin] ?? [], id) },
   });
+}
+
+export const recipeKey = (origin: string, message: string) => `${origin}::${message.trim().toLowerCase().replace(/\s+/g, " ")}`;
+
+export async function saveRecipe(key: string, recipe: Recipe) {
+  const { recipes } = await load();
+  const next = { ...recipes, [key]: recipe };
+  const keys = Object.keys(next).sort((a, b) => next[a].at - next[b].at);
+  for (const old of keys.slice(0, Math.max(0, keys.length - MAX_RECIPES))) delete next[old];
+  await save({ recipes: next });
 }

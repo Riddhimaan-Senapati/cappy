@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
+import type { Tier } from "../../../shared/protocol.js";
 import { getAccessToken, refreshCredentials } from "../../auth/chatgpt.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
@@ -78,19 +79,39 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
 
 export function createOpenAIKeyProvider(): AgentProvider {
   const client = new OpenAI();
-  const model = process.env.OPENAI_MODEL ?? "gpt-6.1-sol";
-  return { name: "openai-key", model, run: (session) => runLoop(async () => client, model, session) };
+  const models: Record<Tier, string> = {
+    fast: process.env.OPENAI_MODEL_FAST ?? "gpt-6-luna",
+    frontier: process.env.OPENAI_MODEL_FRONTIER ?? process.env.OPENAI_MODEL ?? "gpt-6.1-sol",
+  };
+  return {
+    name: "openai-key",
+    models,
+    async listModels() {
+      const names: string[] = [];
+      for await (const model of client.models.list()) names.push(model.id);
+      return names.filter((name) => name.startsWith("gpt"));
+    },
+    run: (session, _tier, model) => runLoop(async () => client, model, session),
+  };
 }
 
 export function createChatGptProvider(): AgentProvider {
-  const model = process.env.CHATGPT_MODEL ?? "gpt-6.1-sol";
+  const models: Record<Tier, string> = {
+    fast: process.env.CHATGPT_MODEL_FAST ?? "gpt-6-luna",
+    frontier: process.env.CHATGPT_MODEL_FRONTIER ?? process.env.CHATGPT_MODEL ?? "gpt-6.1-sol",
+  };
   let retriedAuth = false;
   const getClient = async () => new OpenAI({ apiKey: await getAccessToken(), baseURL: "https://api.openai.com/v1", maxRetries: 0 });
 
   return {
     name: "chatgpt-signin",
-    model,
-    async run(session) {
+    models,
+    async listModels() {
+      const response = await fetch("https://api.openai.com/v1/models", { headers: { authorization: `Bearer ${await getAccessToken()}` } });
+      const json = (await response.json()) as { models?: Array<{ slug: string; visibility?: string }> };
+      return (json.models ?? []).filter((model) => model.visibility === "list").map((model) => model.slug);
+    },
+    async run(session, _tier, model) {
       try {
         return await runLoop(getClient, model, session);
       } catch (error) {

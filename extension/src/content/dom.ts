@@ -19,18 +19,34 @@ export function queryAll(selector: string, root: ParentNode = document): Element
   }
 }
 
-export function textElements(limit = 4000): HTMLElement[] {
+export function textElements(limit = 4000, roots?: ParentNode[]): HTMLElement[] {
   const found = new Set<HTMLElement>();
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      const parent = node.parentElement;
-      if (!parent || !node.textContent?.trim()) return NodeFilter.FILTER_REJECT;
-      if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(parent.tagName) || isOwn(parent)) return NodeFilter.FILTER_REJECT;
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-  while (walker.nextNode() && found.size < limit) found.add(walker.currentNode.parentElement as HTMLElement);
+  for (const root of roots ?? (document.body ? [document.body] : [])) {
+    if (found.size >= limit) break;
+    const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent || !node.textContent?.trim()) return NodeFilter.FILTER_REJECT;
+        if (/^(SCRIPT|STYLE|NOSCRIPT|TEMPLATE)$/.test(parent.tagName) || isOwn(parent)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    while (walker.nextNode() && found.size < limit) found.add(walker.currentNode.parentElement as HTMLElement);
+  }
   return [...found];
+}
+
+export function queryIn(roots: ParentNode[], selector: string): Element[] {
+  const found = new Set<Element>();
+  try {
+    for (const root of roots) {
+      if (root instanceof Element && root.matches(selector)) found.add(root);
+      for (const element of root.querySelectorAll(selector)) found.add(element);
+    }
+  } catch {
+    throw new Error(`Invalid selector: ${selector}`);
+  }
+  return [...found].filter((element) => !isOwn(element));
 }
 
 export function cssPath(element: Element): string {

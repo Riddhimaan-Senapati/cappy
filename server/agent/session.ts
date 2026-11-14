@@ -8,7 +8,9 @@ export class RunCancelledError extends Error {}
 
 export class AgentSession {
   readonly profileUpdates: string[] = [];
+  readonly appliedIds = new Set<string>();
   blockedReason: string | null = null;
+  failures = 0;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private closed = false;
 
@@ -27,6 +29,16 @@ export class AgentSession {
 
   warn(text: string) {
     this.send({ type: "warning", runId: this.request.runId, text });
+  }
+
+  struggled() {
+    return this.failures >= 2 || (this.failures >= 1 && this.appliedIds.size === 0);
+  }
+
+  async undoAppliedChanges() {
+    for (const id of this.appliedIds) await this.callTab("revert_change", { id }).catch(() => undefined);
+    this.appliedIds.clear();
+    this.failures = 0;
   }
 
   callTab<Name extends TabToolName>(name: Name, input: TabTools[Name]["input"]): Promise<TabTools[Name]["output"]> {

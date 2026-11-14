@@ -1,5 +1,6 @@
 import { GoogleGenAI, type Content, type Part } from "@google/genai";
 import { z } from "zod";
+import type { Tier } from "../../../shared/protocol.js";
 import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
 import type { AgentSession } from "../session.js";
 import { tools } from "../tools.js";
@@ -9,7 +10,8 @@ const MAX_STEPS = 16;
 
 export function createGeminiProvider(): AgentProvider {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-  const model = process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
+  const fast = process.env.GEMINI_MODEL_FAST ?? process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
+  const models: Record<Tier, string> = { fast, frontier: process.env.GEMINI_MODEL_FRONTIER ?? fast };
   const functionDeclarations = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -18,8 +20,13 @@ export function createGeminiProvider(): AgentProvider {
 
   return {
     name: "gemini",
-    model,
-    async run(session: AgentSession) {
+    models,
+    async listModels() {
+      const names: string[] = [];
+      for await (const model of await ai.models.list()) if (model.name) names.push(model.name.replace(/^models\//, ""));
+      return names.filter((name) => name.startsWith("gemini"));
+    },
+    async run(session: AgentSession, _tier: Tier, model: string) {
       const contents: Content[] = [{ role: "user", parts: [{ text: buildUserTurn(session.request) }] }];
 
       for (let step = 0; step < MAX_STEPS; step++) {
