@@ -73,6 +73,7 @@ export function blockCss(config: BlockConfig): string {
       return formFixerCss(config);
     case "gesture_scroll":
     case "text_scale":
+    case "dark_mode":
       return "";
     case "stop_motion":
       return [

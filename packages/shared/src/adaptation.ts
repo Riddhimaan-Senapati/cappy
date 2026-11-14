@@ -61,6 +61,14 @@ export const TextScale = z
   })
   .strict();
 
+// Dark mode tries the site's own dark theme first and only inverts colors when the site has none.
+export const DarkMode = z
+  .object({
+    block: z.literal("dark_mode"),
+    allowSiteControls: z.boolean(),
+  })
+  .strict();
+
 export const BlockConfig = z.discriminatedUnion("block", [
   TextFocus,
   ColorFix,
@@ -68,6 +76,7 @@ export const BlockConfig = z.discriminatedUnion("block", [
   GestureScroll,
   StopMotion,
   TextScale,
+  DarkMode,
 ]);
 export type BlockConfig = z.infer<typeof BlockConfig>;
 export type BlockName = BlockConfig["block"];
