@@ -139,7 +139,14 @@ async function record() {
   } catch (error) {
     stream?.getTracks().forEach((track) => track.stop());
     recording = undefined;
-    emit({ type: "error", error: error instanceof DOMException && error.name === "NotAllowedError" ? "not-allowed" : "start-failed" });
+    const code = error instanceof DOMException ? {
+      NotAllowedError: "not-allowed",
+      SecurityError: "not-allowed",
+      NotFoundError: "audio-capture",
+      NotReadableError: "microphone-unavailable",
+      AbortError: "microphone-unavailable",
+    }[error.name] : undefined;
+    emit({ type: "error", error: code ?? "start-failed" });
     emit({ type: "ended" });
   }
 }
@@ -179,7 +186,14 @@ async function playSpeech(text: string, rate: number) {
 chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string; text?: string; rate?: number }, _sender, respond) => {
   if (message?.target !== "offscreen") return;
   if (message.kind === "voiceStart") {
-    void load().then(({ voiceProvider }) => voiceProvider === "openai" ? record() : start(message.lang ?? "")).catch(() => {
+    void load().then(async ({ voiceProvider }) => {
+      const permission = await navigator.permissions.query({ name: "microphone" }).catch(() => undefined);
+      if (permission && permission.state !== "granted") {
+        emit({ type: "error", error: "microphone-setup" });
+        return;
+      }
+      await (voiceProvider === "openai" ? record() : start(message.lang ?? ""));
+    }).catch(() => {
       emit({ type: "error", error: "start-failed" });
       emit({ type: "ended" });
     });

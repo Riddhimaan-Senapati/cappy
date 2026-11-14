@@ -36,7 +36,7 @@ function report(text: string, tone: "good" | "bad" | "") {
   status.className = tone;
 }
 
-button.addEventListener("click", async () => {
+async function requestMicrophone() {
   button.disabled = true;
   report("Waiting for your answer in the permission prompt...", "");
   try {
@@ -44,9 +44,15 @@ button.addEventListener("click", async () => {
     stream.getTracks().forEach((track) => track.stop());
     report("Microphone enabled. You can close this tab.", "good");
     button.textContent = "Enabled";
+    if (new URLSearchParams(location.search).has("resume")) {
+      await chrome.runtime.sendMessage({ kind: "voicePermissionGranted" }).catch(() => undefined);
+    }
   } catch (error) {
     const denied = error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "SecurityError");
     report(denied ? "Microphone access was blocked. Allow it in the address bar icon, then press the button again." : "No microphone was found or it could not be opened.", "bad");
     button.disabled = false;
   }
-});
+}
+
+button.addEventListener("click", () => void requestMicrophone());
+if (new URLSearchParams(location.search).has("resume")) void requestMicrophone();

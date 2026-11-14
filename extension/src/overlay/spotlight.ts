@@ -16,6 +16,7 @@ export interface SpotlightDeps {
   listChanges(): ActiveChange[];
   revert(id: string): Promise<void>;
   revertAll(): Promise<void>;
+  enableMicrophone(): void;
   openDebug(): void;
   readAloud(): void;
   stopSpeaking(): void;
@@ -108,7 +109,10 @@ export class Spotlight {
     this.input.autocomplete = "off";
     this.body.setAttribute("role", "listbox");
 
-    this.mic.addEventListener("click", () => this.toggleVoice());
+    this.mic.addEventListener("click", () => {
+      if (this.voice.active) this.toggleVoice();
+      else void this.startVoice().catch(reportExtensionError);
+    });
     this.bar.append(h("div", "row", "", [this.orb, this.input, this.mic, this.trail]), this.body, this.foot, this.live);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
@@ -283,6 +287,16 @@ export class Spotlight {
         section: "Commands",
         keywords: "orb launcher floating button",
         run: async () => (await save({ floatingButton: state?.floatingButton === false }), this.hide()),
+      },
+      {
+        id: "enable-microphone",
+        icon: "mic",
+        title: "Enable microphone",
+        hint: "All supported websites",
+        kind: "command",
+        section: "Commands",
+        keywords: "voice input mic permission settings all websites",
+        run: () => (this.deps.enableMicrophone(), this.hide()),
       },
       { id: "debug", icon: "bug", title: "Open debug panel", hint: "chat + tool log", kind: "command", section: "Commands", keywords: "developer console logs", run: () => (this.deps.openDebug(), this.hide()) },
       { id: "clear-chat", icon: "text", title: "Clear chat", hint: "memory is kept", kind: "command", section: "Commands", keywords: "history reset conversation", run: async () => { await save({ history: [], submittedRequests: [] }); this.run = null; } },

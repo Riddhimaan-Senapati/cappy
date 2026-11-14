@@ -5,6 +5,17 @@ type Owner = { tabId: number } | { panel: true };
 
 const OFFSCREEN_PATH = "offscreen.html";
 let owner: Owner | null = null;
+let language = "";
+let setupTab: number | undefined;
+let permissionRetried = false;
+let openingSetup = false;
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (tabId !== setupTab) return;
+  setupTab = undefined;
+  deliver({ type: "ended" });
+  owner = null;
+});
 
 let opening: Promise<void> | undefined;
 
@@ -34,12 +45,36 @@ async function openMicSetup() {
   await chrome.tabs.create({ url: chrome.runtime.getURL("mic.html") });
 }
 
+async function startRecognition() {
+  try {
+    await ensureOffscreen();
+    if (owner) await chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: language });
+  } catch {
+    deliver({ type: "error", error: "start-failed" });
+    owner = null;
+  }
+}
+
 async function onRecognitionEvent(raw: unknown) {
   const event = parseVoiceEvent(raw);
   if (!event) return;
-  if (event.type === "error" && event.error === "not-allowed") await openMicSetup().catch(() => undefined);
+  if (event.type === "error" && ["microphone-setup", "not-allowed"].includes(event.error) && owner && !permissionRetried) {
+    permissionRetried = true;
+    openingSetup = true;
+    try {
+      const tab = await chrome.tabs.create({ url: chrome.runtime.getURL("mic.html?resume=1") });
+      setupTab = tab.id;
+    } catch {
+      deliver({ type: "error", error: "start-failed" });
+      owner = null;
+    } finally {
+      openingSetup = false;
+    }
+    return;
+  }
+  if ((openingSetup || setupTab !== undefined) && (event.type === "ended" || event.type === "final")) return;
   deliver(event);
-  if (event.type === "ended") {
+  if (event.type === "ended" || (event.type === "error" && event.error === "microphone-setup")) {
     owner = null;
   }
 }
@@ -51,17 +86,32 @@ export function handleVoiceRequest(request: BackgroundRequest, sender: chrome.ru
         respond(false);
         return true;
       }
-      owner = sender.tab?.id !== undefined ? { tabId: sender.tab.id } : { panel: true };
+      owner = sender.url !== chrome.runtime.getURL("sidepanel.html") && sender.tab?.id !== undefined
+        ? { tabId: sender.tab.id } : { panel: true };
+      permissionRetried = false;
+      language = request.lang;
       respond(true);
-      void ensureOffscreen()
-        .then(() => chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: request.lang }))
-        .catch(() => {
-          deliver({ type: "error", error: "unsupported" });
-          deliver({ type: "ended" });
-          owner = null;
-        });
+      void startRecognition();
       return true;
+    case "voicePermissionGranted": {
+      if (sender.tab?.id === undefined || sender.tab.id !== setupTab || sender.url !== chrome.runtime.getURL("mic.html?resume=1")) return true;
+      const tabId = setupTab;
+      setupTab = undefined;
+      const target = owner;
+      void chrome.tabs.remove(tabId).catch(() => undefined).then(async () => {
+        if (target && "tabId" in target) await chrome.tabs.update(target.tabId, { active: true });
+        await startRecognition();
+      }).catch(() => {
+        deliver({ type: "error", error: "start-failed" });
+        owner = null;
+      });
+      return true;
+    }
     case "voiceStop":
+      if (setupTab !== undefined) {
+        void chrome.tabs.remove(setupTab).catch(() => undefined);
+        return true;
+      }
       void chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStop" }).catch(() => undefined);
       return true;
     case "voiceOpenMic":

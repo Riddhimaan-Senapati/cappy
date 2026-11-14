@@ -66,6 +66,7 @@ export type BackgroundRequest =
   | { kind: "voiceStart"; lang: string }
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }
+  | { kind: "voicePermissionGranted" }
   | { kind: "recognitionEvent"; event: unknown };
 
 export type DebugPortMessage =

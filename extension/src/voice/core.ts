@@ -65,14 +65,18 @@ export function parseVoiceEvent(value: unknown): VoiceEvent | null {
 
 export function voiceErrorText(error: string): string {
   switch (error) {
+    case "microphone-setup":
+      return "Allow microphone access in Chrome, then try again.";
     case "not-allowed":
-      return "Microphone access is blocked. A setup tab opened; allow the microphone there, then try again.";
+      return "Microphone access is blocked for Adaptive Browser Agent. Check Chrome and your system microphone permissions.";
     case "service-not-allowed":
       return "Chrome's speech service is turned off for this browser.";
     case "aborted":
       return "Voice input stopped.";
     case "no-speech":
       return "Didn't hear anything. Try again.";
+    case "microphone-unavailable":
+      return "Chrome found a microphone but could not open it. Check your system microphone settings and try again.";
     case "audio-capture":
       return "No microphone was found.";
     case "network":

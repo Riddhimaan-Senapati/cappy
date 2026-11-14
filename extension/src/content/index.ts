@@ -86,6 +86,7 @@ function ensureOverlay(): OverlayUi {
     revertAll: async () => {
       for (const change of activeChanges().reverse()) await revert(change.id);
     },
+    enableMicrophone: () => void send({ kind: "voiceOpenMic" }),
     openDebug: () => void send({ kind: "openDebug" }),
     readAloud: () => {
       if (!readPageAloud()) ensureOverlay().showToast("No readable text on this page.", [], true);
