@@ -8,13 +8,17 @@ import {
   type AdaptResponse,
   type BlockConfig,
   type BlockOf,
+  type ContentFilter,
+  type ItemGroup,
   type RequestBody,
 } from "@browser-agent/shared";
 import {
   BLOCK_RULES,
   CHANGE_RULES,
+  FILTER_RULES,
   MEASURED_RULE,
   elementLines,
+  groupLines,
   measuredLines,
   parseAdaptText,
   responseJsonSchema,
@@ -37,6 +41,7 @@ const INVERT = /invert|dark mode|night/i;
 const HIDE = /hide (the )?(sidebar|ads?|recommendations)/i;
 const HIDE_TARGET = /sidebar|\bads?\b|recommend/i;
 const MAX_HIDE_IDS = 50;
+const FILTER_VERB = /\b(remove|hide|dim|no more|get rid of)( all)?( the)? (\w+)/i;
 const INVERT_CSS =
   "html { filter: invert(1) hue-rotate(180deg); } img, video, picture, canvas { filter: invert(1) hue-rotate(180deg); }";
 
@@ -69,7 +74,11 @@ function needIdFor(body: RequestBody): NeedId {
   return NeedId.parse(body.profile.needs[0]?.id ?? "request");
 }
 
-function adaptationFor(body: RequestBody, blocks: BlockConfig[], change: Partial<Pick<Adaptation, "css" | "ops">> = {}): Adaptation {
+function adaptationFor(
+  body: RequestBody,
+  blocks: BlockConfig[],
+  change: Partial<Pick<Adaptation, "css" | "ops" | "filters">> = {},
+): Adaptation {
   return {
     id: AdaptationId.parse(randomUUID()),
     sites: [HostPattern.parse(new URL(body.url).hostname)],
@@ -88,6 +97,23 @@ function hideOpFor(body: RequestBody): Adaptation["ops"] {
   return [{ op: "hide", ids }];
 }
 
+function pluralVariants(word: string): string[] {
+  return [...new Set([word, word.endsWith("s") ? word.slice(0, -1) : `${word}s`])];
+}
+
+// Largest repeated group whose samples name the keyword, else the largest group on the page.
+function filterFor(body: RequestBody, verb: string, word: string): ContentFilter | undefined {
+  const groups = body.outline.groups ?? [];
+  if (groups.length === 0 || word.length < 2 || word.length > 40) return undefined;
+  const keywords = pluralVariants(word.toLowerCase());
+  const bySize = (a: ItemGroup, b: ItemGroup) => b.count - a.count;
+  const mentions = (g: ItemGroup) =>
+    g.samples.some((s) => keywords.some((k) => s.toLowerCase().includes(k)));
+  const group = [...groups].filter(mentions).sort(bySize)[0] ?? [...groups].sort(bySize)[0];
+  if (!group) return undefined;
+  return { itemSelector: group.selector, keywords, action: verb.toLowerCase() === "dim" ? "dim" : "hide" };
+}
+
 export const stubRequester: Requester = async (body) => {
   if (INVERT.test(body.request)) {
     return { kind: "adaptation", adaptation: adaptationFor(body, [], { css: INVERT_CSS }) };
@@ -97,6 +123,10 @@ export const stubRequester: Requester = async (body) => {
     if (!ops) return { kind: "none", reason: "No sidebar, ad or recommendation element on this page" };
     return { kind: "adaptation", adaptation: adaptationFor(body, [], { ops }) };
   }
+  // Without repeated groups a removal request falls through to the block routes, so "remove the sidebar distractions" still gets text_focus.
+  const verb = FILTER_VERB.exec(body.request);
+  const filter = verb ? filterFor(body, verb[1] ?? "", verb[4] ?? "") : undefined;
+  if (filter) return { kind: "adaptation", adaptation: adaptationFor(body, [], { filters: [filter] }) };
   const blocks = blockForRequest(body.request);
   if (!blocks) return { kind: "none", reason: NONE_CLOSEST };
   return { kind: "adaptation", adaptation: adaptationFor(body, blocks) };
@@ -108,6 +138,7 @@ const REQUEST_RULES = [
   "Pick blocks from the schema when they fit. Never write JavaScript.",
   ...BLOCK_RULES,
   ...CHANGE_RULES,
+  ...FILTER_RULES,
   MEASURED_RULE,
   "If nothing fits the request, answer kind none and name the closest block in the reason.",
   "Scope sites to the page host given below.",
@@ -128,6 +159,7 @@ export function buildRequestPrompt(body: RequestBody): string {
     JSON.stringify({ ...body.outline, elements: undefined }).replaceAll("<", "\\u003c"),
     "Page elements (id <tag> text):",
     ...elementLines(body.outline.elements),
+    ...groupLines(body.outline.groups),
     "</page_outline_untrusted>",
   ].join("\n");
 }
