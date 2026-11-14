@@ -211,6 +211,14 @@ export class AgentClient {
     for (const run of [...this.runs.values()].filter((existing) => existing.tabId === tabId)) this.cancelRun(run, "Stopped.");
   }
 
+  stopForProfileSwitch() {
+    for (const [tabId, queue] of this.queues) {
+      for (const item of queue) this.hooks.event(tabId, { type: "cancelled", runId: item.runId, reason: "Profile switched." });
+    }
+    this.queues.clear();
+    for (const run of [...this.runs.values()]) this.cancelRun(run, "Profile switched.");
+  }
+
   private cancelRun(run: Run, reason: string) {
     this.send({ type: "cancel", runId: run.runId });
     this.finish(run);

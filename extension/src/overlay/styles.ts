@@ -176,7 +176,10 @@ export const OVERLAY_CSS = `
 .mic { width: 28px; height: 28px; }
 .request-row { display: flex; align-items: center; gap: 4px; }
 .request-row .item { flex: 1; min-width: 0; }
-.request-row .delete-request { color: #f87171; }
+.request-row .delete-request, .request-row .delete-profile { color: #f87171; }
+.delete-profile.confirm { width: auto; padding: 0 6px; font-size: 11px; white-space: nowrap; }
+.delete-profile:disabled { opacity: 0.3; cursor: default; }
+.delete-profile:focus-visible { outline: 2px solid var(--accent); }
 .memory { display: flex; flex-direction: column; gap: 4px; margin-left: 24px; }
 .memory .chg .tag { flex: none; font-size: 11px; color: rgba(255, 255, 255, 0.38); }
 .memory .chg b { flex: 1; min-width: 0; white-space: normal; }
