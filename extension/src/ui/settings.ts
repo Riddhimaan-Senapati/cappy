@@ -3,6 +3,7 @@ import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type StatusInfo } from "../messages.js";
 import { load, save, type StoredState } from "../storage.js";
 import { h, icon } from "./dom.js";
+import { createMemoryView } from "./memory.js";
 
 export interface SettingsContext {
   listChanges(): Promise<ActiveChange[]>;
@@ -58,7 +59,6 @@ function statusCard(status: StatusInfo) {
 
 export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => void {
   root.classList.add("s");
-  let draft = "";
   let disposed = false;
   let queued = false;
 
@@ -67,30 +67,6 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     if (disposed) return;
     const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
     const hadFocus = focused instanceof HTMLInputElement && root.contains(focused);
-
-    const chips = state.profile.length
-      ? state.profile.map((line, index) => {
-          const remove = h("button", "s-x", "", [icon("x", 12)]);
-          remove.type = "button";
-          remove.setAttribute("aria-label", `Remove ${line}`);
-          remove.addEventListener("click", () => save({ profile: state.profile.filter((_, i) => i !== index) }));
-          return h("span", "s-chip", line, [remove]);
-        })
-      : [h("div", "s-empty", "Nothing yet. Tell the agent about your needs, or add a line.")];
-
-    const input = h("input");
-    input.placeholder = "Add a need, e.g. light sensitive";
-    input.value = draft;
-    input.setAttribute("aria-label", "Add a profile line");
-    input.addEventListener("input", () => (draft = input.value));
-    const form = h("form", "s-add", "", [input, h("button", "s-btn", "Add")]);
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const line = input.value.trim();
-      if (!line) return;
-      draft = "";
-      await save({ profile: [...state.profile, line] });
-    });
 
     const segments = (["auto", "fast", "frontier"] as Routing[]).map((value) => {
       const button = h("button", "", ROUTING_LABELS[value]);
@@ -140,7 +116,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
       ),
       section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status)),
-      section("Your profile", h("div", "s-chips", "", chips), form),
+      memory.render(state, toggle),
       section("On this page", ...changeRows),
       h("div", "s-foot", "", [shortcuts, debug]),
     );
@@ -156,6 +132,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     });
   };
 
+  const memory = createMemoryView(queue);
   const onStorage = () => queue();
   chrome.storage.onChanged.addListener(onStorage);
   void paint();

@@ -97,14 +97,14 @@ export const tools: AgentTool[] = [
   defineTool({
     name: "remember",
     description:
-      "Save durable facts about the user's needs or preferences to their profile (e.g. 'Red-green colorblind', 'Prefers larger text'). Not for one-off page requests.",
+      "Record durable lines about the user's needs or free-text preferences (e.g. 'Red-green colorblind', 'Prefers dark mode', 'No podcasts on weekdays 9-5', 'Likes long-form videos, not Shorts'). The user's settings decide whether they are saved now or proposed for approval. Not for one-off page requests.",
     schema: z.object({ lines: z.array(z.string()) }),
     async run({ lines }, session) {
       const known = new Set(session.request.profile.map((line) => line.toLowerCase()));
       const fresh = lines.map((line) => line.trim().slice(0, 140)).filter((line) => line && !known.has(line.toLowerCase()));
       session.profileUpdates.push(...fresh);
       if (fresh.length) session.send({ type: "profile", runId: session.request.runId, lines: fresh });
-      return { text: fresh.length ? `Saved ${fresh.length} line(s).` : "Nothing new to save." };
+      return { text: fresh.length ? `Recorded ${fresh.length} line(s); the extension stores or proposes them per the user's settings.` : "Nothing new to record." };
     },
   }),
 ];

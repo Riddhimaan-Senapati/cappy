@@ -1,6 +1,7 @@
 import type { ActiveChange, Change, PageOutline, PageStats } from "../../../shared/adaptation.js";
 import type { ApplyOutcome, ClientMessage, RunRequest, ServerMessage, ToolCallMessage, Trigger } from "../../../shared/protocol.js";
 import type { AppliedSummary, ContentRequest, ContentResponse, StatusInfo, UiEvent } from "../messages.js";
+import { rememberLines } from "../memory.js";
 import { load, recipeKey, save, saveRecipe } from "../storage.js";
 
 interface Run {
@@ -203,9 +204,10 @@ export class AgentClient {
       case "blocked":
         return this.emit(run, { type: "blocked", runId: run.runId, reason: message.reason });
       case "profile": {
-        const state = await load();
-        await save({ profile: [...state.profile, ...message.lines.filter((line) => !state.profile.includes(line))] });
-        return this.step(run, `Remembered: ${message.lines.join("; ")}`, "good");
+        const { saved, proposed } = await rememberLines(message.lines);
+        if (saved.length) this.emit(run, { type: "memory", runId: run.runId, status: "saved", lines: saved });
+        if (proposed.length) this.emit(run, { type: "memory", runId: run.runId, status: "proposed", lines: proposed });
+        return;
       }
       case "error":
         return this.fail(run, message.message);

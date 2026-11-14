@@ -1,4 +1,5 @@
 import type { UiEvent } from "../messages.js";
+import { forgetLine } from "../memory.js";
 import { adoptStyles, h, icon } from "../ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "../ui/theme.js";
 import { Spotlight, type SpotlightDeps } from "./spotlight.js";
@@ -60,6 +61,10 @@ export class OverlayUi {
   handleEvent(event: UiEvent) {
     if (event.type === "start") this.triggers.set(event.runId, event.trigger);
     const handled = this.spotlight.handleEvent(event);
+    if (event.type === "memory") {
+      if (!(handled && this.spotlight.isOpen())) this.announceMemory(event.status, event.lines);
+      return;
+    }
     const working = event.type === "start" || event.type === "step" || event.type === "tier";
     this.fabOrb.classList.toggle("work", working);
 
@@ -78,7 +83,15 @@ export class OverlayUi {
     }
   }
 
-  showToast(text: string, undoIds: string[], isError = false) {
+  private announceMemory(status: "saved" | "proposed", lines: string[]) {
+    const text = lines.join("; ");
+    if (status === "proposed") return this.showToast(`Suggested for your memory: ${text}. Accept it in the bar or settings.`, []);
+    this.showToast(`Remembered: ${text}`, [], false, async () => {
+      for (const line of lines) await forgetLine(line);
+    });
+  }
+
+  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>) {
     window.clearTimeout(this.toastTimer);
     const previous = this.toast;
     if (previous) {
@@ -90,10 +103,11 @@ export class OverlayUi {
     close.type = "button";
     close.setAttribute("aria-label", "Dismiss");
     const nodes: Node[] = [icon(isError ? "x" : "sparkle", 14), h("span", "msg", text)];
-    if (undoIds.length) {
+    if (undoIds.length || onUndo) {
       const undo = h("button", "link", "Undo");
       undo.type = "button";
       undo.addEventListener("click", async () => {
+        await onUndo?.();
         for (const id of undoIds) await this.deps.revert(id);
         this.dismissToast();
       });

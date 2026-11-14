@@ -82,6 +82,9 @@ function onEvent(event: UiEvent) {
     case "blocked":
       run.steps.append(h("li", "bad", `Blocked: ${event.reason}`));
       break;
+    case "memory":
+      run.steps.append(h("li", event.status === "saved" ? "good" : "info", `${event.status === "saved" ? "Remembered" : "Proposed"}: ${event.lines.join("; ")}`));
+      break;
     case "error":
       run.steps.append(h("li", "bad", `Error: ${event.message}`));
       break;

@@ -12,6 +12,7 @@ export type UiEvent =
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
   | { type: "tier"; runId: string; tier: Tier; model: string }
   | { type: "blocked"; runId: string; reason: string }
+  | { type: "memory"; runId: string; status: "saved" | "proposed"; lines: string[] }
   | { type: "done"; runId: string; trigger: Trigger; reply: string; applied: AppliedSummary[]; fromCache: boolean }
   | { type: "error"; runId: string; message: string };
 
