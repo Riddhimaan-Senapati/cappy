@@ -19,6 +19,12 @@ export async function startBackend(opts: {
   env?: Record<string, string>;
   envFile?: string;
 }): Promise<Bun.Subprocess> {
+  const taken = await fetch(`http://localhost:${opts.port}/health`).then((r) => r.ok, () => false);
+  if (taken) {
+    throw new Error(
+      `port ${opts.port} already serves a backend (likely your \`bun run dev\`); stop it first so this test uses its own backend: lsof -ti tcp:${opts.port} -sTCP:LISTEN | xargs kill`,
+    );
+  }
   const args = ["bun", ...(opts.envFile ? [`--env-file=${opts.envFile}`] : []), "src/index.ts"];
   const proc = Bun.spawn(args, {
     cwd: join(root, "apps/backend"),
