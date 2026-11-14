@@ -21,6 +21,7 @@ export interface CameraSettings {
   handScroll: boolean;
   headScroll: boolean;
   pointer: boolean;
+  swipeNav?: boolean;
   dwellMs: number;
 }
 
@@ -48,7 +49,7 @@ export const DEFAULTS: StoredState = {
   siteChanges: {},
   recipes: {},
   commands: [],
-  camera: { enabled: false, handScroll: true, headScroll: false, pointer: true, dwellMs: 0 },
+  camera: { enabled: false, handScroll: true, headScroll: false, pointer: true, swipeNav: true, dwellMs: 0 },
   paused: false,
   proactive: true,
   floatingButton: true,

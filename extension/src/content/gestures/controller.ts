@@ -12,16 +12,18 @@ export interface CameraHooks {
 
 const CSS = `
 :host { all: initial; }
-.pip { position: fixed; left: 16px; bottom: 16px; width: 184px; border-radius: 14px; overflow: hidden; pointer-events: auto; background: #0e0e12;
+.pip { position: fixed; left: 16px; bottom: 16px; width: 228px; border-radius: 14px; overflow: hidden; pointer-events: auto; background: #0e0e12;
   border: 1px solid rgba(255,255,255,.12); box-shadow: 0 12px 36px rgba(0,0,0,.45); font: 12px system-ui, sans-serif; color: #e8e8ee; animation: in .35s cubic-bezier(.2,.9,.3,1.15); }
 @keyframes in { from { opacity: 0; transform: translateY(10px) scale(.96); } }
-iframe { display: block; width: 184px; height: 138px; border: 0; }
-.bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+iframe { display: block; width: 228px; height: 171px; border: 0; }
+.bar { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; flex: none; }
 .dot.paused { background: #fbbf24; } .dot.idle { background: rgba(255,255,255,.3); }
-.mode { flex: 1; color: #c9c9d3; }
-.off { all: unset; cursor: pointer; padding: 2px 6px; border-radius: 6px; color: #9a9aa6; }
-.off:hover { color: #fff; background: rgba(255,255,255,.1); }
+.mode { flex: 1; min-width: 0; color: #c9c9d3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.off { all: unset; cursor: pointer; flex: none; padding: 3px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 600; color: #e8e8ee; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); }
+.off:hover { background: rgba(255,255,255,.14); }
+.off.danger { color: #fecaca; background: rgba(239,68,68,.22); border-color: rgba(239,68,68,.45); }
+.off.danger:hover { background: rgba(239,68,68,.36); color: #fff; }
 .off:focus-visible { outline: 2px solid #8b9bff; }
 .cursor { position: fixed; left: 0; top: 0; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; pointer-events: none;
   border: 2.5px solid #fff; background: rgba(139,155,255,.35); box-shadow: 0 0 0 2px rgba(20,20,30,.6), 0 4px 14px rgba(0,0,0,.35); opacity: 0; transition: opacity .15s, transform .12s; }
@@ -42,11 +44,14 @@ const CLICKABLE = 'a[href], button, input, select, textarea, summary, label, [ro
 const PINCH_ON = 0.26;
 const PINCH_OFF = 0.4;
 const DWELL_RADIUS = 28;
-const PAUSE_HOLD_MS = 1200;
 const TAP_MS = 450;
 const SELECT_HOLD_MS = 700;
 const STOP_HOLD_MS = 400;
+const SWIPE_WINDOW_MS = 450;
+const SWIPE_DISTANCE = 0.3;
+const SWIPE_COOLDOWN_MS = 1000;
 const HEAD_DEADZONE = 0.06;
+const HAND_PRIORITY_MS = 800;
 
 const clamp = (value: number) => Math.min(1, Math.max(0, value));
 
@@ -65,6 +70,8 @@ export class CameraController {
   private shadow: ShadowRoot;
   private frame = document.createElement("iframe");
   private dot = document.createElement("span");
+  private pauseButton = document.createElement("button");
+  private overPause = false;
   private mode = document.createElement("span");
   private cursor = document.createElement("div");
   private ringCircle: SVGCircleElement;
@@ -74,14 +81,14 @@ export class CameraController {
   private filterX = new OneEuroFilter();
   private filterY = new OneEuroFilter();
   private paused = false;
-  private fistSince: number | null = null;
-  private fistFired = false;
   private pinching = false;
   private pinchStart = 0;
   private pinchTarget: Element | null = null;
   private holdFired = false;
   private stopSince: number | null = null;
   private stopFired = false;
+  private swipeTrail: Array<{ t: number; x: number; y: number }> = [];
+  private lastSwipe = 0;
   private stable = { x: 0, y: 0 };
   private dwellAnchor: { x: number; y: number; since: number } | null = null;
   private dwellFired = false;
@@ -90,6 +97,7 @@ export class CameraController {
   private headBaseline: number | null = null;
   private headSamples: number[] = [];
   private lastHeadAt = 0;
+  private lastHandAt = 0;
   private raf = 0;
 
   constructor(
@@ -108,15 +116,20 @@ export class CameraController {
     this.dot.className = "dot idle";
     this.mode.className = "mode";
     this.mode.textContent = "Starting camera";
+    this.pauseButton.className = "off";
+    this.pauseButton.type = "button";
+    this.pauseButton.textContent = "Pause";
+    this.pauseButton.setAttribute("aria-label", "Pause camera control");
+    this.pauseButton.addEventListener("click", () => this.togglePause());
     const off = document.createElement("button");
-    off.className = "off";
+    off.className = "off danger";
     off.type = "button";
-    off.textContent = "Off";
+    off.textContent = "Turn off";
     off.setAttribute("aria-label", "Turn off camera control");
     off.addEventListener("click", () => this.hooks.turnOff());
     const bar = document.createElement("div");
     bar.className = "bar";
-    bar.append(this.dot, this.mode, off);
+    bar.append(this.dot, this.mode, this.pauseButton, off);
     const pip = document.createElement("div");
     pip.className = "pip";
     pip.setAttribute("role", "region");
@@ -201,25 +214,39 @@ export class CameraController {
   }
 
   private onFrame(t: number, hand: HandFrame | null, head: HeadFrame | null) {
-    if (hand?.pose === "fist") {
-      this.fistSince ??= t;
-      if (!this.fistFired && t - this.fistSince > PAUSE_HOLD_MS) {
-        this.fistFired = true;
-        this.paused = !this.paused;
-        this.hooks.notify(this.paused ? "Gestures paused. Hold a fist again to resume." : "Gestures back on.");
-      }
-    } else {
-      this.fistSince = null;
-      this.fistFired = false;
-    }
     if (this.paused) {
       this.scrollSpeed = 0;
-      this.hidePointer();
-      return this.setMode("Paused (hold a fist)", "paused");
+      if (hand && this.settings.pointer && (hand.pose === "point" || hand.pose === "pinch")) this.updatePointer(t, hand);
+      else this.hidePointer();
+      return this.setMode("Paused", "paused");
     }
 
+    // Pointing makes people look at the screen, which reads as a head tilt; a recent hand always takes priority.
+    if (hand) this.lastHandAt = t;
+    const handActive = Boolean(hand) || t - this.lastHandAt < HAND_PRIORITY_MS;
     let speed = 0;
-    let mode = hand ? "Hand seen" : head ? "Watching head" : "Show your hand";
+    let mode = handActive ? "Hand seen" : head ? "Watching head" : "Show your hand";
+
+    // A quick, wide, mostly horizontal open-palm swipe goes back or forward, like a trackpad.
+    if (hand?.pose === "open" && this.settings.swipeNav !== false) {
+      this.swipeTrail = [...this.swipeTrail.filter((sample) => t - sample.t <= SWIPE_WINDOW_MS), { t, x: hand.palm.x, y: hand.palm.y }];
+      const first = this.swipeTrail[0];
+      const dx = hand.palm.x - first.x;
+      const dy = hand.palm.y - first.y;
+      if (this.swipeTrail.length >= 4 && t - this.lastSwipe > SWIPE_COOLDOWN_MS && Math.abs(dx) > SWIPE_DISTANCE && Math.abs(dx) > 2.5 * Math.abs(dy)) {
+        this.lastSwipe = t;
+        this.swipeTrail = [];
+        // The camera image is not mirrored: the hand moving toward the image's right is the user swiping to their left.
+        const back = dx > 0;
+        this.hooks.notify(back ? "Back" : "Forward");
+        if (back) history.back();
+        else history.forward();
+        this.scrollSpeed = 0;
+        return this.setMode(back ? "Swiped back" : "Swiped forward", "on");
+      }
+    } else {
+      this.swipeTrail = [];
+    }
 
     if (hand && this.settings.handScroll && hand.pose === "open") {
       const y = hand.palm.y;
@@ -242,7 +269,7 @@ export class CameraController {
       this.stopFired = false;
     }
 
-    if (head && this.settings.headScroll) {
+    if (head && this.settings.headScroll && !handActive) {
       this.lastHeadAt = t;
       if (this.headBaseline === null) {
         this.headSamples.push(head.pitch);
@@ -255,7 +282,7 @@ export class CameraController {
           mode = speed < 0 ? "Head up: scrolling up" : "Head down: scrolling down";
         } else if (!hand) mode = "Head: tilt to scroll";
       }
-    } else if (this.headBaseline !== null && t - this.lastHeadAt > 2500) {
+    } else if (!handActive && this.headBaseline !== null && t - this.lastHeadAt > 2500) {
       this.headBaseline = null;
       this.headSamples = [];
     }
@@ -272,8 +299,9 @@ export class CameraController {
 
   private updatePointer(t: number, hand: HandFrame) {
     // A small box in the middle of the camera view maps to the whole screen, so small hand movements reach every corner.
-    const nx = clamp((1 - hand.index.x - 0.18) / 0.64);
-    const ny = clamp((hand.index.y - 0.15) / 0.55);
+    // Kept well inside the camera view: near the frame border tracking drops out, so screen edges must be reachable from the middle.
+    const nx = clamp((1 - hand.index.x - 0.27) / 0.46);
+    const ny = clamp((hand.index.y - 0.2) / 0.42);
     const x = this.filterX.filter(nx * innerWidth, t);
     const y = this.filterY.filter(ny * innerHeight, t);
 
@@ -285,9 +313,15 @@ export class CameraController {
     this.cursor.classList.add("on");
     this.cursor.classList.toggle("press", this.pinching || startPinch);
 
-    const under = document.elementFromPoint(this.stable.x, this.stable.y);
-    const target = under?.closest(CLICKABLE) ?? under;
-    this.hover(target && target !== document.documentElement && target !== document.body ? target : null);
+    const pauseRect = this.pauseButton.getBoundingClientRect();
+    this.overPause = this.stable.x >= pauseRect.left && this.stable.x <= pauseRect.right && this.stable.y >= pauseRect.top && this.stable.y <= pauseRect.bottom;
+    if (this.overPause) this.hover(this.pauseButton);
+    else if (this.paused) this.hover(null);
+    else {
+      const under = document.elementFromPoint(this.stable.x, this.stable.y);
+      const target = under?.closest(CLICKABLE) ?? under;
+      this.hover(target && target !== document.documentElement && target !== document.body && target !== this.host ? target : null);
+    }
 
     if (startPinch) {
       this.pinching = true;
@@ -300,7 +334,7 @@ export class CameraController {
       // A quick pinch clicks; holding the pinch selects the element as the agent's target.
       const held = t - this.pinchStart;
       this.setRing(held > 200 ? (held - 200) / (SELECT_HOLD_MS - 200) : 0);
-      if (!this.holdFired && held >= SELECT_HOLD_MS && this.pinchTarget) {
+      if (!this.holdFired && held >= SELECT_HOLD_MS && this.pinchTarget && this.pinchTarget !== this.pauseButton && !this.paused) {
         this.holdFired = true;
         this.setRing(0);
         this.hooks.select(this.pinchTarget);
@@ -312,7 +346,8 @@ export class CameraController {
 
   private endPinch(t: number) {
     this.pinching = false;
-    if (!this.holdFired && t - this.pinchStart < TAP_MS && this.pinchTarget) {
+    if (this.pinchTarget === this.pauseButton) this.togglePause();
+    else if (!this.holdFired && t - this.pinchStart < TAP_MS && this.pinchTarget && !this.paused) {
       this.hovered = this.pinchTarget;
       this.activate();
     }
@@ -352,13 +387,22 @@ export class CameraController {
     const rect = target.getBoundingClientRect();
     Object.assign(this.outline.style, { left: `${rect.left - 3}px`, top: `${rect.top - 3}px`, width: `${rect.width + 6}px`, height: `${rect.height + 6}px` });
     this.outline.classList.add("on");
-    this.label.textContent = describeElement(target);
+    this.label.textContent = target === this.pauseButton ? `${this.paused ? "Resume" : "Pause"} · camera control` : describeElement(target);
     Object.assign(this.label.style, { left: `${Math.min(innerWidth - 270, Math.max(8, rect.left))}px`, top: `${rect.top > 32 ? rect.top - 28 : rect.bottom + 6}px` });
     this.label.classList.add("on");
   }
 
   // The user's own click, like a mouse; the agent never clicks on its own.
+  private togglePause() {
+    this.paused = !this.paused;
+    this.scrollSpeed = 0;
+    this.pauseButton.textContent = this.paused ? "Resume" : "Pause";
+    this.pauseButton.setAttribute("aria-label", this.paused ? "Resume camera control" : "Pause camera control");
+    this.hooks.notify(this.paused ? "Camera control paused. Point at Resume and pinch to continue." : "Camera control resumed.");
+  }
+
   private activate() {
+    if (this.overPause) return this.togglePause();
     const target = this.hovered;
     if (!(target instanceof HTMLElement)) return;
     if (target.matches("input, textarea, select, [contenteditable='true']")) target.focus();
