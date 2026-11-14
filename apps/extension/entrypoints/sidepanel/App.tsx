@@ -6,6 +6,7 @@ import { RequestBox } from "./RequestBox";
 import { callLlm } from "../../utils/backend";
 import { GesturePanel } from "./GesturePanel";
 import { VerifyPanel } from "./VerifyPanel";
+import { StepsTimeline } from "./StepsTimeline";
 import { SavedChanges } from "./SavedChanges";
 import {
   KEYS,
@@ -62,6 +63,8 @@ export function App() {
       <Section title="Last change">
         <LastChange last={last} />
       </Section>
+
+      <StepsTimeline />
 
       <VerifyPanel />
 
