@@ -1,0 +1,62 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
+import type { Tier } from "../../../shared/protocol.js";
+import { buildUserTurn, SYSTEM_PROMPT } from "../prompt.js";
+import type { AgentSession } from "../session.js";
+import { tools, type ToolOutput } from "../tools.js";
+import type { AgentProvider } from "./types.js";
+
+type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+
+function toContent(output: ToolOutput) {
+  if (!output.image) return output.text;
+  return [
+    { type: "text" as const, text: output.text },
+    { type: "image" as const, source: { type: "base64" as const, media_type: output.image.mediaType, data: output.image.base64 } },
+  ];
+}
+
+export function createAnthropicProvider(): AgentProvider {
+  const client = new Anthropic();
+  const models: Record<Tier, string> = {
+    fast: process.env.ANTHROPIC_MODEL_FAST ?? "claude-haiku-5-5",
+    frontier: process.env.ANTHROPIC_MODEL_FRONTIER ?? process.env.ANTHROPIC_MODEL ?? "claude-opus-5-5",
+  };
+  const efforts: Record<Tier, Effort> = { fast: "low", frontier: (process.env.AGENT_EFFORT as Effort | undefined) ?? "medium" };
+
+  return {
+    name: "anthropic-key",
+    models,
+    async listModels() {
+      const page = await client.models.list({ limit: 50 });
+      return page.data.map((model) => model.id);
+    },
+    async run(session: AgentSession, tier: Tier, model: string) {
+      const runnableTools = tools.map((tool) =>
+        betaZodTool({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.schema,
+          run: async (input) => toContent(await tool.run(input, session)),
+        }),
+      );
+
+      const finalMessage = await client.beta.messages.toolRunner({
+        model,
+        max_tokens: 16000,
+        max_iterations: 16,
+        ...(model.includes("haiku") ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
+        output_config: { effort: efforts[tier] },
+        system: SYSTEM_PROMPT,
+        tools: runnableTools,
+        messages: [{ role: "user", content: buildUserTurn(session.request) }],
+      });
+
+      if (finalMessage.stop_reason === "refusal") return "I can't help with that one.";
+      return finalMessage.content
+        .flatMap((block) => (block.type === "text" ? [block.text] : []))
+        .join("\n")
+        .trim();
+    },
+  };
+}
