@@ -1,4 +1,5 @@
 import type { BlockConfig, BlockName, BlockOf } from "@browser-agent/shared";
+import { applyDarkMode } from "./dark-mode";
 import { applyFormFixer } from "./form-fixer";
 import { applyStopMotion } from "./stop-motion";
 import { applyTextScale } from "./text-scale";
@@ -6,6 +7,7 @@ import { applyTextScale } from "./text-scale";
 type RuntimeBlock<N extends BlockName> = (cfg: BlockOf<N>) => () => void;
 
 export const runtimeBlocks: Partial<{ [N in BlockName]: RuntimeBlock<N> }> = {
+  dark_mode: applyDarkMode,
   form_fixer: applyFormFixer,
   stop_motion: applyStopMotion,
   text_scale: applyTextScale,
