@@ -47,8 +47,51 @@ export function scanCss(css: string): string | null {
   return null;
 }
 
+const SITE_WIDE = /\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:the |this )?(?:site|website))\b/i;
+
+export function requestedSiteWide(message: string): boolean {
+  return SITE_WIDE.test(message);
+}
+
+export function normalizePagePath(path: string): string {
+  const bare = path.split(/[?#]/)[0] || "/";
+  const withSlash = bare.startsWith("/") ? bare : `/${bare}`;
+  return withSlash.length > 1 && withSlash.endsWith("/") ? withSlash.slice(0, -1) : withSlash;
+}
+
+// Page scope without a stored path is a change made before paths were saved; keep applying it.
+export function savedChangeOnThisPage(change: { scope: string; pagePath?: string | null }, pathname: string): boolean {
+  if (change.scope !== "page" || !change.pagePath) return true;
+  return normalizePagePath(change.pagePath) === normalizePagePath(pathname);
+}
+
+export function scopeLabel(scope: string): string {
+  if (scope === "everywhere") return "all sites";
+  if (scope === "page") return "this page";
+  return "this site";
+}
+
+// One-off chat edits stay on this page, for a block and for CSS alike. A site-wide or scheduled change is the exception, and the UI names it.
+export function prepareSavedChange<T extends { scope: string; pagePath?: string | null; schedule?: unknown; block?: { name?: string; itemSelector?: string | null } | null }>(
+  change: T,
+  message: string,
+  trigger: string,
+  pathname: string,
+): T {
+  let scope = change.scope;
+  if (trigger === "chat" && scope === "site") {
+    const siteWide = requestedSiteWide(message)
+      || change.schedule != null
+      || (change.block?.name === "contentFilter" && Boolean(change.block.itemSelector));
+    scope = siteWide ? "site" : "page";
+  }
+  if (scope === "page") return { ...change, scope, pagePath: normalizePagePath(pathname || change.pagePath || "/") };
+  return { ...change, scope, pagePath: undefined };
+}
+
 export function validateChange(change: Change): string | null {
-  if (change.scope !== "site" && change.scope !== "everywhere") return "bad scope";
+  if (change.scope !== "page" && change.scope !== "site" && change.scope !== "everywhere") return "bad scope";
+  if (change.pagePath != null && change.pagePath !== "" && (change.pagePath.length > 300 || !change.pagePath.startsWith("/"))) return "bad page path";
   if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(change.id)) return `bad id "${change.id}"`;
   if (!change.css && !change.dom?.length && !change.block) return "change does nothing";
   if (change.css) {
@@ -159,7 +202,9 @@ export function isOneShot(schedule: Change["schedule"]): boolean {
   return Boolean(schedule?.untilAt) && !schedule?.days?.length && schedule?.start == null && schedule?.end == null && schedule?.from == null && schedule?.until == null;
 }
 
-const SPOKEN_SPAN = String.raw`\b(?:(?:for|in)\s+)?(?:the\s+)?(?:next\s+)?\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b`;
+const SPOKEN_COUNT = String.raw`(?:\d+(?:\.\d+)?|a couple of|a few|forty[- ]five|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|ninety)`;
+const SPOKEN_UNIT = String.raw`(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)`;
+const SPOKEN_SPAN = String.raw`(?:\b(?:for|next)\s+(?:the\s+)?(?:next\s+)?(?:half\s+an?\s+hour|${SPOKEN_COUNT}\s*${SPOKEN_UNIT}(?:\s+and\s+a\s+half)?)\b|\bfor\s+the\s+next\s+(?:hour|minute)\b|\b(?:until|till)\s+(?:noon|midnight|\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2})(?![\w:]))`;
 const SPOKEN_WINDOW = String.raw`\b(?:between|from)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+(?:and|to)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b`;
 
 // "hide podcasts for 30 seconds" becomes "hide podcasts". Null when the message has no counted span.

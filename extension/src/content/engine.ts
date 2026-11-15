@@ -1,6 +1,6 @@
 import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js";
 import { detectInjectionFields } from "../../../shared/safety.js";
-import { isOneShot, isScheduleActive, validateChange } from "../../../shared/validate.js";
+import { isOneShot, isScheduleActive, savedChangeOnThisPage, validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
@@ -257,10 +257,23 @@ function nextScheduleDelay(now = Date.now()): number {
 }
 
 let focusOn = false;
+let focusMode = false;
 const focusListeners = new Set<(on: boolean) => void>();
 
+// Focus mode keeps every focus rule on, ignoring its times, until the user turns it off.
+function scheduleOn(schedule: Change["schedule"], now: Date): boolean {
+  return focusMode || isScheduleActive(schedule, now);
+}
+
+export function setFocusMode(on: boolean) {
+  if (focusMode === on) return;
+  focusMode = on;
+  syncSchedules();
+  publishFocus();
+}
+
 export function focusLive(): boolean {
-  return [...applied.values()].some((entry) => entry.change.schedule != null && entry.live !== null);
+  return focusMode || [...applied.values()].some((entry) => entry.change.schedule != null && entry.live !== null);
 }
 
 export function onFocusLive(listener: (on: boolean) => void): () => void {
@@ -301,7 +314,7 @@ function manageScheduleTimer() {
 // Switches scheduled changes on or off to match the clock. Runs on a timer, on visibilitychange and after each apply.
 function syncSchedules() {
   const now = new Date();
-  const due = [...applied.values()].filter((entry) => entry.change.schedule && isScheduleActive(entry.change.schedule, now) !== (entry.live !== null));
+  const due = [...applied.values()].filter((entry) => entry.change.schedule && scheduleOn(entry.change.schedule, now) !== (entry.live !== null));
   if (due.length) {
     void transition(() => {
       for (const entry of due) {
@@ -351,7 +364,7 @@ function competingSorts(change: Change): string[] {
 }
 
 async function transition(update: () => void, animate: boolean) {
-  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduceMotion = globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (!animate || reduceMotion || !document.startViewTransition || !document.body) return update();
   await document.startViewTransition(update).updateCallbackDone;
 }
@@ -405,7 +418,7 @@ function stopObservingIfIdle() {
 async function installChange(entry: Applied, matched: Record<string, number>, animate: boolean): Promise<string | undefined> {
   await transition(() => {
     revertNow(entry.change.id);
-    const waiting = entry.change.schedule != null && !isScheduleActive(entry.change.schedule, new Date());
+    const waiting = entry.change.schedule != null && !scheduleOn(entry.change.schedule, new Date());
     if (isOneShot(entry.change.schedule) && waiting) {
       changeLog.delete(entry.change.id);
       return;
@@ -443,6 +456,10 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
   if (problem) {
     const before = computeStats();
     return { ok: false, error: problem, matched: {}, before, after: before };
+  }
+  if (!savedChangeOnThisPage(change, globalThis.location.pathname)) {
+    const before = computeStats();
+    return { ok: false, error: "Saved for a different page.", matched: {}, before, after: before };
   }
 
   const replaced = competingSorts(change);

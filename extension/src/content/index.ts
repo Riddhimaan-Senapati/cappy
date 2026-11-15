@@ -14,7 +14,7 @@ import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
 import { setFilterClassifier } from "./content-filter.js";
-import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
 import { inspectPage, recordActivity, recordChange, recordRun, recordUsage, setEventTracking } from "./inspection.js";
@@ -171,20 +171,28 @@ function mutate<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
+function forThisRequest(change: Change, source: string): Change {
+  if (change.scope !== "page") return change.pagePath ? { ...change, pagePath: undefined } : change;
+  const askedHere = source.startsWith("Generated") || source.startsWith("Reapplied");
+  const pagePath = askedHere ? location.pathname : (change.pagePath || location.pathname);
+  return pagePath === change.pagePath ? change : { ...change, pagePath };
+}
+
 async function apply(change: Change, source = "Reapplied from page history locally (no LLM call)") {
-  if (change.block?.name === "textScale" && change.id !== learnedTextScale.id) {
+  const scoped = forThisRequest(change, source);
+  if (scoped.block?.name === "textScale" && scoped.id !== learnedTextScale.id) {
     await revertChange(learnedTextScale.id, false);
   }
-  const outcome = await applyChange(change);
-  const stored = activeChanges().find((active) => active.id === change.id);
+  const outcome = await applyChange(scoped);
+  const stored = activeChanges().find((active) => active.id === scoped.id);
   if (outcome.ok && stored && !isOneShot(stored.schedule)) {
     await recordApplied(origin, stored);
-    recordChange(change.id, source);
-  } else if (outcome.ok && isOneShot(change.schedule)) {
-    if (!stored) await recordReverted(origin, change.id);
-  } else recordActivity(`Could not apply ${change.id}: ${outcome.error ?? "No active change"}`);
+    recordChange(scoped.id, source);
+  } else if (outcome.ok && isOneShot(scoped.schedule)) {
+    if (!stored) await recordReverted(origin, scoped.id);
+  } else recordActivity(`Could not apply ${scoped.id}: ${outcome.error ?? "No active change"}`);
   for (const id of outcome.replaced ?? []) await recordReverted(origin, id);
-  if (change.block?.name === "textScale") await syncLearnedText();
+  if (scoped.block?.name === "textScale") await syncLearnedText();
   return outcome;
 }
 
@@ -271,7 +279,7 @@ async function syncLearnedText() {
   }
 }
 
-async function restore(animate: boolean) {
+async function restore() {
   if (detectInjectionFields(readInjectionSurface())) {
     const saved = await savedChangesFor(origin);
     const { paused, profile } = await load();
@@ -281,8 +289,8 @@ async function restore(animate: boolean) {
     return 0;
   }
   let restored = 0;
-  for (const change of await savedChangesFor(origin)) {
-    if ((await applyChange(change, animate)).ok) {
+  for (const change of await savedChangesFor(origin, location.pathname)) {
+    if ((await applyChange(change, false)).ok) {
       restored++;
       recordChange(change.id, "Saved change restored locally (no LLM call)");
     } else recordActivity(`Saved change ${change.id} could not be restored.`);
@@ -454,7 +462,8 @@ function start() {
         await revertAll(false);
         clearChangeHistory();
         const state = await load();
-        const restored = state.paused ? 0 : await restore(true);
+        // A view transition waits for a frame, so a fast switch would keep the previous profile's rules on screen.
+        const restored = state.paused ? 0 : await restore();
         await send({ kind: "pageReady", origin, restored, profileChanged: true });
       }).catch(reportExtensionError);
     } else if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
@@ -462,10 +471,11 @@ function start() {
       recordActivity(changes.paused.newValue ? "Adaptations paused; reverting all active changes locally." : "Adaptations resumed; restoring saved changes locally.");
       void mutate(async () => {
         if (changes.paused.newValue) await revertAll();
-        else await restore(true);
+        else await restore();
       }).catch(() => undefined);
     }
     if (changes.trackEvents) setEventTracking(changes.trackEvents.newValue !== false);
+    if (changes.focusMode) setFocusMode(changes.focusMode.newValue === true);
     if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
     if (changes.camera || changes.paused) void load().then((state) => whenReady(() => syncCamera(state.camera, state.paused)));
   });
@@ -478,13 +488,14 @@ function start() {
   (async () => {
     const state = await load();
     setEventTracking(state.trackEvents);
+    setFocusMode(state.focusMode);
     recordActivity(state.paused ? "Adaptations paused; saved changes were not restored." : "Restoring saved site and global changes locally.");
     whenReady(() => {
       if (state.floatingButton) ensureOverlay().setFab(true);
       void mutate(async () => {
         let restored = 0;
         try {
-          if (!state.paused) restored = await restore(false);
+          if (!state.paused) restored = await restore();
         } finally {
           void send({ kind: "pageReady", origin, restored });
         }

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { askInBar, fontSizeOf, openDemo, openSidePanel, runE2E, sendChat, shadowTextVisible, waitFor } from "./lib.js";
 
 const ORIGIN = "http://localhost:8787";
-const REQUEST = "make the text bigger";
+// Site-wide, so the saved change belongs on every clean page of this host. A one-off stays on its own page.
+const REQUEST = "make the text bigger on this site";
 
 await runE2E("replay-trap", async ({ browser }) => {
   const campus = await openDemo(browser, "/demo/campus.html");
@@ -13,12 +14,12 @@ await runE2E("replay-trap", async ({ browser }) => {
 
   const worker = browser.context.serviceWorkers()[0] ?? (await browser.context.waitForEvent("serviceworker"));
   await waitFor("the recipe and the site change to be saved", () =>
-    worker.evaluate(async (origin) => {
+    worker.evaluate(async ({ origin, request }) => {
       const data = await chrome.storage.local.get(["recipes", "siteChanges"]);
       const recipes = data.recipes as Record<string, unknown> | undefined;
       const site = data.siteChanges as Record<string, unknown[]> | undefined;
-      return recipes?.[`${origin}::make the text bigger`] && site?.[origin]?.length ? true : undefined;
-    }, ORIGIN),
+      return recipes?.[`${origin}::${request}`] && site?.[origin]?.length ? true : undefined;
+    }, { origin: ORIGIN, request: REQUEST }),
   );
 
   const trap = await openDemo(browser, "/demo/trap.html");

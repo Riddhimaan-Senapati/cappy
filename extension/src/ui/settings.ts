@@ -1,12 +1,13 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
-import { forgetStoredChange, load, save, type StoredState } from "../storage.js";
-import { isScheduleActive, scheduleStatus } from "../../../shared/validate.js";
+import { DEFAULTS, forgetStoredChange, load, save, type StoredState } from "../storage.js";
+import { describeSchedule, isScheduleActive, scheduleStatus, scopeLabel } from "../../../shared/validate.js";
 import { h, icon, type IconName } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 import { createProfilesView } from "./profiles.js";
 import { createConfigView } from "./config.js";
+import { paintOnce, settle } from "../coalesce.js";
 
 let voicesRequest: Promise<string[]> | null = null;
 
@@ -315,9 +316,14 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let checkingVoice = false;
   let pendingVoice: "openai" | "gemini" | undefined;
 
-  const paint = async () => {
-    const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch((): StatusInfo => ({ connected: false, busy: false })), loadVoices()]);
-    if (disposed) return;
+  const paint = paintOnce(async (current) => {
+    const [state, changes, status, voices] = await Promise.all([
+      settle(load(), { ...DEFAULTS }, 8_000),
+      settle(ctx.listChanges(), [] as ActiveChange[], 8_000),
+      settle(ctx.getStatus(), { connected: false, busy: false }, 8_000),
+      settle(loadVoices(), [], 8_000),
+    ]);
+    if (disposed || !current()) return;
     const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
     const field = (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && root.contains(focused) ? focused : null;
     const focusLabel = field?.getAttribute("aria-label");
@@ -346,7 +352,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
             queue();
           });
           return h("div", "s-change", "", [
-            h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", change.scope === "everywhere" ? "all sites" : "this site"), undo]),
+            h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", scopeLabel(change.scope)), undo]),
             ...(change.schedule ? [h("div", "why", scheduleStatus(change.schedule) ?? "")] : []),
             h("div", "why", change.reason),
           ]);
@@ -374,10 +380,11 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
               where = host;
             }
           }
-          const on = change.schedule != null && isScheduleActive(change.schedule, new Date());
+          const on = state.focusMode || (change.schedule != null && isScheduleActive(change.schedule, new Date()));
+          const when = state.focusMode ? `${describeSchedule(change.schedule) ?? ""} · on now, Focus mode` : scheduleStatus(change.schedule) ?? "";
           return h("div", `s-change${on ? " on" : ""}`, "", [
             h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", where), remove]),
-            h("div", "why", scheduleStatus(change.schedule) ?? ""),
+            h("div", "why", when),
           ]);
         })
       : [h("div", "s-empty", "No focus rules yet. Ask to hide clutter during work or study, such as Shorts on weekdays 9 to 5.")];
@@ -554,7 +561,12 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
         ),
         section("Appearance", themePicker()),
-        section("Focus rules", ...focusRows),
+        section(
+          "Focus rules",
+          h("div", "s-note", "Time-based rules that hide clutter while you study or work. They turn on and off with the clock, and the bar shows Focus while one is on."),
+          toggle("Focus mode", "Turns on every focus rule now, ignoring its times, until you turn this off", state.focusMode, set("focusMode")),
+          ...focusRows,
+        ),
         section(`On this page${changes.length ? ` · ${changes.length}` : ""}`, ...changeRows),
       ],
       memory: () => [
@@ -607,7 +619,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       next?.focus();
       if (selection != null) next?.setSelectionRange(selection, selection);
     }
-  };
+  }, 15_000);
 
   const queue = () => {
     if (queued) return;

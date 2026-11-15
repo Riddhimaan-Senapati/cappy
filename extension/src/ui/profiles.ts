@@ -18,6 +18,7 @@ export function profilePicker(state: StoredState, onChange: (id: string) => void
 
 export function createProfilesView(rerender: () => void) {
   let name = "";
+  let renameDraft: string | null = null;
   let error = "";
   let pending = false;
   let managing = false;
@@ -28,6 +29,7 @@ export function createProfilesView(rerender: () => void) {
     try {
       await updateProfile(action);
       name = "";
+      renameDraft = null;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
@@ -66,7 +68,7 @@ export function createProfilesView(rerender: () => void) {
         return element;
       };
       rows.push(
-        form("Current profile name", state.profiles[state.activeProfileId].name, "Profile name", "Rename", (value) => void act({ action: "rename", name: value })),
+        form("Current profile name", renameDraft ?? state.profiles[state.activeProfileId].name, "Profile name", "Rename", (value) => void act({ action: "rename", name: value }), (value) => (renameDraft = value)),
         form("New profile name", name, "New profile, e.g. Mom or Study", "Create", (value) => void act({ action: "create", name: value }), (value) => (name = value)),
         h("div", "s-note", "A new profile starts empty. Tip: type /profile in the bar to switch quickly."),
       );

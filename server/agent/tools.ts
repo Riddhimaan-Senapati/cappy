@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Change, validateChange } from "../../shared/adaptation.js";
+import { prepareSavedChange } from "../../shared/validate.js";
 import { detectInjection, detectInjectionText } from "../../shared/safety.js";
 import { rememberFacts } from "./memory.js";
 import { withSpokenSchedule } from "./schedule.js";
@@ -104,7 +105,14 @@ export const tools: AgentTool[] = [
     async run({ change: incoming }, session) {
       if (session.blockedReason) return { text: "BLOCKED: no changes allowed on this page." };
       const now = session.request.clientTime?.iso ? new Date(session.request.clientTime.iso) : new Date();
-      const change = withSpokenSchedule(incoming, session.request.message, now);
+      const scheduled = withSpokenSchedule(incoming, session.request.message, now);
+      let pathname = "/";
+      try {
+        pathname = new URL(session.request.page.url).pathname || "/";
+      } catch {
+        pathname = "/";
+      }
+      const change = prepareSavedChange(scheduled, session.request.message, session.request.trigger, pathname);
       if (change.scope === "everywhere" && change.block?.name === "contentFilter" && change.block.itemSelector !== null) {
         return { text: "REJECTED: a content filter with a site-specific itemSelector requires site scope. For a cross-site preference, remember the general intent." };
       }

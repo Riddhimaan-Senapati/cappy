@@ -133,6 +133,15 @@ describe("undo restores what was changed", () => {
   });
 });
 
+describe("invert keeps images the original color", () => {
+  it("re-inverts pictures with invert(1) and does not hue-rotate them into maroon", async () => {
+    const { INVERT_CSS } = await import("../extension/src/content/dark-mode.js");
+    assert.match(INVERT_CSS, /html \{ filter: invert\(1\) !important/);
+    assert.match(INVERT_CSS, /img, video, picture, canvas, svg, iframe[\s\S]*\{ filter: invert\(1\) !important/);
+    assert.equal(INVERT_CSS.includes("hue-rotate"), false);
+  });
+});
+
 describe("strategy order", () => {
   it("tries the remembered strategy first", () => {
     assert.deepEqual(strategyOrder(undefined), ["class", "media", "invert"]);

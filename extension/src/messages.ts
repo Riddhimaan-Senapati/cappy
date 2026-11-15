@@ -7,7 +7,7 @@ export interface AppliedSummary {
   id: string;
   summary: string;
   reason: string;
-  scope: "site" | "everywhere";
+  scope: "page" | "site" | "everywhere";
   // When a time-based rule is on, in plain words, with whether it is on right now.
   schedule?: string;
 }

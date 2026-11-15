@@ -10,9 +10,10 @@ const DARK_LUMINANCE = 0.2;
 const MAX_SWITCH_TRIES = 4;
 const STYLE_MARK = "dark-mode";
 
-const INVERT_CSS = `
-html { filter: invert(1) hue-rotate(180deg) !important; background: #fff !important; }
-img, video, picture, canvas, svg, iframe, [style*="background-image"] { filter: invert(1) hue-rotate(180deg) !important; }
+// hue-rotate(180) clamps saturated colors, so a second copy turns red maroon. invert(1) undoes itself.
+export const INVERT_CSS = `
+html { filter: invert(1) !important; background: #fff !important; }
+img, video, picture, canvas, svg, iframe, [style*="background-image"] { filter: invert(1) !important; }
 `;
 
 export type Rgba = { r: number; g: number; b: number; a: number };
