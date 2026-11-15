@@ -118,6 +118,8 @@ export class Spotlight {
   private view: View = "list";
   private items: Item[] = [];
   private selected = 0;
+  // ArrowUp/ArrowDown only. The highlighted row is not a choice until then.
+  private pickedIndex: number | null = null;
   private runs: RunState[] = [];
   private sessionRequest = "";
   private opened = false;
@@ -269,6 +271,7 @@ export class Spotlight {
     });
     this.input.value = "";
     this.selected = 0;
+    this.pickedIndex = null;
     this.setView(view ?? (this.working ? "run" : "list"));
     this.layer.classList.add("open");
     this.onToggle(true);
@@ -487,6 +490,7 @@ export class Spotlight {
 
   private onInput() {
     this.deletingProfileId = null;
+    this.pickedIndex = null;
     window.clearTimeout(this.closeTimer);
     if (this.view === "run" && !this.working) this.setView("list");
     if (this.view !== "list") return this.renderHints();
@@ -738,7 +742,10 @@ export class Spotlight {
 
   private renderList() {
     this.items = this.buildItems();
+    if (!this.items.length) this.pickedIndex = null;
+    else if (this.pickedIndex != null) this.selected = Math.min(this.pickedIndex, this.items.length - 1);
     this.selected = Math.min(this.selected, Math.max(0, this.items.length - 1));
+    if (this.pickedIndex != null) this.pickedIndex = this.selected;
     const nodes: Node[] = [];
     this.items.forEach((item, index) => {
       const row = h("div", `item${index === this.selected ? " sel" : ""}`, "", [icon(item.icon, 15), h("span", "title", item.title), item.hint ? h("span", "hint", item.hint) : null]);
@@ -1631,8 +1638,17 @@ export class Spotlight {
       return true;
     }
     if (this.view === "list" && this.items.length) {
-      if (key === "ArrowDown") return this.select((this.selected + 1) % this.items.length), true;
-      if (key === "ArrowUp") return this.select((this.selected - 1 + this.items.length) % this.items.length), true;
+      if (key === "ArrowDown" || key === "ArrowUp") {
+        const count = this.items.length;
+        const from = this.pickedIndex ?? 0;
+        // Down lands on the top row first, so a highlighted suggestion can be chosen without skipping it.
+        const index = this.pickedIndex == null
+          ? (key === "ArrowDown" ? 0 : count - 1)
+          : key === "ArrowDown" ? (from + 1) % count : (from - 1 + count) % count;
+        this.pickedIndex = index;
+        this.select(index);
+        return true;
+      }
       const item = this.items[this.selected];
       if (key === "Delete" && event.shiftKey && item?.kind === "previous") {
         void this.deleteSuggestion(item.title);
@@ -1645,11 +1661,24 @@ export class Spotlight {
         this.renderList();
         return true;
       }
-      if (key === "Enter") {
-        if (event.shiftKey && item.kind === "ask") this.ask(this.input.value.trim(), true);
-        else void this.runItem(item);
+    }
+    if (this.view === "list" && key === "Enter") {
+      // The list can still show a suggestion or a prefix after fast typing. Enter sends the field unless a row was chosen with the arrow keys.
+      const text = this.input.value.trim();
+      const picked = this.pickedIndex == null ? undefined : this.items[this.pickedIndex];
+      if (picked) {
+        if (picked.kind === "ask") this.ask(text, event.shiftKey);
+        else void this.runItem(picked);
         return true;
       }
+      if (text.startsWith("/")) {
+        this.renderList();
+        const command = this.items[0];
+        if (command) void this.runItem(command);
+        return true;
+      }
+      if (text) this.ask(text, event.shiftKey);
+      return this.items.length > 0;
     }
     if ((this.view === "run" || this.view === "session") && key === "Enter") {
       const text = this.input.value.trim();
