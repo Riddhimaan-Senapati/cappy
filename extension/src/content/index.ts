@@ -10,14 +10,15 @@ import { forgetLine, hasMemoryLine, rememberLines } from "../memory.js";
 import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
-import { detectInjection } from "../../../shared/safety.js";
+import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
+import { setFilterClassifier } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
 import { inspectPage, recordActivity, recordChange, recordRun, recordUsage, setEventTracking } from "./inspection.js";
-import { inspect, listItems, readPage } from "./outline.js";
+import { inspect, listItems, readInjectionSurface, readPage } from "./outline.js";
 import { findSiteFeatures } from "./site-controls.js";
 import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
 
@@ -128,6 +129,7 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
     select: (element) => void selectByGesture(element),
     release: () => overlay?.spotlight.finishVoice(),
     hasSelection: () => Boolean(targetElement) || picker.isActive,
+    pointAt: (x, y) => overlay?.pointAt(x, y) ?? { covered: false, control: null },
     cancel: () => {
       const hadSomething = Boolean(targetElement) || Boolean(overlay?.spotlight.isOpen()) || picker.isActive;
       picker.stop();
@@ -270,7 +272,7 @@ async function syncLearnedText() {
 }
 
 async function restore() {
-  if (detectInjection(readPage())) {
+  if (detectInjectionFields(readInjectionSurface())) {
     const saved = await savedChangesFor(origin);
     const { paused, profile } = await load();
     if (saved.length || (!paused && hasMemoryLine(profile, LARGER_TEXT))) {
@@ -399,6 +401,8 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return;
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
+    case "openSettings":
+      return ensureOverlay().spotlight.openSettings();
     case "ui": {
       recordRun(request.event);
       const handled = (overlay ?? ensureOverlay()).handleEvent(request.event);
@@ -413,6 +417,7 @@ async function handle(request: ContentRequest): Promise<unknown> {
 const LOADED_FLAG = "__adaptiveAgentLoaded";
 
 function start() {
+  setFilterClassifier((match, items) => send({ kind: "classify", match, items }) as Promise<boolean[] | null>);
   // A reloaded extension leaves the previous instance's UI and styles behind; clear them before restoring.
   document.querySelectorAll('[data-ba="ui"], style[data-ba], svg[data-ba], label[data-ba]').forEach((node) => node.remove());
   onSpeechChange((on) => ensureOverlay().setSpeaking(on));

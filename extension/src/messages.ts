@@ -45,6 +45,7 @@ export type ContentRequest =
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
+  | { kind: "openSettings" }
   | { kind: "startVoice" }
   | { kind: "targetContextElement" }
   | { kind: "pickElement" }
@@ -79,6 +80,7 @@ export interface StatusInfo {
 export type BackgroundRequest =
   | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement }
   | { kind: "deleteRequest"; message: string }
+  | { kind: "openWelcome" }
   | ({ kind: "profileAction" } & ProfileAction)
   | { kind: "pageReady"; origin: string; restored: number; profileChanged?: boolean }
   | { kind: "openDebug" }
@@ -90,6 +92,7 @@ export type BackgroundRequest =
   | { kind: "chatgptLogout" }
   | { kind: "stopRun" }
   | { kind: "suggest"; page: PageOutline; applied: string[]; friction?: FrictionCount[] }
+  | { kind: "classify"; match: string; items: string[] }
   | { kind: "dequeue"; runId: string }
   | { kind: "voiceStart"; lang: string; hold?: boolean }
   | { kind: "voiceStop" }

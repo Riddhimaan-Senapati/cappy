@@ -198,6 +198,15 @@ export interface Suggestion {
   memory: string | null;
 }
 
+export interface ClassifyMessage {
+  type: "classify";
+  requestId: string;
+  provider?: string;
+  models?: Partial<Record<Tier, string>>;
+  match: string;
+  items: string[];
+}
+
 export interface SuggestMessage {
   type: "suggest";
   requestId: string;
@@ -216,11 +225,12 @@ export interface CancelMessage {
   runId: string;
 }
 
-export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage | SuggestMessage;
+export type ClientMessage = RunRequest | ToolResultMessage | PingMessage | CancelMessage | SetKeyMessage | SignInMessage | SignOutMessage | ListModelsMessage | SuggestMessage | ClassifyMessage;
 export type ServerMessage =
   | ToolCallMessage
   | { type: "usage"; usage: TokenUsage; runId?: string; requestId?: string; model: string }
   | AgentEvent
   | { type: "providers"; providers: ProviderInfo[]; defaultProvider: string | null }
   | { type: "notice"; level: "info" | "error"; text: string }
-  | { type: "suggestion"; requestId: string; suggestion: Suggestion | null };
+  | { type: "suggestion"; requestId: string; suggestion: Suggestion | null }
+  | { type: "classified"; requestId: string; verdicts: boolean[] | null };

@@ -1,6 +1,6 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { TargetElement } from "../../../shared/protocol.js";
-import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
+import type { BackgroundRequest, ContentRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
 import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, save, type RequestSession } from "../storage.js";
 import { lastingRequest } from "../../../shared/validate.js";
 import { settle } from "../coalesce.js";
@@ -85,21 +85,57 @@ async function injectContent(tabId: number) {
   await chrome.scripting.executeScript({ target: { tabId }, files: [CONTENT_SCRIPT] });
 }
 
-async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
-  if (!tab?.id) return;
+// The setup page has no content script; it shows that the shortcut worked instead.
+function onWelcomePage(tab: chrome.tabs.Tab | undefined, command: string) {
+  if (!tab?.url?.startsWith(chrome.runtime.getURL("welcome.html"))) return false;
+  void chrome.runtime.sendMessage({ kind: "welcomeShortcut", command }).catch(() => undefined);
+  return true;
+}
+
+// Tabs opened before the extension was (re)loaded have no content script yet; a fresh one needs a moment to start listening.
+async function reachTab(tabId: number, request: ContentRequest): Promise<boolean> {
   try {
-    await sendToTab(tab.id, { kind: "toggleSpotlight" });
-    return;
+    await sendToTab(tabId, request);
+    return true;
   } catch {
-    // tabs opened before the extension was (re)loaded have no content script yet
+    // fall through to injecting the content script
   }
   try {
-    await injectContent(tab.id);
+    await injectContent(tabId);
+  } catch {
+    return false;
+  }
+  for (let attempt = 0; attempt < 8; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 150));
-    await sendToTab(tab.id, { kind: "toggleSpotlight" });
-  } catch {
-    await chrome.action.openPopup().catch(() => undefined);
+    try {
+      await sendToTab(tabId, request);
+      return true;
+    } catch {
+      // still starting up
+    }
   }
+  return false;
+}
+
+async function flagUnavailable(tabId: number) {
+  await chrome.action.setBadgeText({ tabId, text: "!" }).catch(() => undefined);
+  await chrome.action.setTitle({ tabId, title: "The bar can't open on this page. Chrome blocks extensions here." }).catch(() => undefined);
+  setTimeout(() => {
+    void chrome.action.setBadgeText({ tabId, text: "" }).catch(() => undefined);
+    void chrome.action.setTitle({ tabId, title: "Adaptive Agent" }).catch(() => undefined);
+  }, 4000);
+}
+
+async function openBarSettings(tab: chrome.tabs.Tab | undefined) {
+  if (!tab?.id) return;
+  if (!(await reachTab(tab.id, { kind: "openSettings" }))) await flagUnavailable(tab.id);
+}
+
+chrome.action.onClicked.addListener((tab) => void openBarSettings(tab));
+
+async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
+  if (!tab?.id || onWelcomePage(tab, "toggle-spotlight")) return;
+  if (!(await reachTab(tab.id, { kind: "toggleSpotlight" }))) await flagUnavailable(tab.id);
 }
 
 // An earlier version made the toolbar icon open the side panel, and Chrome persists that choice.
@@ -109,7 +145,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "adapt-element" && tab?.id) void sendToTab(tab.id, { kind: "targetContextElement" }).catch(() => undefined);
 });
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  if (reason === "install" && !(await load()).onboarded) void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
   chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Adaptive Agent", contexts: ["all"] }, () => void chrome.runtime.lastError);
   for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {
     if (tab.id) void injectContent(tab.id).catch(() => undefined);
@@ -120,6 +157,7 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   if (command === "toggle-spotlight") await toggleSpotlight(tab ?? (await activeTab()));
   if (command === "start-voice") {
     const target = tab ?? (await activeTab());
+    if (onWelcomePage(target, "start-voice")) return;
     if (target?.id !== undefined) await sendToTab(target.id, { kind: "startVoice" }).catch(() => undefined);
   }
   if (command === "open-debug") {
@@ -188,6 +226,9 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
           error: error instanceof TypeError ? "Could not reach the local audio server. Check that it is running." : error.message,
         }));
       return true;
+    case "openWelcome":
+      void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+      break;
     case "status":
       void settle(
         agent.ensureConnected({ probe: true }).catch(() => undefined).then(() => agent.getStatus()),
@@ -203,6 +244,9 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
       break;
     case "suggest":
       void agent.suggest(request.page, request.applied, request.friction, sender.tab?.id).then(sendResponse);
+      return true;
+    case "classify":
+      void agent.classify(request.match, request.items).then(sendResponse);
       return true;
     case "stopRun":
       if (sender.tab?.id) agent.stopRun(sender.tab.id);

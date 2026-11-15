@@ -24,6 +24,8 @@ interface Run {
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  // Set when the run request is sent, so a replaced socket can still fail its own runs.
+  socket?: WebSocket;
 }
 
 export interface AgentHooks {
@@ -77,6 +79,7 @@ export class AgentClient {
   private modelsRequested = new Set<string>();
   private suggestionTabs = new Map<string, number>();
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
+  private classifications = new Map<string, (verdicts: boolean[] | null) => void>();
   private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
 
   constructor(private hooks: AgentHooks) {}
@@ -147,6 +150,29 @@ export class AgentClient {
     });
   }
 
+  async classify(match: string, items: string[]): Promise<boolean[] | null> {
+    try {
+      await this.ensureConnected();
+    } catch {
+      return null;
+    }
+    const state = await load();
+    const { activeProvider } = await this.getStatus();
+    if (!activeProvider) return null;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.classifications.delete(requestId);
+        resolve(null);
+      }, 20_000);
+      this.classifications.set(requestId, (verdicts) => {
+        clearTimeout(timer);
+        resolve(verdicts);
+      });
+      this.send({ type: "classify", requestId, provider: activeProvider, models: state.modelChoices[activeProvider] ?? {}, match, items });
+    });
+  }
+
   async setKey(provider: string, key: string | null, baseURL?: string | null) {
     await this.ensureConnected();
     this.send({ type: "setKey", provider, key, ...(baseURL != null ? { baseURL } : {}) });
@@ -212,24 +238,27 @@ export class AgentClient {
         clearTimeout(timer);
         this.nextConnectAt = 0;
         this.clearReconnect();
+        clearInterval(this.keepAlive);
         this.socket = socket;
         this.keepAlive = setInterval(() => this.send({ type: "ping" }), 20_000);
         resolve();
       };
       socket.onerror = () => {
-        // A live socket's error is followed by onclose. A socket we already replaced must not mark us offline.
-        if (opened || (this.socket && this.socket !== socket)) return;
+        // A socket that already opened reports the drop through onclose. A failed handshake rejects now.
+        if (opened) return;
         clearTimeout(timer);
         this.setStatus({ connected: false, error: SERVER_OFFLINE.message });
         rejectOffline();
       };
       socket.onmessage = (event) => void this.onMessage(JSON.parse(event.data) as ServerMessage);
       socket.onclose = () => {
-        // A socket this client already replaced must not drop the live connection or fail its runs.
+        for (const run of [...this.runs.values()]) {
+          if (run.socket === socket) this.fail(run, "Lost connection to the agent server.");
+        }
+        // Only the live socket owns the connection. Runs sent on a replaced socket were failed above.
         if (this.socket !== socket) return;
         clearInterval(this.keepAlive);
         this.socket = null;
-        for (const run of [...this.runs.values()]) this.fail(run, "Lost connection to the agent server.");
         this.setStatus({ connected: false });
       };
     });
@@ -248,8 +277,6 @@ export class AgentClient {
   }
 
   private fail(run: Run, message: string) {
-    // A close can land after the run already finished. Emitting again would mark that success as failed.
-    if (!this.runs.has(run.runId)) return;
     this.finish(run);
     this.emit(run, { type: "error", runId: run.runId, message });
   }
@@ -326,7 +353,7 @@ export class AgentClient {
         await this.markCommandApplied(run);
         return;
       }
-      if (recipe === "blocked") return;
+      if (recipe === "blocked" || recipe === "stopped") return;
     }
     if (!this.runs.has(runId)) return;
 
@@ -370,6 +397,7 @@ export class AgentClient {
       const historyText = target ? `${message} (selected: ${target.label})` : message;
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: historyText }].slice(-20) });
       if (!this.runs.has(runId)) return;
+      run.socket = this.socket ?? undefined;
       this.send(request);
       return true;
     } catch (error) {
@@ -377,11 +405,11 @@ export class AgentClient {
     }
   }
 
-  private async tryRecipe(run: Run, changes: ActiveChange[] | undefined): Promise<"applied" | "blocked" | false> {
+  private async tryRecipe(run: Run, changes: ActiveChange[] | undefined): Promise<"applied" | "blocked" | "stopped" | false> {
     if (!changes?.length) return false;
     try {
       const page = await sendToTab<PageOutline>(run.tabId, { kind: "tool", name: "read_page", input: {} });
-      if (!this.runs.has(run.runId)) return "applied";
+      if (!this.runs.has(run.runId)) return "stopped";
       // Same check the server runs before a model call, so a saved change cannot land on a trap page.
       const injection = detectInjection(page);
       if (injection) {
@@ -394,12 +422,12 @@ export class AgentClient {
       }
       this.step(run, "Using your saved version of this request", "info");
       for (const change of changes) {
-        if (!this.runs.has(run.runId)) return "applied";
+        if (!this.runs.has(run.runId)) return "stopped";
         const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
         if (!outcome.ok) return false;
         run.applied.set(change.id, change);
       }
-      if (!this.runs.has(run.runId)) return "applied";
+      if (!this.runs.has(run.runId)) return "stopped";
       this.finish(run, true);
       const reply = "Done, from your saved version. Hold Shift+Enter to ask the AI again.";
       void speakIfEnabled(reply, run.tabId);
@@ -451,6 +479,11 @@ export class AgentClient {
       if (this.notice?.level === "info") this.notice = undefined;
       this.setStatus({ connected: true, error: undefined });
       void this.ensureModels();
+      return;
+    }
+    if (message.type === "classified") {
+      this.classifications.get(message.requestId)?.(message.verdicts);
+      this.classifications.delete(message.requestId);
       return;
     }
     if (message.type === "suggestion") {

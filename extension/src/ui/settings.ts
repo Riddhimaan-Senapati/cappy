@@ -3,8 +3,7 @@ import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
 import { DEFAULTS, forgetStoredChange, load, save, type StoredState } from "../storage.js";
 import { isScheduleActive, scheduleStatus } from "../../../shared/validate.js";
-import { usageCard, USAGE_CSS } from "./usage.js";
-import { adoptStyles, h, icon } from "./dom.js";
+import { h } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 import { createProfilesView } from "./profiles.js";
 import { createConfigView } from "./config.js";
@@ -102,11 +101,11 @@ function voiceSection(state: StoredState): Node {
     "s-sec",
     "",
     [
-      h("h3", "", "Voice"),
-      toggle("Send after speaking", "Off leaves your words in the box to edit first.", state.voiceAutoSend, (on) => save({ voiceAutoSend: on })),
+      h("h3", "", "Talking"),
+      toggle("Send after speaking", "Off lets you edit first", state.voiceAutoSend, (on) => save({ voiceAutoSend: on })),
       voiceLanguage(state),
-      h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Chrome asks once. Allow it in the tab that opens.")]), enable]),
-      h("div", "s-note", "Press Alt+Shift+M (Option+Shift+M on Mac) on a page to speak. With the bar closed, point at something with the mouse or the camera pointer and say what to change, like \"make this red\". It sends after a short pause (a ring shows it is about to), when you say \"done\", or after 15 seconds. Keep talking to cancel the pause. Change the shortcut under Shortcuts."),
+      h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Chrome asks once")]), enable]),
+      h("div", "s-note", "Press Alt+Shift+M on a page, or point at something and say what to change. It sends after a short pause or when you say \"done\"."),
     ],
   );
 }
@@ -114,14 +113,14 @@ function voiceSection(state: StoredState): Node {
 function cameraSection(state: StoredState): Node {
   const camera = state.camera;
   const set = (patch: Partial<StoredState["camera"]>) => save({ camera: { ...camera, ...patch } });
-  const rows: Node[] = [toggle("Camera control", "Hands-free control with your webcam. Video stays on this computer.", camera.enabled, (on) => set({ enabled: on }))];
+  const rows: Node[] = [toggle("Camera control", "Hands-free with your webcam. Video stays on this computer.", camera.enabled, (on) => set({ enabled: on }))];
   if (camera.enabled) {
     rows.push(
-      toggle("Air pointer", "Point to move, pinch thumb and finger to click.", camera.pointer, (on) => set({ pointer: on })),
-      toggle("Hand scrolling", "Open palm high to scroll up, low to scroll down.", camera.handScroll, (on) => set({ handScroll: on })),
-      toggle("Head scrolling", "Tilt your head down or up to scroll.", camera.headScroll, (on) => set({ headScroll: on })),
-      toggle("Swipe to go back", "Swipe an open palm sideways for back or forward.", camera.swipeNav !== false, (on) => set({ swipeNav: on })),
-      toggle("Speak after selecting", "Pinch and hold on something and keep holding while you say what to change, like \"make this red\". Let go to send.", camera.speakAfterSelect !== false, (on) => set({ speakAfterSelect: on })),
+      toggle("Air pointer", "Point to move, pinch to click", camera.pointer, (on) => set({ pointer: on })),
+      toggle("Hand scrolling", "Open palm high or low", camera.handScroll, (on) => set({ handScroll: on })),
+      toggle("Head scrolling", "Tilt your head", camera.headScroll, (on) => set({ headScroll: on })),
+      toggle("Swipe to go back", "Swipe an open palm sideways", camera.swipeNav !== false, (on) => set({ swipeNav: on })),
+      toggle("Speak after selecting", "Hold a pinch, talk, let go to send", camera.speakAfterSelect !== false, (on) => set({ speakAfterSelect: on })),
     );
     const options: Array<[number, string]> = [[0, "Off"], [800, "0.8s"], [1200, "1.2s"], [2000, "2s"]];
     const segments = options.map(([value, label]) => {
@@ -131,21 +130,74 @@ function cameraSection(state: StoredState): Node {
       button.addEventListener("click", () => set({ dwellMs: value }));
       return button;
     });
-    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click, for when pinching is hard."), h("div", "s-seg s-seg4", "", segments), h("div", "s-note", "Thumbs down to cancel. Pause from the camera preview: point at Pause and pinch."));
+    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click"), h("div", "s-seg s-seg4", "", segments), h("div", "s-note", "Thumbs down cancels. Pause from the camera preview."));
   }
   return h("section", "s-sec", "", [h("h3", "", "Camera"), ...rows]);
 }
 
-function statusCard(status: StatusInfo) {
-  const dot = h("span", `s-dot ${status.connected ? "on" : "off"}`);
-  const title = status.connected ? `Connected to ${status.provider ?? "agent"}` : "Offline mode";
-  const sub = status.connected && status.models ? `${status.models.fast} (Fast) · ${status.models.frontier} (Pro)` : status.connected ? "Sign in with ChatGPT or add an API key below." : "Saved adaptations, request suggestions, and widget controls are available. New AI requests need the local server.";
-  return h("div", "s-status", "", [dot, h("div", "", "", [h("b", "", title), h("small", "", sub)])]);
+type Tab = "general" | "memory" | "ai" | "voice" | "camera";
+const TABS: Array<[Tab, string]> = [["general", "General"], ["memory", "Memory"], ["ai", "AI"], ["voice", "Voice"], ["camera", "Camera"]];
+let currentTab: Tab | null = null;
+
+function tabBar(onPick: (tab: Tab) => void): HTMLElement {
+  const bar = h("div", "s-tabs");
+  bar.setAttribute("role", "tablist");
+  bar.setAttribute("aria-label", "Settings sections");
+  const buttons = TABS.map(([id, label]) => {
+    const button = h("button", "", label);
+    button.type = "button";
+    button.id = `s-tab-${id}`;
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(id === currentTab));
+    button.setAttribute("aria-controls", "s-panel");
+    button.tabIndex = id === currentTab ? 0 : -1;
+    button.addEventListener("click", () => onPick(id));
+    return button;
+  });
+  bar.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    event.stopPropagation();
+    const focused = buttons.indexOf(event.target as HTMLButtonElement);
+    const index = focused >= 0 ? focused : TABS.findIndex(([id]) => id === currentTab);
+    const next = TABS[(index + (event.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
+    onPick(next);
+  });
+  bar.append(...buttons);
+  return bar;
+}
+
+const openMore = new Set<string>();
+
+// Settings re-render on every storage change, so open state lives outside the element.
+function more(label: string, children: Node[]): HTMLElement {
+  const details = h("details", "s-more");
+  details.open = openMore.has(label);
+  details.addEventListener("toggle", () => (details.open ? openMore.add(label) : openMore.delete(label)));
+  details.append(h("summary", "", label), ...children);
+  return details;
+}
+
+function statusLine(status: StatusInfo, state: StoredState): HTMLElement {
+  const provider = status.providers?.find((candidate) => candidate.id === status.activeProvider);
+  const [title, sub] = !status.connected
+    ? ["Server offline", "Saved changes still work"]
+    : provider
+      ? [provider.label, status.models ? `${status.models.fast} · ${status.models.frontier}` : "Ready"]
+      : ["No AI set up", "Open the AI tab to connect one"];
+  const power = h("button", "s-switch");
+  power.type = "button";
+  power.setAttribute("role", "switch");
+  power.setAttribute("aria-checked", String(!state.paused));
+  power.setAttribute("aria-label", "Adaptations on all pages");
+  power.title = state.paused ? "Adaptations are off" : "Adaptations are on";
+  power.addEventListener("click", () => void save({ paused: !state.paused }));
+  const dot = h("span", `s-dot ${!status.connected ? "off" : provider ? "on" : "idle"}`);
+  return h("div", "s-status", "", [dot, h("div", "grow", "", [h("b", "", title), h("small", "", sub)]), h("small", "s-power", state.paused ? "Off" : "On"), power]);
 }
 
 export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => void {
   root.classList.add("s");
-  adoptStyles(root.getRootNode() as Document | ShadowRoot, USAGE_CSS);
   let draft = "";
   let editingKey: string | null = null;
   let confirming: string | null = null;
@@ -153,9 +205,12 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let keyDraft = "";
   let urlDraft = "";
   let disposed = false;
+  let refocusTab = false;
 
   const providerSection = (status: StatusInfo, state: StoredState): Node[] => {
-    if (!status.connected) return [statusCard(status)];
+    if (!status.connected) {
+      return [h("section", "s-sec", "", [h("h3", "", "AI provider"), h("div", "s-empty", "", [document.createTextNode("Start the local server to connect an AI: "), h("code", "", "bun run dev")])])];
+    }
     const rows = (status.providers ?? []).map((provider) => {
       const active = provider.id === status.activeProvider;
       const sub = provider.ready
@@ -246,7 +301,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       return h("div", "s-sec", "", [row, form]);
     });
     const notice = status.notice ? [h("div", `s-note${status.notice.level === "error" ? " s-error" : ""}`, status.notice.text)] : [];
-    const hint = status.activeProvider ? [] : [h("div", "s-note", "Sign in with ChatGPT or add a key to start. Keys stay on your computer, in the local server.")];
+    const hint = status.activeProvider ? [] : [h("div", "s-note", "Sign in with ChatGPT or add a key. Keys stay on your computer.")];
     return [h("section", "s-sec", "", [h("h3", "", "AI provider"), ...rows, ...notice, ...hint])];
   };
   let queued = false;
@@ -326,13 +381,6 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           ]);
         })
       : [h("div", "s-empty", "No focus rules yet. Ask to hide clutter during work or study, such as Shorts on weekdays 9 to 5.")];
-
-    const shortcuts = h("button", "s-btn", "", [icon("keyboard", 15), document.createTextNode("Shortcuts")]);
-    shortcuts.type = "button";
-    shortcuts.addEventListener("click", () => ctx.openShortcuts());
-    const debug = h("button", "s-btn", "", [icon("bug", 15), document.createTextNode("Debug panel")]);
-    debug.type = "button";
-    debug.addEventListener("click", () => ctx.openDebug());
 
     const section = (title: string, ...children: Node[]) => h("section", "s-sec", "", [h("h3", "", title), ...children]);
     const set = <K extends keyof StoredState>(key: K) => (value: StoredState[K]) => save({ [key]: value } as Partial<StoredState>);
@@ -431,34 +479,71 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     const verificationStatus = h("div", "s-note", voiceCheck);
     verificationStatus.setAttribute("role", "status");
 
+    currentTab ??= status.connected && status.activeProvider ? "general" : "ai";
+    const number = (value: number) => value.toLocaleString("en-US");
+    const usageRow = h("div", "s-row", "", [
+      h("div", "grow", "", [h("div", "", "Usage on this browser"), h("small", "", `${number(state.usage.calls)} calls · ${number(state.usage.inputTokens)} in · ${number(state.usage.outputTokens)} out tokens`)]),
+    ]);
+    const panels: Record<Tab, () => Node[]> = {
+      general: () => [
+        profiles(state),
+        section(
+          "Automatic",
+          toggle("Act on page load", "Fix new pages before you ask", state.proactive, set("proactive")),
+          toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
+        ),
+        section("Focus rules", ...focusRows),
+        section(`On this page${changes.length ? ` · ${changes.length}` : ""}`, ...changeRows),
+      ],
+      memory: () => [
+        memory.render(state, toggle),
+        section("Data", toggle("Track events", "Log what happens on each page for the debug panel (latest 100)", state.trackEvents, set("trackEvents")), config()),
+      ],
+      ai: () => [
+        ...providerSection(status, state),
+        section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...(status.activeProvider ? [more("Choose models", modelPickers(state, status))] : [])),
+        section("Usage", usageRow),
+      ],
+      voice: () => [
+        voiceSection(state),
+        section(
+          "Reading aloud",
+          toggle("Read replies aloud", "Speaks what the agent changed", state.speakReplies, set("speakReplies")),
+          voiceRow,
+          rateRow,
+          h("div", "s-foot", "", [testVoice]),
+          ...(speechError ? [h("div", "s-note s-error", speechError)] : []),
+        ),
+        more("Speech provider", [voiceProviderRow, ...(voiceProvider.value !== "chrome" || pendingVoice ? [voiceKeyField, verify] : []), verificationStatus]),
+      ],
+      camera: () => [cameraSection(state)],
+    };
+    const pick = (tab: Tab) => {
+      currentTab = tab;
+      refocusTab = true;
+      queue();
+    };
+    const panel = h("div", "s-panel", "", panels[currentTab]());
+    panel.id = "s-panel";
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", `s-tab-${currentTab}`);
+    const link = (label: string, run: () => void) => {
+      const button = h("button", "s-link s-quiet", label);
+      button.type = "button";
+      button.addEventListener("click", run);
+      return button;
+    };
+
     root.replaceChildren(
-      profiles(state),
-      usageCard(state.usage),
-      ...providerSection(status, state),
-      section(
-        "General",
-        toggle("Adaptations", "Master switch. Off reverts everything.", !state.paused, (on) => set("paused")(!on)),
-        toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
-        toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
-        toggle("Track events", "Keep a log of what happens on each page. The debug panel inspector shows the latest 100.", state.trackEvents, set("trackEvents")),
-      ),
-      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, voiceKeyField, verify, verificationStatus),
-      memory.render(state, toggle),
-      section(
-        "Speech",
-        toggle("Read replies aloud", "Speaks chat replies and page-load announcements.", state.speakReplies, set("speakReplies")),
-        voiceRow,
-        rateRow,
-        h("div", "s-foot", "", [testVoice]),
-        h("div", "s-note", speechError),
-      ),
-      voiceSection(state),
-      cameraSection(state),
-      section("Focus", h("div", "s-note", "Time-based rules that hide clutter while you study or work. They turn on and off with the clock."), ...focusRows),
-      config(),
-      section("On this page", ...changeRows),
-      h("div", "s-foot", "", [shortcuts, debug]),
+      statusLine(status, state),
+      tabBar(pick),
+      panel,
+      h("div", "s-links", "", [link("Shortcuts", () => ctx.openShortcuts()), link("Setup guide", () => void chrome.runtime.sendMessage({ kind: "openWelcome" })), link("Debug panel", () => ctx.openDebug())]),
     );
+    if (refocusTab) {
+      refocusTab = false;
+      root.querySelector<HTMLElement>(`#s-tab-${currentTab}`)?.focus();
+    }
     if (field) {
       const next = focusLabel
         ? root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${CSS.escape(focusLabel)}"]`)

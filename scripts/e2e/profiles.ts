@@ -44,18 +44,16 @@ try {
     await waitFor("Study restored after navigation", async () => !await page.locator(".game").isVisible());
   }
   assert.deepEqual(await panel.evaluate(async () => (await chrome.storage.local.get("submittedRequests")).submittedRequests), ["Study request"]);
-  const popup = await browser.context.newPage();
-  await popup.setViewportSize({ width: 480, height: 900 });
-  await popup.goto(`chrome-extension://${browser.extensionId}/popup.html`);
-  await popup.getByLabel("New profile name", { exact: true }).fill("Fresh");
-  await popup.getByRole("button", { name: "New profile", exact: true }).click();
-  await waitFor("empty profile selected", async () => (await popup.getByLabel("Active profile", { exact: true }).locator("option:checked").textContent()) === "Fresh");
+  const activeName = () => panel.evaluate(async () => {
+    const { profiles, activeProfileId } = (await chrome.storage.local.get(["profiles", "activeProfileId"])) as { profiles: Record<string, { name: string }>; activeProfileId: string };
+    return profiles[activeProfileId].name;
+  });
+  await panel.evaluate(() => chrome.runtime.sendMessage({ kind: "profileAction", action: "create", name: "Fresh" }));
+  await waitFor("empty profile selected", async () => (await activeName()) === "Fresh");
   assert.deepEqual(await panel.evaluate(async () => (await chrome.storage.local.get("submittedRequests")).submittedRequests), []);
-  await popup.getByLabel("Current profile name", { exact: true }).fill("Focus");
-  await popup.getByRole("button", { name: "Rename", exact: true }).click();
-  await waitFor("renamed profile", async () => (await popup.getByLabel("Active profile", { exact: true }).locator("option:checked").textContent()) === "Focus");
-  await popup.screenshot({ path: "/tmp/browser-agent-profiles.png" });
-  await popup.getByLabel("Active profile", { exact: true }).selectOption("default");
+  await panel.evaluate(() => chrome.runtime.sendMessage({ kind: "profileAction", action: "rename", name: "Focus" }));
+  await waitFor("renamed profile", async () => (await activeName()) === "Focus");
+  await panel.evaluate(() => chrome.runtime.sendMessage({ kind: "profileAction", action: "switch", id: "default" }));
   for (const page of pages) await waitFor("UI profile switch", async () => !await page.locator(".study").isVisible());
 
   const page = pages[0];
