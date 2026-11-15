@@ -46,6 +46,7 @@ export type ContentRequest =
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
   | { kind: "openSettings" }
+  | { kind: "offerAdapt" }
   | { kind: "resetPage" }
   | { kind: "startVoice" }
   | { kind: "targetContextElement" }

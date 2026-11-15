@@ -252,6 +252,13 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
     await note("Automatic page adaptation skipped: this profile already checked this site in the last week.");
     return;
   }
+  // Asking first costs nothing until the user accepts; the offer counts as this week's check so it does not repeat on every visit.
+  if (state.askBeforeAdapting && !profileChanged) {
+    await markChecked(checked);
+    await sendToTab(tabId, { kind: "offerAdapt" }).catch(() => undefined);
+    await note("Offered to adapt this page instead of adapting it automatically.");
+    return;
+  }
   proactivePending.set(tabId, checked);
   if (await agent.startRun(tab, "page_load", "")) {
     await note("Automatic page adaptation started: enabled, profile present, no saved site adaptation, first check for this site and profile in this tab.");

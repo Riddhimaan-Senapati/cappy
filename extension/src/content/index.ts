@@ -219,6 +219,14 @@ const isTyping = () => {
   return focused instanceof HTMLElement && (focused.isContentEditable || focused.matches("input, textarea, select"));
 };
 
+async function offerAdapt() {
+  if (tornDown || isTyping() || overlay?.spotlight.isOpen()) return;
+  const { floatingButton } = await load();
+  const offer: Suggestion = { text: "Adapt this page to my needs", reason: "Uses the needs you saved. Nothing changes until you click.", scope: "site", memory: null };
+  if (floatingButton) ensureOverlay().nudge(offer);
+  else ensureOverlay().spotlight.setNudge(offer);
+}
+
 // Every friction event is logged; the gate in recordFriction decides when one is worth a model call.
 async function onFriction(kind: FrictionKind) {
   if (tornDown) return;
@@ -412,6 +420,8 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return;
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
+    case "offerAdapt":
+      return void offerAdapt();
     case "openSettings":
       return ensureOverlay().spotlight.openSettings();
     case "resetPage":

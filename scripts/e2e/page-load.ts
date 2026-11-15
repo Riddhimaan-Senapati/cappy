@@ -6,7 +6,7 @@ const runs = (output: string) => output.split("[run] page_load").length - 1;
 // The page-load run checks a site once per profile, then later tabs and visits reuse that check with no model call.
 await runE2E("page-load", async ({ server, browser }) => {
   const worker = browser.context.serviceWorkers()[0] ?? (await browser.context.waitForEvent("serviceworker"));
-  await worker.evaluate(() => chrome.storage.local.set({ proactive: true, paused: false, profile: ["Enjoys reading about science"] }));
+  await worker.evaluate(() => chrome.storage.local.set({ proactive: true, askBeforeAdapting: false, paused: false, profile: ["Enjoys reading about science"] }));
 
   const first = await openDemo(browser, "/demo/campus.html");
   await waitFor("one page-load run on the first visit", async () => runs(server.output()) === 1);

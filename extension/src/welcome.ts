@@ -271,25 +271,30 @@ function needsStep(state: StoredState): Node[] {
 
 // Asked here because the page-load run acts on these needs. Automatic costs one AI request and a short blur the first time each site opens.
 function autoAdaptQuestion(state: StoredState): Node {
-  const choices: Array<{ value: boolean; label: string }> = [
-    { value: true, label: "Adapt it for me" },
-    { value: false, label: "Wait until I ask" },
+  const mode = !state.proactive ? "off" : state.askBeforeAdapting ? "ask" : "auto";
+  const choices: Array<{ value: "ask" | "auto" | "off"; label: string; patch: Partial<StoredState> }> = [
+    { value: "ask", label: "Ask me first", patch: { proactive: true, askBeforeAdapting: true } },
+    { value: "auto", label: "Adapt it for me", patch: { proactive: true, askBeforeAdapting: false } },
+    { value: "off", label: "Wait until I ask", patch: { proactive: false } },
   ];
   const seg = h(
     "div",
-    "s-seg w-seg2",
+    "s-seg",
     "",
     choices.map((choice) => {
-      const option = button("", choice.label, () => void save({ proactive: choice.value }).then(render));
-      option.setAttribute("aria-pressed", String(state.proactive === choice.value));
+      const option = button("", choice.label, () => void save(choice.patch).then(render));
+      option.setAttribute("aria-pressed", String(mode === choice.value));
       return option;
     }),
   );
   seg.setAttribute("role", "group");
   seg.setAttribute("aria-label", "When you open a new website");
-  const note = state.proactive
-    ? "The first time you open a site, the page blurs for a moment while the agent applies what clearly fits your needs. Later visits reuse the result with no AI request."
-    : "Nothing changes until you open the bar and ask. Changes you save still come back on their own.";
+  const note =
+    mode === "ask"
+      ? "The first time you open a site, a small suggestion offers to adapt it. Nothing changes until you click it."
+      : mode === "auto"
+        ? "The first time you open a site, the page blurs for a moment while the agent applies what clearly fits your needs. Later visits reuse the result with no AI request."
+        : "Nothing changes until you open the bar and ask. Changes you save still come back on their own.";
   return h("div", "w-sub", "", [h("label", "", "When you open a new website"), seg, h("small", "w-note", note)]);
 }
 

@@ -501,6 +501,28 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       button.addEventListener("click", run);
       return button;
     };
+    const pageLoadPicker = (): Node => {
+      const mode = !state.proactive ? "off" : state.askBeforeAdapting ? "ask" : "auto";
+      const choices: Array<[string, string, Partial<StoredState>]> = [
+        ["ask", "Ask first", { proactive: true, askBeforeAdapting: true }],
+        ["auto", "Adapt it", { proactive: true, askBeforeAdapting: false }],
+        ["off", "Do nothing", { proactive: false }],
+      ];
+      const seg = h(
+        "div",
+        "s-seg",
+        "",
+        choices.map(([value, label, patch]) => {
+          const button = h("button", "", label);
+          button.type = "button";
+          button.setAttribute("aria-pressed", String(mode === value));
+          button.addEventListener("click", () => void save(patch));
+          return button;
+        }),
+      );
+      const note = mode === "ask" ? "Offers to adapt each new site; nothing changes until you click" : mode === "auto" ? "Adapts each new site once; later visits reuse the result" : "Only changes pages when you ask";
+      return h("div", "s-sec", "", [seg, h("div", "s-note", note)]);
+    };
     const themePicker = (): Node => {
       const choices: Array<[StoredState["uiTheme"], string]> = [["dark", "Dark"], ["light", "Light"], ["system", "Auto"]];
       return h(
@@ -556,8 +578,8 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       general: () => [
         profiles(state),
         section(
-          "Automatic",
-          toggle("Act on page load", "Adapts each new site once, before you ask. Later visits reuse the result", state.proactive, set("proactive")),
+          "On a new website",
+          pageLoadPicker(),
           toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
         ),
         section("Appearance", themePicker()),

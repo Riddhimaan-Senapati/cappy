@@ -83,6 +83,7 @@ export interface StoredState {
   camera: CameraSettings;
   paused: boolean;
   proactive: boolean;
+  askBeforeAdapting: boolean;
   floatingButton: boolean;
   trackEvents: boolean;
   focusMode: boolean;
@@ -129,6 +130,7 @@ export const DEFAULTS: StoredState = {
   camera: { enabled: false, handScroll: true, headScroll: false, pointer: true, swipeNav: true, dwellMs: 0 },
   paused: false,
   proactive: true,
+  askBeforeAdapting: true,
   floatingButton: true,
   trackEvents: true,
   focusMode: false,

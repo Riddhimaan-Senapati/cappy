@@ -16,6 +16,8 @@ await runE2E("preferences", async ({ browser }) => {
   });
 
   const [worker] = browser.context.serviceWorkers();
+  // This test covers automatic adaptation; the default now asks first.
+  await worker.evaluate(() => chrome.storage.local.set({ askBeforeAdapting: false }));
   const saved = (origin: string) => worker.evaluate(async (site) => {
     const { profile = [], siteChanges = {}, globalChanges = [] } = await chrome.storage.local.get(["profile", "siteChanges", "globalChanges"]) as {
       profile?: string[];
