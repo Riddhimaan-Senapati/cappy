@@ -108,6 +108,24 @@ describe("one-off scope is the same for every change type", () => {
     assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere", "chat", "/demo/campus.html").scope, "everywhere");
     assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode on this site", "chat", "/demo/campus.html").scope, "site");
     assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere on youtube.com", "chat", "/demo/campus.html").scope, "site");
+    assert.equal(prepareSavedChange({ ...text, scope: "everywhere" }, "make the text bigger across all websites", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "site" }, "dark mode everywhere on the web", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere on this page", "chat", "/demo/campus.html").scope, "page");
+    const weekdays = { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "17:00" };
+    const portable = prepareSavedChange(
+      { ...text, scope: "everywhere", schedule: weekdays, block: { name: "contentFilter", keywords: ["shorts"], itemSelector: null, action: "hide" } },
+      "hide Shorts on weekdays 9 to 5",
+      "chat",
+      "/demo/campus.html",
+    );
+    assert.equal(portable.scope, "everywhere");
+    const hosted = prepareSavedChange(
+      { ...text, scope: "everywhere", schedule: weekdays, block: { name: "contentFilter", keywords: ["shorts"], itemSelector: "ytd-rich-item-renderer", action: "hide" } },
+      "hide Shorts on weekdays 9 to 5",
+      "chat",
+      "/demo/campus.html",
+    );
+    assert.equal(hosted.scope, "site");
   });
 
   it("restores dark mode after CSS so an already-dark page is not inverted", () => {

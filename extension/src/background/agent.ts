@@ -8,7 +8,7 @@ import { emptyActivity, summarizeActivity } from "../friction-log.js";
 import { findRequestSessions, load, recipeKey, save, saveRecipe, saveSiteNotes } from "../storage.js";
 import { speakIfEnabled } from "./tts.js";
 import { detectInjection } from "../../../shared/safety.js";
-import { scheduleStatus } from "../../../shared/validate.js";
+import { changesWithDarkModeLast, scheduleStatus } from "../../../shared/validate.js";
 import { settle } from "../coalesce.js";
 import { paintedStatusKey } from "../status-key.js";
 
@@ -68,6 +68,7 @@ export class AgentClient {
   private socket: WebSocket | null = null;
   private connectedUrl: string | null = null;
   private opening: Promise<void> | null = null;
+  private connectGeneration = 0;
   private nextConnectAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private retrying = false;
@@ -196,6 +197,11 @@ export class AgentClient {
     if (this.connectedUrl === url && this.socket?.readyState === WebSocket.OPEN) return;
     this.nextConnectAt = 0;
     this.clearReconnect();
+    clearInterval(this.keepAlive);
+    this.keepAlive = undefined;
+    // The in-flight dial is still the old address. Drop it so ensureConnected opens a new one.
+    this.connectGeneration++;
+    this.opening = null;
     const previous = this.socket;
     this.socket = null;
     this.connectedUrl = null;
@@ -209,9 +215,12 @@ export class AgentClient {
       this.scheduleReconnect();
       return Promise.reject(SERVER_OFFLINE);
     }
-    this.opening ??= this.open().finally(() => {
-      this.opening = null;
-    });
+    if (!this.opening) {
+      const generation = this.connectGeneration;
+      this.opening = this.open(generation).finally(() => {
+        if (this.connectGeneration === generation) this.opening = null;
+      });
+    }
     return this.opening;
   }
 
@@ -238,12 +247,18 @@ export class AgentClient {
     this.reconnectTimer = undefined;
   }
 
-  private async open() {
+  private async open(generation: number) {
     const { serverUrl } = await load();
+    if (generation !== this.connectGeneration) throw SERVER_OFFLINE;
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(serverUrl);
       let opened = false;
+      const stale = () => generation !== this.connectGeneration;
       const rejectOffline = () => {
+        if (stale()) {
+          reject(SERVER_OFFLINE);
+          return;
+        }
         this.nextConnectAt = Date.now() + 4000;
         // One retry per failure; a failed retry waits for the next status probe instead of looping forever.
         if (!this.retrying) this.scheduleReconnect();
@@ -254,8 +269,14 @@ export class AgentClient {
         rejectOffline();
       }, 4000);
       socket.onopen = () => {
-        opened = true;
         clearTimeout(timer);
+        if (stale()) {
+          opened = true;
+          socket.close();
+          reject(SERVER_OFFLINE);
+          return;
+        }
+        opened = true;
         this.nextConnectAt = 0;
         this.clearReconnect();
         clearInterval(this.keepAlive);
@@ -442,7 +463,7 @@ export class AgentClient {
         return "blocked";
       }
       this.step(run, "Using your saved version of this request", "info");
-      for (const change of changes) {
+      for (const change of changesWithDarkModeLast(changes)) {
         if (!this.runs.has(run.runId)) return "stopped";
         const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
         if (!outcome.ok) return false;

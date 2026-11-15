@@ -303,11 +303,12 @@ async function restore() {
   }
   let restored = 0;
   for (const change of changesWithDarkModeLast(await savedChangesFor(origin, location.pathname))) {
-    if ((await applyChange(change, false, { pageChecked: true })).ok) {
-      // Counts what this page or site already has; a global change alone still lets the page-load run adapt here.
+    const outcome = await applyChange(change, false, { pageChecked: true });
+    // A no-op (the page was already dark) did not restore anything, so it must not skip the page-load run.
+    if (outcome.ok && !outcome.noop) {
       if (change.scope !== "everywhere") restored++;
       recordChange(change.id, "Saved change restored locally (no LLM call)");
-    } else recordActivity(`Saved change ${change.id} could not be restored.`);
+    } else if (!outcome.ok) recordActivity(`Saved change ${change.id} could not be restored.`);
   }
   await syncLearnedText();
   return restored;

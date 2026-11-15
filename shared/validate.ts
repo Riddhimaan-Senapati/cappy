@@ -47,16 +47,25 @@ export function scanCss(css: string): string | null {
   return null;
 }
 
-const SITE_WIDE = /\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:all of )?(?:the |this )?[\w.-]+|everywhere on [\w.-]+|all over [\w.-]+|on all of [\w.-]+)\b/i;
+// A named place is one site. "all", "the web", and "this page" are not site names.
+const NAMED_SITE = String.raw`(?!all\b|every\b|the\b|this\b|websites?\b|sites?\b|web\b|pages?\b|page\b|internet\b)[\w.-]+`;
+const THIS_SITE = String.raw`(?:this|the) (?:site|website)`;
+const SITE_WIDE = new RegExp(
+  String.raw`\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:all of )?${NAMED_SITE}|across ${THIS_SITE}|everywhere on ${NAMED_SITE}|everywhere on ${THIS_SITE}|all over ${NAMED_SITE}|on all of ${NAMED_SITE})\b`,
+  "i",
+);
 const ALL_SITES = /\b(?:all (?:sites|websites)|every (?:site|website)|everywhere)\b/i;
+const THIS_PAGE = /\beverywhere on this page\b|\bon this page\b|\bthis page only\b/i;
 const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
 
 export function requestedSiteWide(message: string): boolean {
   return SITE_WIDE.test(message);
 }
 
-// "everywhere" alone means every website. "everywhere on youtube" is one site, and the site-wide pattern wins.
+// "everywhere" and "across all websites" mean every website. "everywhere on youtube" is one site.
+// "everywhere on this page" is a one-off, so it is neither.
 export function requestedEverywhere(message: string): boolean {
+  if (THIS_PAGE.test(message)) return false;
   return ALL_SITES.test(message) && !SITE_WIDE.test(message);
 }
 
@@ -88,10 +97,13 @@ export function prepareSavedChange<T extends { scope: string; pagePath?: string 
 ): T {
   let scope = change.scope;
   if (trigger === "chat" && (scope === "site" || scope === "everywhere")) {
-    const siteWide = requestedSiteWide(message)
-      || change.schedule != null
-      || (change.block?.name === "contentFilter" && Boolean(change.block.itemSelector));
-    const everywhere = requestedEverywhere(message) || (scope === "everywhere" && PREFERENCE.test(message) && !siteWide);
+    const namedSite = requestedSiteWide(message);
+    const siteSpecificFilter = change.block?.name === "contentFilter" && Boolean(change.block.itemSelector);
+    // A schedule keeps a portable all-sites filter (no host selector) on every site. A selector is this site only.
+    const portableEverywhere = scope === "everywhere" && change.schedule != null && !namedSite && !siteSpecificFilter;
+    const preferenceEverywhere = scope === "everywhere" && PREFERENCE.test(message) && !namedSite;
+    const everywhere = requestedEverywhere(message) || preferenceEverywhere || portableEverywhere;
+    const siteWide = !everywhere && (namedSite || change.schedule != null || siteSpecificFilter);
     scope = everywhere ? "everywhere" : siteWide ? "site" : "page";
   }
   if (scope === "page") return { ...change, scope, pagePath: normalizePagePath(pathname || change.pagePath || "/") };

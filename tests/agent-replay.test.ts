@@ -212,6 +212,64 @@ describe("socket lifetime", () => {
     assert.ok(socketB.sent.some((body) => body.includes("again please")));
   });
 
+  it("applies a saved dark mode after the other recipe changes", async () => {
+    const dark = { ...savedChange, id: "dark-mode", css: null, block: { name: "darkMode" as const, allowSiteControls: true }, summary: "Dark mode" };
+    const dim = { ...savedChange, id: "dim", summary: "Dim the page" };
+    bridge.data = structuredClone(DEFAULTS);
+    bridge.data.recipes = { [recipeKey(ORIGIN, "dark mode")]: { message: "dark mode", changes: [dark, dim], at: 1 } };
+    const order: string[] = [];
+    bridge.sendMessage = async (_tabId, request) => {
+      if (request.kind === "tool" && request.name === "read_page") return { ok: true, result: outline };
+      if (request.kind === "tool" && request.name === "apply_change") {
+        order.push((request.input as { change: { id: string } }).change.id);
+        return { ok: true, result: { ok: true, matched: {}, before: outline.stats, after: outline.stats } };
+      }
+      if (request.kind === "list") return { ok: true, result: [] };
+      return { ok: true, result: null };
+    };
+    const agent = new AgentClient({ event: () => undefined, tool: () => undefined, status: () => undefined });
+    await agent.startRun(tab, "chat", "dark mode");
+    assert.deepEqual(order, ["dim", "dark-mode"]);
+  });
+
+  it("dials the new server address when it changes during a connect and drops the old ping", async () => {
+    const agent = new AgentClient({ event: () => undefined, tool: () => undefined, status: () => undefined });
+    const opening = agent.ensureConnected();
+    const socketA = await nextSocket(0);
+    socketA.succeed();
+    await opening;
+    assert.equal(intervals.size, 1);
+    const next = "ws://127.0.0.1:9999/agent";
+    bridge.data.serverUrl = next;
+    agent.useServer(next);
+    assert.equal(intervals.size, 0);
+    const socketB = await nextSocket(1);
+    assert.equal(socketB.url, next);
+    socketA.succeed();
+    socketB.succeed();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(socketA.readyState, FakeSocket.CLOSED);
+    assert.equal(intervals.size, 1);
+  });
+
+  it("ignores a socket that opens after the server address changed", async () => {
+    const agent = new AgentClient({ event: () => undefined, tool: () => undefined, status: () => undefined });
+    const started = FakeSocket.all.length;
+    const late = agent.ensureConnected();
+    const socketC = await nextSocket(started);
+    const next = "ws://127.0.0.1:10000/agent";
+    bridge.data.serverUrl = next;
+    agent.useServer(next);
+    const socketD = await nextSocket(started + 1);
+    assert.equal(socketD.url, next);
+    socketC.succeed();
+    socketD.succeed();
+    await late.catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(socketC.readyState, FakeSocket.CLOSED);
+    assert.equal(socketD.readyState, FakeSocket.OPEN);
+  });
+
   it("stops the previous ping when a replacement socket opens", async () => {
     const agent = new AgentClient({ event: () => undefined, tool: () => undefined, status: () => undefined });
     const opening = agent.ensureConnected();

@@ -11,6 +11,8 @@ export interface LiveBlock {
   undo: Undo;
   reapply?: (roots: Element[]) => void;
   note?: Promise<string>;
+  // True when the block looked and left the page as it was, such as dark mode on an already-dark page.
+  noop?: Promise<boolean>;
   matched?: () => number;
 }
 
@@ -109,6 +111,42 @@ export function rescaleFonts(elements: readonly HTMLElement[]) {
   for (const scaler of fontScalers) scaler.rescale(elements);
 }
 
+const STATE_PSEUDO = /:(?:hover|focus-visible|focus-within|focus|active|visited)\b/;
+const TEXT_PSEUDO = /::?(?:before|after|placeholder|selection|marker|first-line|first-letter)\b/;
+
+// Hover and focus rules must not release text scale on every matching element while the pointer is elsewhere.
+export function restingFontSizeSelector(selector: string): string | null {
+  const parts = selector.split(",").map((part) => part.trim()).filter((part) => part && !STATE_PSEUDO.test(part) && !TEXT_PSEUDO.test(part));
+  return parts.length ? parts.join(", ") : null;
+}
+
+const fontSizeSelectors: string[] = [];
+
+export function watchFontSizeSelector(selector: string): () => void {
+  fontSizeSelectors.push(selector);
+  return () => {
+    const index = fontSizeSelectors.lastIndexOf(selector);
+    if (index >= 0) fontSizeSelectors.splice(index, 1);
+  };
+}
+
+export function releaseRuledFonts(roots: ParentNode[]) {
+  for (const selector of fontSizeSelectors) {
+    const found: HTMLElement[] = [];
+    for (const root of roots) {
+      try {
+        if (root instanceof HTMLElement && root.matches(selector)) found.push(root);
+        for (const element of root.querySelectorAll(selector)) {
+          if (element instanceof HTMLElement) found.push(element);
+        }
+      } catch {
+        // One bad selector should not stop the others.
+      }
+    }
+    releaseScaledFont(found);
+  }
+}
+
 function textScale(scale: number): LiveBlock {
   const scaled = new Map<HTMLElement, ScaledRecord>();
   const handedOff = new WeakSet<HTMLElement>();
@@ -156,8 +194,13 @@ function textScale(scale: number): LiveBlock {
   };
   fontScalers.add(scaler);
   scaleElements(textElements());
+  // A font-size rule that is already on the page keeps those elements, including ones that load later.
+  releaseRuledFonts([document]);
   return {
-    reapply: (roots) => scaleElements(textElements(1500, roots)),
+    reapply: (roots) => {
+      scaleElements(textElements(1500, roots));
+      releaseRuledFonts(roots);
+    },
     undo: () => {
       fontScalers.delete(scaler);
       for (const [element, record] of scaled) restoreInline(element, record);
@@ -205,7 +248,7 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return stopMotion();
     case "darkMode": {
       const dark = applyDarkMode();
-      return { undo: dark.undo, note: dark.note };
+      return { undo: dark.undo, note: dark.note, noop: dark.noop };
     }
     case "contentFilter":
       return contentFilter(block);
