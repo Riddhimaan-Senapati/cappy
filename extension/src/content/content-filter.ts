@@ -114,7 +114,8 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
 
   // Groups seen once stay in the set: a group whose items are all hidden no longer looks like a group, and would otherwise be un-hidden.
   const selectorsToCheck = (): string[] => {
-    if (filter.itemSelector) return [filter.itemSelector];
+    // A selector saved on one page of a site (a home feed card) may not exist on another (search results); then fall back to the page's own groups.
+    if (filter.itemSelector && queryItems(doc, filter.itemSelector).length > 0) return [filter.itemSelector];
     const now = Date.now();
     if (now - groupsAt >= GROUP_REFRESH_MS) {
       groupsAt = now;
@@ -126,7 +127,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const pass = (): void => {
     if (undone) return;
     const desired = new Map<HTMLElement, Action>();
-    for (const el of targets(doc, selectorsToCheck(), matches)) desired.set(el, filter.action);
+    for (const el of targets(doc, selectorsToCheck(), matches, (el) => pattern.test(el.textContent?.toLowerCase() ?? ""))) desired.set(el, filter.action);
 
     for (const el of Array.from(held.keys())) {
       if (desired.has(el)) continue;
@@ -171,40 +172,60 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   return { undo, matched: () => held.size };
 }
 
+const HEADING = "h1, h2, h3, h4, [role=heading], #title";
+const PAGE_REGION = "main, [role=main], #content, #primary";
+
 // A keyword hit on an item also matches every container around it, since text is inherited, so a
-// selector like "div" would hide the whole page. Containers holding unmatched members of the same
-// selector are skipped, and only the outermost hit is hidden, so a card goes as one unit.
-function targets(doc: Document, selectors: readonly string[], matches: (el: HTMLElement) => boolean): HTMLElement[] {
+// selector like "div" would hide the whole page. A container holding any unmatched item (from any
+// selector) is skipped, and only the outermost hit is hidden, so a card goes as one unit.
+// A shelf whose own heading matches ("Podcasts", "Shorts") is about that topic and goes whole, heading included.
+// Nothing that holds the page's main region is ever hidden.
+function targets(doc: Document, selectors: readonly string[], matches: (el: HTMLElement) => boolean, headingMatches: (el: HTMLElement) => boolean): HTMLElement[] {
+  const items = new Set<HTMLElement>();
+  for (const selector of selectors) for (const el of queryItems(doc, selector)) items.add(el);
+
   const hits: HTMLElement[] = [];
-  const missesAbove = new Map<HTMLElement, Set<string>>();
-  const hitsAbove = new Map<HTMLElement, Set<string>>();
-  for (const selector of selectors) {
-    for (const el of queryItems(doc, selector)) {
-      const matched = matches(el);
-      if (matched) hits.push(el);
-      const table = matched ? hitsAbove : missesAbove;
-      for (let a = el.parentElement; a; a = a.parentElement) {
-        let set = table.get(a);
-        if (!set) {
-          set = new Set();
-          table.set(a, set);
-        }
-        set.add(selector);
-      }
+  const titled = new Set<HTMLElement>();
+  const holdsMiss = new Set<HTMLElement>();
+  for (const el of items) {
+    const heading = ownHeading(el, items);
+    const named = heading !== null && headingMatches(heading);
+    if (named) titled.add(el);
+    if (named || matches(el)) {
+      hits.push(el);
+      continue;
     }
+    for (let a = el.parentElement; a; a = a.parentElement) holdsMiss.add(a);
   }
 
+  const region = doc.querySelector(PAGE_REGION);
   const candidates = new Set<HTMLElement>();
   for (const el of hits) {
-    const misses = missesAbove.get(el);
-    const contained = hitsAbove.get(el);
-    const mixed = misses !== undefined && contained !== undefined && [...misses].some((s) => contained.has(s));
-    if (!mixed) candidates.add(el);
+    if (region && el.contains(region)) continue;
+    // A matching heading names a shelf, not a whole result list: one holding most of the page's items stays.
+    if (holdsMiss.has(el) && !(titled.has(el) && share(el, items) <= 0.5)) continue;
+    candidates.add(el);
   }
   return [...candidates].filter((el) => {
     for (let a = el.parentElement; a; a = a.parentElement) if (candidates.has(a)) return false;
     return true;
   });
+}
+
+function share(el: HTMLElement, items: ReadonlySet<HTMLElement>): number {
+  let inside = 0;
+  for (const item of items) if (item !== el && el.contains(item)) inside++;
+  return items.size ? inside / items.size : 0;
+}
+
+// The first heading that belongs to this element rather than to an item nested inside it.
+function ownHeading(el: HTMLElement, items: ReadonlySet<HTMLElement>): HTMLElement | null {
+  for (const heading of Array.from(el.querySelectorAll<HTMLElement>(HEADING))) {
+    let owner: HTMLElement | null = heading.parentElement;
+    while (owner && owner !== el && !items.has(owner)) owner = owner.parentElement;
+    if (owner === el) return heading;
+  }
+  return null;
 }
 
 function queryItems(doc: Document, selector: string): HTMLElement[] {

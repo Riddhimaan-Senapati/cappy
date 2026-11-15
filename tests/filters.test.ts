@@ -160,3 +160,54 @@ describe("content filter judged by meaning", () => {
     setFilterClassifier(null);
   });
 });
+
+describe("YouTube search results", () => {
+  const video = (title: string, i: number) =>
+    `<ytd-video-renderer><a href="/watch?v=v${i}"><h3 id="video-title">${title}</h3></a><div id="channel">Channel ${i} · ${i}M views · 2 weeks ago</div></ytd-video-renderer>`;
+  // Search-page Shorts show only a view count; the link is what says they are Shorts.
+  const short = (i: number) =>
+    `<ytm-shorts-lockup-view-model-v2><a href="/shorts/s${i}"><img alt=""></a><div class="subhead">${i}m views</div></ytm-shorts-lockup-view-model-v2>`;
+  const page = (resultsHeading = "") => {
+    document.body.innerHTML = `<ytd-app><div id="primary"><ytd-item-section-renderer>${resultsHeading}<div id="contents">
+      <ytd-shelf-renderer><h2><span id="title">Podcasts</span></h2><a href="/feed/podcasts">View all</a><div id="items">${["Trump episode 12 explained", "Mark Cuban the brutal truth", "Diary of a CEO interview", "Huberman sleep science"].map(video).join("")}</div></ytd-shelf-renderer>
+      <grid-shelf-view-model><yt-shelf-header-layout><h2><span>Shorts</span></h2></yt-shelf-header-layout><div class="row">${[1, 2, 3, 4, 5].map(short).join("")}</div></grid-shelf-view-model>
+      ${["Cooking pasta at home tonight", "Learn guitar in ten minutes", "Funny cats compilation 2026"].map((title, i) => video(title, i + 10)).join("")}
+    </div></ytd-item-section-renderer></div></ytd-app>`;
+  };
+  const hidden = () => [...document.querySelectorAll<HTMLElement>("*")].filter((el) => el.style.display === "none").map((el) => el.localName);
+  const visibleVideos = () => [...document.querySelectorAll<HTMLElement>("ytd-video-renderer")].filter((el) => !el.closest<HTMLElement>("[style*='none']")).length;
+
+  it("hides the Shorts shelf and nothing else", async () => {
+    page();
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await settle();
+    assert.deepEqual(hidden(), ["grid-shelf-view-model"]);
+    assert.equal(visibleVideos(), 7);
+    handle.undo();
+  });
+
+  it("hides a shelf by its heading, heading included, even when its items never say the word", async () => {
+    page();
+    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document);
+    await settle();
+    assert.deepEqual(hidden(), ["ytd-shelf-renderer"]);
+    assert.equal(visibleVideos(), 3);
+    handle.undo();
+  });
+
+  it("keeps a result list whose heading matches, since it holds most of the page", async () => {
+    page(`<h2>Results for podcasts</h2>`);
+    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document);
+    await settle();
+    assert.equal(hidden().includes("ytd-item-section-renderer"), false);
+    handle.undo();
+  });
+
+  it("falls back to the page's own groups when a saved item selector matches nothing here", async () => {
+    page();
+    const handle = applyContentFilter(filter({ keywords: ["shorts"], itemSelector: "ytd-rich-item-renderer" }), document);
+    await settle();
+    assert.deepEqual(hidden(), ["grid-shelf-view-model"]);
+    handle.undo();
+  });
+});
