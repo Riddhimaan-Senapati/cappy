@@ -167,10 +167,8 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return textScale(block.scale);
     case "stopMotion":
       return stopMotion();
-    case "darkMode": {
-      const dark = applyDarkMode();
-      return { undo: dark.undo, note: dark.note, reapply: dark.reapply };
-    }
+    case "darkMode":
+      return applyDarkMode();
     case "contentFilter":
       return contentFilter(block);
     case "formFixer":

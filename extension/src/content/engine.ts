@@ -15,6 +15,7 @@ interface Live {
   undo: Undo[];
   reapply: Reapply[];
   note?: Promise<string>;
+  adoptReapply?: () => void;
 }
 
 // live is null while the change's schedule is off; the change stays registered so it can switch on without a reload.
@@ -168,6 +169,9 @@ function materialize(change: Change, matched: Record<string, number>): Live {
       const block = applyBlock(change.block);
       live.undo.push(block.undo);
       if (block.reapply) live.reapply.push(block.reapply);
+      live.adoptReapply = () => {
+        if (block.reapply && !live.reapply.includes(block.reapply)) live.reapply.push(block.reapply);
+      };
       if (block.note) live.note = block.note;
       if (block.matched && change.block.name === "contentFilter") {
         matched[`contentFilter ${change.block.itemSelector ?? "all item groups"}`] = block.matched();
@@ -432,8 +436,11 @@ async function installChange(entry: Applied, matched: Record<string, number>, an
     if (entry.live?.reapply.length) startObserving();
     manageScheduleTimer();
   }, animate);
+  const note = await entry.live?.note;
+  entry.live?.adoptReapply?.();
+  if (entry.live?.reapply.length) startObserving();
   publishFocus();
-  return entry.live?.note;
+  return note;
 }
 
 // View transitions and pulses can introduce temporary animations during verification.
