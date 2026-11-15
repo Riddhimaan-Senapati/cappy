@@ -582,6 +582,23 @@ export class Spotlight {
     return this.commands(this.deps.listChanges()).some((item) => item.title.toLowerCase().startsWith(query) || core(item.title).startsWith(query));
   }
 
+// Focus mode keeps every focus rule (any scheduled change, on any site) on until it is turned off.
+  private focusModeItem(): Item {
+    const state = this.cache;
+    const on = state?.focusMode === true;
+    const rules = state ? [...state.globalChanges, ...Object.values(state.siteChanges).flat()].filter((change) => change.schedule).length : 0;
+    return {
+      id: "focus-mode",
+      icon: "target",
+      title: on ? "Turn off Focus mode" : "Turn on Focus mode",
+      hint: on ? "rules go back to their times" : rules ? `all ${rules} focus rule${rules === 1 ? "" : "s"} on now` : "no focus rules yet",
+      kind: "command",
+      section: "Commands",
+      keywords: "focus mode rules study work concentrate distraction schedule timed all",
+      run: async () => (await save({ focusMode: !on }), this.hide()),
+    };
+  }
+
   private commands(changes: ActiveChange[]): Item[] {
     const state = this.cache;
     const routing: Routing = state?.routing ?? "auto";
@@ -590,6 +607,7 @@ export class Spotlight {
       { id: "pick", icon: "target", title: "Select an element on the page", hint: "then say what to change", kind: "command", section: "Commands", keywords: "pick choose this element point target inspect", run: () => this.startPicking() },
       { id: "commands", icon: "bookmark", title: "Saved commands", hint: "→", kind: "command", section: "Commands", keywords: "shortcuts presets saved favorites", run: () => this.setView("commands") },
       { id: "always", icon: "bookmark", title: "Do something on every site", hint: "/always …", kind: "command", section: "Commands", keywords: "global everywhere always all sites every site rule default new command", run: () => this.prefill("/always ") },
+      this.focusModeItem(),
       { id: "profiles", icon: "circle", title: "Profiles", hint: state?.profiles[state.activeProfileId]?.name ?? "Default", kind: "command", section: "Commands", keywords: "profile switch select new create", run: () => this.showProfileCommands() },
       {
         id: "camera",
