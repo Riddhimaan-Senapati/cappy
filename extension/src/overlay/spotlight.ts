@@ -102,23 +102,10 @@ const ROUTING_ORDER: Routing[] = ["auto", "fast", "frontier"];
 const BACK_VIEWS: View[] = ["settings", "history", "commands", "session"];
 const LISTBOX_ID = "ba-listbox";
 
-// Open product decision. "field" sends an exact command name to the model.
-// "command" runs a command whose title or id is that text, and "undo" runs Undo all.
-const EXACT_COMMAND_ON_ENTER: { mode: "field" | "command" } = { mode: "field" };
-
 function optionDomId(itemId: string, index: number): string {
   let hash = 0;
   for (let i = 0; i < itemId.length; i++) hash = (Math.imul(hash, 33) + itemId.charCodeAt(i)) >>> 0;
   return `ba-opt-${index}-${hash.toString(36)}`;
-}
-
-function exactCommand(items: Item[], text: string): Item | undefined {
-  const query = text.toLowerCase();
-  return items.find((item) => {
-    if (item.kind !== "command") return false;
-    if (item.title.toLowerCase() === query || item.id === query) return true;
-    return query === "undo" && item.id === "undo-all";
-  });
 }
 
 export class Spotlight {
@@ -1803,14 +1790,6 @@ export class Spotlight {
         const command = this.items[0];
         if (command) void this.runItem(command);
         return true;
-      }
-      if (EXACT_COMMAND_ON_ENTER.mode === "command") {
-        this.renderList();
-        const command = exactCommand(this.items, text);
-        if (command) {
-          void this.runItem(command);
-          return true;
-        }
       }
       if (text) this.ask(text, event.shiftKey);
       return this.items.length > 0;

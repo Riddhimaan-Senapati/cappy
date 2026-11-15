@@ -1,5 +1,5 @@
 import type { ClassifyMessage, UsageReporter } from "../../shared/protocol.js";
-import { detectInjectionText } from "../safety.js";
+import { detectInjectionText } from "../../shared/safety.js";
 import type { AgentProvider } from "./providers/types.js";
 
 const SYSTEM = `You judge items from a web page for an accessibility browser extension.

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { installDom } from "./dom-setup.js";
 import { DEFAULTS, type StoredState } from "../extension/src/storage.js";
+import type { ActiveChange } from "../shared/adaptation.js";
 import type { Suggestion } from "../shared/protocol.js";
 import type { SpotlightDeps } from "../extension/src/overlay/spotlight.js";
 
@@ -40,11 +41,26 @@ interface Asked {
 
 type StorageListener = (changes: Record<string, chrome.storage.StorageChange>, area: string) => void;
 
-async function openBar(stored: Partial<StoredState> = {}) {
+const PAGE_CHANGE = {
+  id: "bigger-text",
+  summary: "Larger text",
+  reason: "Request",
+  css: null,
+  dom: null,
+  block: null,
+  scope: "site",
+  appliedAt: 1,
+} as ActiveChange;
+
+async function openBar(stored: Partial<StoredState> = {}, changes: ActiveChange[] = []) {
   const data = { ...DEFAULTS, ...stored };
   const listeners: StorageListener[] = [];
   globalThis.chrome = {
-    runtime: { id: "test", sendMessage: async () => ({ ok: true }) },
+    runtime: {
+      id: "test",
+      sendMessage: async () => ({ ok: true }),
+      onMessage: { addListener() {}, removeListener() {} },
+    },
     storage: {
       local: {
         get: async () => data,
@@ -63,6 +79,7 @@ async function openBar(stored: Partial<StoredState> = {}) {
   const asked: Asked[] = [];
   const accepted: string[] = [];
   let readAloud = 0;
+  const reverted: string[] = [];
   const deps = {
     ask: (message: string, fresh: boolean) => asked.push({ message, fresh }),
     stop() {},
@@ -71,11 +88,11 @@ async function openBar(stored: Partial<StoredState> = {}) {
     pick() {},
     pointed: () => null,
     markTarget() {},
-    listChanges: () => [],
+    listChanges: () => changes,
     history: () => [],
     reapply: async () => undefined,
-    revert: async () => undefined,
-    revertAll: async () => undefined,
+    revert: async (id: string) => { reverted.push(id); },
+    revertAll: async () => { reverted.push("all"); },
     enableMicrophone() {},
     openDebug() {},
     readAloud: () => { readAloud += 1; },
@@ -126,6 +143,7 @@ async function openBar(stored: Partial<StoredState> = {}) {
     shadow,
     asked,
     accepted,
+    reverted,
     readAloud: () => readAloud,
     press,
     type,
@@ -319,18 +337,51 @@ describe("bar Enter", () => {
     }
   });
 
-  it("sends an exact command name to the model until that switch is flipped", async () => {
-    const box = await openBar();
+  it("sends a typed command name to the model and still runs a slash command", async () => {
+    const named = await openBar({}, [PAGE_CHANGE]);
     try {
-      box.type("settings");
-      const settings = [...box.shadow.querySelectorAll(".item")].find((row) => row.textContent?.includes("Settings"));
+      named.type("settings");
+      const settings = [...named.shadow.querySelectorAll(".item")].find((row) => row.textContent?.includes("Settings"));
       assert.ok(settings, "settings row exists");
       assert.equal(settings.classList.contains("sel"), false);
-      box.press("Enter");
-      assert.deepEqual(box.asked, [{ message: "settings", fresh: false }]);
-      assert.equal(box.input.readOnly, false);
+      named.press("Enter");
+      assert.deepEqual(named.asked, [{ message: "settings", fresh: false }]);
+      assert.equal(named.input.readOnly, false);
     } finally {
-      box.close();
+      named.close();
+    }
+
+    const undo = await openBar({}, [PAGE_CHANGE]);
+    try {
+      undo.type("undo");
+      const row = [...undo.shadow.querySelectorAll(".item")].find((item) => item.textContent?.includes("Undo larger text"));
+      assert.ok(row, "undo row exists");
+      assert.equal(row.classList.contains("sel"), false);
+      undo.press("Enter");
+      assert.deepEqual(undo.asked, [{ message: "undo", fresh: false }]);
+      assert.deepEqual(undo.reverted, []);
+    } finally {
+      undo.close();
+    }
+
+    const slash = await openBar({}, [PAGE_CHANGE]);
+    try {
+      slash.type("/settings");
+      slash.press("Enter");
+      assert.deepEqual(slash.asked, []);
+      assert.equal(slash.input.readOnly, true);
+    } finally {
+      slash.close();
+    }
+
+    const slashUndo = await openBar({}, [PAGE_CHANGE]);
+    try {
+      slashUndo.type("/undo");
+      slashUndo.press("Enter");
+      assert.deepEqual(slashUndo.asked, []);
+      assert.deepEqual(slashUndo.reverted, ["bigger-text"]);
+    } finally {
+      slashUndo.close();
     }
   });
 
