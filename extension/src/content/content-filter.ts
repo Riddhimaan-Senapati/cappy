@@ -42,6 +42,18 @@ function release(el: HTMLElement, holder: object): void {
 
 export type Classifier = (match: string, items: string[]) => Promise<boolean[] | null>;
 
+// Called when a filter has settled and keyword matches are still visible, so a claim like "hid Shorts" can be checked on every page.
+export type LeftoverListener = (filter: Filter, count: number) => void;
+let leftoverListener: LeftoverListener | null = null;
+export const LEFTOVER_SETTLE_MS = 1_500;
+const LEFTOVER_SCAN_MAX = 400;
+// Site chrome the filter leaves alone on purpose: menus, tabs, search and bars that stay on screen.
+const CHROME = "nav, header, footer, aside, form, button, [role=navigation], [role=tablist], [role=tab], [role=menu], [role=menubar], [role=banner], [role=search], [role=button]";
+
+export function setLeftoverListener(next: LeftoverListener | null) {
+  leftoverListener = next;
+}
+
 const CLASSIFY_BATCH = 40;
 const CLASSIFY_DELAY_MS = 250;
 let classifier: Classifier | null = null;
@@ -110,7 +122,15 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const matches = (el: HTMLElement) => pattern.test(searchableText(el)) || (match !== null && verdictFor(match, el) === true);
   let groupsAt = Number.NEGATIVE_INFINITY;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let leftoverTimer: ReturnType<typeof setTimeout> | undefined;
   let undone = false;
+
+  const checkLeftovers = (): void => {
+    leftoverTimer = undefined;
+    if (undone || !leftoverListener) return;
+    const count = leftovers(doc, pattern);
+    if (count > 0) leftoverListener(filter, count);
+  };
 
   // Groups seen once stay in the set: a group whose items are all hidden no longer looks like a group, and would otherwise be un-hidden.
   const selectorsToCheck = (): string[] => {
@@ -139,6 +159,10 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
       claim(el, holder, action);
       held.set(el, action);
     }
+    if (filter.action === "hide" && leftoverListener) {
+      clearTimeout(leftoverTimer);
+      leftoverTimer = setTimeout(checkLeftovers, LEFTOVER_SETTLE_MS);
+    }
   };
 
   // Infinite scroll can mutate the page faster than the delay, so one pass is scheduled per window rather than pushed back by every mutation.
@@ -163,6 +187,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
     undone = true;
     if (match) waiting.get(match)?.delete(schedulePass);
     observer.disconnect();
+    clearTimeout(leftoverTimer);
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     for (const el of held.keys()) release(el, holder);
@@ -170,6 +195,38 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   };
 
   return { undo, matched: () => held.size };
+}
+
+// Links that still name the filtered thing ("/shorts/abc", "Podcasts") and are on screen, outside site chrome.
+export function leftovers(doc: Document, pattern: RegExp): number {
+  let count = 0;
+  const links = Array.from(doc.querySelectorAll<HTMLElement>("a[href]")).slice(0, LEFTOVER_SCAN_MAX * 5);
+  for (const link of links) {
+    if (isOwn(link) || link.closest(CHROME)) continue;
+    const text = `${link.getAttribute("href") ?? ""} ${link.getAttribute("aria-label") ?? ""} ${link.textContent ?? ""}`.toLowerCase();
+    if (!pattern.test(text) || !shown(link) || pinned(link)) continue;
+    count++;
+    if (count >= LEFTOVER_SCAN_MAX) break;
+  }
+  return count;
+}
+
+function shown(el: HTMLElement): boolean {
+  const check = (el as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility;
+  if (typeof check === "function") return check.call(el);
+  for (let a: HTMLElement | null = el; a; a = a.parentElement) if (a.style.display === "none") return false;
+  return true;
+}
+
+// Fixed and sticky bars are site chrome such as a side menu, which the filter leaves in place.
+function pinned(el: HTMLElement): boolean {
+  const view = el.ownerDocument.defaultView;
+  if (!view) return false;
+  for (let a: HTMLElement | null = el.parentElement; a && a !== el.ownerDocument.body; a = a.parentElement) {
+    const position = view.getComputedStyle(a).position;
+    if (position === "fixed" || position === "sticky") return true;
+  }
+  return false;
 }
 
 const HEADING = "h1, h2, h3, h4, [role=heading], #title";
@@ -272,6 +329,8 @@ export function searchableText(el: HTMLElement): string {
   if (aria) parts.push(aria);
   const own = el.getAttribute("title");
   if (own) parts.push(own);
+  // An item that is itself a link ("a[href*='/shorts/']" groups) is named by its own address.
+  if (el.localName === "a") parts.push(el.getAttribute("href") ?? "");
   for (const node of Array.from(el.querySelectorAll("[title], a[href]"))) {
     const title = node.getAttribute("title");
     if (title) parts.push(title);

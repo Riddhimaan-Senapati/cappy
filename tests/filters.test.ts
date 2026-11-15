@@ -4,7 +4,7 @@ import type { BlockCall } from "../shared/adaptation.js";
 import { installDom } from "./dom-setup.js";
 
 installDom();
-const { applyContentFilter, keywordPattern, setFilterClassifier } = await import("../extension/src/content/content-filter.js");
+const { applyContentFilter, keywordPattern, leftovers, setFilterClassifier, setLeftoverListener, LEFTOVER_SETTLE_MS } = await import("../extension/src/content/content-filter.js");
 const { findItemGroups } = await import("../extension/src/content/item-groups.js");
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
@@ -201,6 +201,39 @@ describe("YouTube search results", () => {
     await settle();
     assert.equal(hidden().includes("ytd-item-section-renderer"), false);
     handle.undo();
+  });
+
+  it("counts nothing left over once the shelf is gone, and leaves menus out of the count", async () => {
+    page();
+    document.body.insertAdjacentHTML("afterbegin", `<nav><a href="/shorts">Shorts</a></nav>`);
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await settle();
+    assert.equal(leftovers(document, keywordPattern(["shorts"])), 0);
+    handle.undo();
+    assert.equal(leftovers(document, keywordPattern(["shorts"])), 5);
+  });
+
+  it("hides a stray Short link by its own address, outside any shelf", async () => {
+    page();
+    document.querySelector("#primary")!.insertAdjacentHTML("beforeend", `<div class="extra"><a href="/shorts/lone"><img alt=""></a></div>`);
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await settle();
+    assert.equal(leftovers(document, keywordPattern(["shorts"])), 0);
+    assert.equal(visibleVideos(), 7);
+    handle.undo();
+  });
+
+  it("tells the listener when matches stay on screen after the filter settles", async () => {
+    page();
+    // A link in running text belongs to no repeated group, so the filter cannot take it out and should say so.
+    document.querySelector("#primary")!.insertAdjacentHTML("beforeend", `<p>Read why <a href="/blog/shorts-limits">Shorts are capped</a> this year.</p>`);
+    const told: number[] = [];
+    setLeftoverListener((_filter, count) => told.push(count));
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await new Promise((resolve) => setTimeout(resolve, LEFTOVER_SETTLE_MS + 400));
+    assert.deepEqual(told, [1]);
+    handle.undo();
+    setLeftoverListener(null);
   });
 
   it("falls back to the page's own groups when a saved item selector matches nothing here", async () => {

@@ -125,6 +125,7 @@ What we can show and say, with the numbers behind it.
 - **Time rules that understand how people talk.** "Hide Shorts on weekdays 9 to 5" means 9 AM to 5 PM, not 9 AM to 5 AM. "For an hour", "for half an hour" and "until 5pm" all end on time. Ambiguous hours defer to the model's reading when it matches the same clock positions.
 - **Focus mode.** One switch, in Settings or by typing "focus" in the bar, turns on every focus rule now, ignoring its schedule, until you turn it off. The bar shows Focus while any rule is on.
 - **Safety held up under merging.** Merging five parallel agent PRs surfaced a server that could not start (an import of a deleted module), a reconnect loop that kept the extension awake forever while the server was offline, and tests that no longer matched the UI. All were caught by typecheck, 192 unit tests and 16 browser scenarios before anything reached main.
+- **It checks its own claims.** After a filter runs, on every page and every reapply, it counts links that still match ("/shorts/…") outside menus and fixed bars. The agent sees that count before it says something is hidden, and on later pages a toast says "still showing here" with a Fix it button (`leftovers` and `setLeftoverListener` in `content-filter.ts`). Shelves go whole by their heading, and a container that holds non-matching items is never hidden.
 - **Every speed claim has a test.** The page-load scenario fails if a second tab makes another model call, and was checked to fail with the fix removed.
 
 ## Repo layout
