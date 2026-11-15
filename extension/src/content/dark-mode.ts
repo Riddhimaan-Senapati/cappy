@@ -154,8 +154,39 @@ class DarkSession {
 
   private injectInvert(): void {
     const style = injectStyle(this.doc, INVERT_CSS);
-    this.undos.push(() => style.remove());
+    const preserved = preserveSurfaces(this.doc);
+    this.undos.push(() => {
+      for (const undo of preserved) undo();
+      style.remove();
+    });
   }
+}
+
+// A second invert brings a surface back to its own colors. Charts are already re-inverted as svg;
+// legend chips and already-dark boxes (a red bar, a dark newsletter) need the same so they do not flip.
+export function preserveSurfaces(doc: Document): Array<() => void> {
+  const undos: Array<() => void> = [];
+  const marked: HTMLElement[] = [];
+  const win = doc.defaultView ?? window;
+  for (const el of doc.body?.querySelectorAll<HTMLElement>("*") ?? []) {
+    if (el.closest(`[${OWN_ATTR}]`)) continue;
+    if (el.matches("img, video, picture, canvas, svg, iframe")) continue;
+    if (marked.some((parent) => parent.contains(el))) continue;
+    const inline = el.getAttribute("style") ?? "";
+    const swatch = /background/i.test(inline) && !(el.textContent ?? "").trim();
+    const parsed = parseColor(win.getComputedStyle(el).backgroundColor, doc);
+    const dark = Boolean(parsed && parsed.a > 0.5 && relativeLuminance(parsed) < 0.4);
+    if (!swatch && !dark) continue;
+    const previous = el.style.getPropertyValue("filter");
+    const priority = el.style.getPropertyPriority("filter");
+    el.style.setProperty("filter", "invert(1)", "important");
+    marked.push(el);
+    undos.push(() => {
+      if (previous) el.style.setProperty("filter", previous, priority);
+      else el.style.removeProperty("filter");
+    });
+  }
+  return undos;
 }
 
 function classToken(name: string): { token: ThemeToken; pattern: RegExp } {
@@ -310,8 +341,16 @@ function effectiveBackground(start: HTMLElement, doc: Document, win: Window): Rg
 }
 
 // Canvas parsing covers color formats (oklch, color()) that the regex cannot read.
+function parseHex(css: string): Rgba | undefined {
+  const match = css.trim().match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (!match) return undefined;
+  const hex = match[1]!.length === 3 ? [...match[1]!].map((char) => char + char).join("") : match[1]!;
+  const value = Number.parseInt(hex, 16);
+  return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255, a: 1 };
+}
+
 function parseColor(css: string, doc: Document): Rgba | undefined {
-  const direct = parseRgba(css);
+  const direct = parseRgba(css) ?? parseHex(css);
   if (direct) return direct;
   try {
     const canvas = doc.createElement("canvas");

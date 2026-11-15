@@ -142,6 +142,24 @@ describe("invert keeps images the original color", () => {
   });
 });
 
+describe("invert keeps colored surfaces and dark boxes", () => {
+  it("re-inverts a dark popup, a red bar and a legend swatch", async () => {
+    const { preserveSurfaces } = await import("../extension/src/content/dark-mode.js");
+    document.head.innerHTML = `<style>
+      .bar { background: #ff3b3b; color: #fff; }
+      .popup { background: #222; color: #ddd; }
+    </style>`;
+    document.body.innerHTML = `<div class="bar">News</div><div class="popup"><b>Don't miss a story</b></div><p class="legend"><span style="background:#4caf50"></span>Productive</p>`;
+    const undos = preserveSurfaces(document);
+    for (const selector of [".bar", ".popup", ".legend span"]) {
+      assert.equal((document.querySelector(selector) as HTMLElement).style.getPropertyValue("filter"), "invert(1)", selector);
+    }
+    assert.equal((document.querySelector(".popup b") as HTMLElement).style.getPropertyValue("filter"), "");
+    undos.forEach((undo) => undo());
+    assert.equal((document.querySelector(".popup") as HTMLElement).style.getPropertyValue("filter"), "");
+  });
+});
+
 describe("strategy order", () => {
   it("tries the remembered strategy first", () => {
     assert.deepEqual(strategyOrder(undefined), ["class", "media", "invert"]);
