@@ -17,7 +17,7 @@ import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { normalizeBaseURL, setKey } from "./keys.js";
 import { audio } from "./audio.js";
-import { detectInjection } from "./safety.js";
+import { detectInjection } from "../shared/safety.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));

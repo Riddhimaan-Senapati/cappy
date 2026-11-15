@@ -22,6 +22,8 @@ interface Run {
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  // Set when the run request is sent, so a replaced socket can still fail its own runs.
+  socket?: WebSocket;
 }
 
 export interface AgentHooks {
@@ -191,24 +193,27 @@ export class AgentClient {
       socket.onopen = () => {
         opened = true;
         clearTimeout(timer);
+        clearInterval(this.keepAlive);
         this.socket = socket;
         this.keepAlive = setInterval(() => this.send({ type: "ping" }), 20_000);
         resolve();
       };
       socket.onerror = () => {
-        // A live socket's error is followed by onclose. A socket we already replaced must not mark us offline.
-        if (opened || (this.socket && this.socket !== socket)) return;
+        // A socket that already opened reports the drop through onclose. A failed handshake rejects now.
+        if (opened) return;
         clearTimeout(timer);
         this.setStatus({ connected: false, error: unreachable.message });
         reject(unreachable);
       };
       socket.onmessage = (event) => void this.onMessage(JSON.parse(event.data) as ServerMessage);
       socket.onclose = () => {
-        // A socket this client already replaced must not drop the live connection or fail its runs.
+        for (const run of [...this.runs.values()]) {
+          if (run.socket === socket) this.fail(run, "Lost connection to the agent server.");
+        }
+        // Only the live socket owns the connection. Runs sent on a replaced socket were failed above.
         if (this.socket !== socket) return;
         clearInterval(this.keepAlive);
         this.socket = null;
-        for (const run of [...this.runs.values()]) this.fail(run, "Lost connection to the agent server.");
         this.setStatus({ connected: false });
       };
     });
@@ -227,8 +232,6 @@ export class AgentClient {
   }
 
   private fail(run: Run, message: string) {
-    // A close can land after the run already finished. Emitting again would mark that success as failed.
-    if (!this.runs.has(run.runId)) return;
     this.finish(run);
     this.emit(run, { type: "error", runId: run.runId, message });
   }
@@ -305,7 +308,7 @@ export class AgentClient {
         await this.markCommandApplied(run);
         return;
       }
-      if (recipe === "blocked") return;
+      if (recipe === "blocked" || recipe === "stopped") return;
     }
     if (!this.runs.has(runId)) return;
 
@@ -349,6 +352,7 @@ export class AgentClient {
       const historyText = target ? `${message} (selected: ${target.label})` : message;
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: historyText }].slice(-20) });
       if (!this.runs.has(runId)) return;
+      run.socket = this.socket ?? undefined;
       this.send(request);
       return true;
     } catch (error) {
@@ -356,11 +360,11 @@ export class AgentClient {
     }
   }
 
-  private async tryRecipe(run: Run, changes: ActiveChange[] | undefined): Promise<"applied" | "blocked" | false> {
+  private async tryRecipe(run: Run, changes: ActiveChange[] | undefined): Promise<"applied" | "blocked" | "stopped" | false> {
     if (!changes?.length) return false;
     try {
       const page = await sendToTab<PageOutline>(run.tabId, { kind: "tool", name: "read_page", input: {} });
-      if (!this.runs.has(run.runId)) return "applied";
+      if (!this.runs.has(run.runId)) return "stopped";
       // Same check the server runs before a model call, so a saved change cannot land on a trap page.
       const injection = detectInjection(page);
       if (injection) {
@@ -373,12 +377,12 @@ export class AgentClient {
       }
       this.step(run, "Using your saved version of this request", "info");
       for (const change of changes) {
-        if (!this.runs.has(run.runId)) return "applied";
+        if (!this.runs.has(run.runId)) return "stopped";
         const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
         if (!outcome.ok) return false;
         run.applied.set(change.id, change);
       }
-      if (!this.runs.has(run.runId)) return "applied";
+      if (!this.runs.has(run.runId)) return "stopped";
       this.finish(run, true);
       const reply = "Done, from your saved version. Hold Shift+Enter to ask the AI again.";
       void speakIfEnabled(reply, run.tabId);
