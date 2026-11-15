@@ -9,6 +9,8 @@ import { findRequestSessions, load, recipeKey, save, saveRecipe, saveSiteNotes }
 import { speakIfEnabled } from "./tts.js";
 import { detectInjection } from "../../../shared/safety.js";
 import { scheduleStatus } from "../../../shared/validate.js";
+import { settle } from "../coalesce.js";
+import { paintedStatusKey } from "../status-key.js";
 
 interface Run {
   runId: string;
@@ -29,6 +31,8 @@ export interface AgentHooks {
   tool(tabId: number, name: string, ms: number, ok: boolean, detail: string): void;
   status(status: StatusInfo): void;
 }
+
+const SERVER_OFFLINE = new Error("The local agent server is offline. Start it to send a new AI request.");
 
 const STAT_LABELS: Record<keyof PageStats, string> = {
   inputsWithoutLabel: "unlabeled inputs",
@@ -62,6 +66,9 @@ export class AgentClient {
   private socket: WebSocket | null = null;
   private opening: Promise<void> | null = null;
   private nextConnectAt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private paintedKey = "";
+  private statusWrite: Promise<void> = Promise.resolve();
   private keepAlive: ReturnType<typeof setInterval> | undefined;
   private runs = new Map<string, Run>();
   private providers: ProviderInfo[] = [];
@@ -75,12 +82,19 @@ export class AgentClient {
   constructor(private hooks: AgentHooks) {}
 
   private setStatus(patch: Partial<StatusInfo>) {
-    const prev = this.status;
     this.status = { ...this.status, ...patch, busy: this.runs.size > 0 };
-    void this.getStatus().then((status) => this.hooks.status(status));
-    // Settings repaints on storage changes. Repeating an unchanged stamp reconnects on every paint while the server is down.
-    if (prev.connected === this.status.connected && prev.error === this.status.error && prev.busy === this.status.busy) return;
-    void chrome.storage.local.set({ statusStamp: Date.now() });
+    this.statusWrite = this.statusWrite.then(() => this.publishStatus()).catch(() => undefined);
+  }
+
+  private async publishStatus() {
+    const status = await settle(this.getStatus(), undefined, 8_000);
+    if (!status) return;
+    this.hooks.status(status);
+    const key = paintedStatusKey(status);
+    // Settings repaints on storage changes. An unchanged painted status must not stamp, or every paint probes the server again.
+    if (key === this.paintedKey) return;
+    this.paintedKey = key;
+    await chrome.storage.local.set({ statusStamp: Date.now() });
   }
 
   async getStatus(): Promise<StatusInfo> {
@@ -151,31 +165,53 @@ export class AgentClient {
 
   ensureConnected(options?: { probe?: boolean }): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
-    if (options?.probe && Date.now() < this.nextConnectAt) return Promise.reject(new Error("The local agent server is offline. Start it to send a new AI request."));
+    if (options?.probe && Date.now() < this.nextConnectAt) {
+      this.scheduleReconnect();
+      return Promise.reject(SERVER_OFFLINE);
+    }
     this.opening ??= this.open().finally(() => {
       this.opening = null;
     });
     return this.opening;
   }
 
+  private scheduleReconnect() {
+    if (this.reconnectTimer !== undefined) return;
+    const wait = Math.max(0, this.nextConnectAt - Date.now());
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.ensureConnected().then(
+        () => this.setStatus({ connected: true, error: undefined }),
+        () => undefined,
+      );
+    }, wait);
+  }
+
+  private clearReconnect() {
+    if (this.reconnectTimer === undefined) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+  }
+
   private async open() {
     const { serverUrl } = await load();
     await new Promise<void>((resolve, reject) => {
-      const unreachable = new Error("The local agent server is offline. Start it to send a new AI request.");
       const socket = new WebSocket(serverUrl);
       let opened = false;
-      const fail = () => {
+      const rejectOffline = () => {
         this.nextConnectAt = Date.now() + 4000;
-        reject(unreachable);
+        this.scheduleReconnect();
+        reject(SERVER_OFFLINE);
       };
       const timer = setTimeout(() => {
         socket.close();
-        fail();
+        rejectOffline();
       }, 4000);
       socket.onopen = () => {
         opened = true;
         clearTimeout(timer);
         this.nextConnectAt = 0;
+        this.clearReconnect();
         this.socket = socket;
         this.keepAlive = setInterval(() => this.send({ type: "ping" }), 20_000);
         resolve();
@@ -184,8 +220,8 @@ export class AgentClient {
         // A live socket's error is followed by onclose. A socket we already replaced must not mark us offline.
         if (opened || (this.socket && this.socket !== socket)) return;
         clearTimeout(timer);
-        this.setStatus({ connected: false, error: unreachable.message });
-        fail();
+        this.setStatus({ connected: false, error: SERVER_OFFLINE.message });
+        rejectOffline();
       };
       socket.onmessage = (event) => void this.onMessage(JSON.parse(event.data) as ServerMessage);
       socket.onclose = () => {
@@ -426,7 +462,6 @@ export class AgentClient {
     if (message.type === "notice") {
       this.notice = { level: message.level, text: message.text };
       this.setStatus({});
-      void chrome.storage.local.set({ statusStamp: Date.now() });
       return;
     }
     if (message.type === "tool") return this.runTool(message);

@@ -3,6 +3,7 @@ import type { TargetElement } from "../../../shared/protocol.js";
 import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
 import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, save, type RequestSession } from "../storage.js";
 import { lastingRequest } from "../../../shared/validate.js";
+import { settle } from "../coalesce.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
 import { registerFriction } from "./friction.js";
@@ -188,7 +189,11 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
         }));
       return true;
     case "status":
-      void agent.ensureConnected({ probe: true }).catch(() => undefined).then(() => agent.getStatus()).then(sendResponse);
+      void settle(
+        agent.ensureConnected({ probe: true }).catch(() => undefined).then(() => agent.getStatus()),
+        { connected: false, busy: false },
+        8_000,
+      ).then(sendResponse);
       return true;
     case "setKey":
       void agent.setKey(request.provider, request.key).catch(() => undefined);

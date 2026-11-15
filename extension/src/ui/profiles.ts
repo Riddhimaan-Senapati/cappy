@@ -18,6 +18,7 @@ export function profilePicker(state: StoredState, onChange: (id: string) => void
 
 export function createProfilesView(rerender: () => void) {
   let name = "";
+  let renameDraft: string | null = null;
   let error = "";
   let pending = false;
   const act = async (action: ProfileAction) => {
@@ -27,6 +28,7 @@ export function createProfilesView(rerender: () => void) {
     try {
       await updateProfile(action);
       name = "";
+      renameDraft = null;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
@@ -46,8 +48,10 @@ export function createProfilesView(rerender: () => void) {
     picker.classList.add("s-select");
     picker.disabled = pending;
     const rename = h("input");
-    rename.value = state.profiles[state.activeProfileId].name;
+    const storedName = state.profiles[state.activeProfileId]?.name ?? "";
+    rename.value = renameDraft ?? storedName;
     rename.setAttribute("aria-label", "Current profile name");
+    rename.addEventListener("input", () => { renameDraft = rename.value; });
     const renameForm = h("form", "s-add", "", [rename, button("Rename", () => void act({ action: "rename", name: rename.value }))]);
     renameForm.addEventListener("submit", (event) => {
       event.preventDefault();
