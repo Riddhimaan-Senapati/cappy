@@ -95,6 +95,8 @@ export function voiceErrorText(error: string): string {
       return "Gemini transcription failed. Check the Gemini API key and local server.";
     case "openai-audio":
       return "OpenAI audio failed. Check the OpenAI API key and local server.";
+    case "live-unavailable":
+      return "GPT-Live could not start or stopped. Check the OpenAI API key and that the local server is running.";
     case "start-failed":
       return "Could not start voice input. Check microphone access in Settings and try again.";
     case "unsupported":

@@ -22,11 +22,17 @@ export const DomOp = z.discriminatedUnion("op", [
     op: z.literal("reorder"),
     selector: z.string().describe("Selector for the items to sort, e.g. the video tiles. Items are sorted within their own parent."),
     keySelector: z.string().nullable().describe("Selector inside each item whose text identifies it (e.g. the title). null = the item's own text."),
+    groupSelector: z.string().nullish().describe("Selector for the sibling rows that belong under an item, such as tr:has(.subtext), tr.spacer. null when each item is a single element."),
     direction: z.enum(["asc", "desc"]).describe("Only for alphabetical sorting (ranking null). Ignored when ranking is given."),
     ranking: z
       .array(z.object({ key: z.string().describe("The item's key text exactly as list_items returned it."), rank: z.number().describe("Position in the final order: 1 is shown first.") }))
       .nullable()
       .describe("Your own ranking for any criterion (views, date, price, relevance), worked out from list_items. null = alphabetical by key text, which also keeps sorting items that load later."),
+    keywords: z
+      .array(z.string())
+      .nullable()
+      .optional()
+      .describe("Words that mark the kind of item you put first, such as [\"cooking\", \"pasta\"] for \"put cooking videos first\". Items that load later and contain one of these words join that front group. Null for a pure alphabetical sort."),
   }),
 ]);
 
@@ -44,6 +50,10 @@ export const BlockCall = z.discriminatedUnion("name", [
   z.object({
     name: z.literal("darkMode"),
     allowSiteControls: z.boolean().describe("Legacy compatibility flag. Set false. Use find_site_features and use_site_control for native theme controls."),
+  }),
+  z.object({
+    name: z.literal("contrast"),
+    minRatio: z.number().describe("Contrast ratio to reach in one pass. 4.5 for normal text, 3 for large text."),
   }),
   z.object({
     name: z.literal("formFixer"),

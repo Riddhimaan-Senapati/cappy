@@ -115,7 +115,7 @@ export function createMemoryView(rerender: () => void): MemoryView {
 
       const clearButton = confirmingClear
         ? h("div", "s-row", "", [
-            h("div", "grow", `Clear ${state.profile.length} saved line(s) and ${state.pendingMemory.length} proposal(s)? This cannot be undone.`),
+            h("div", "grow", `Clear ${state.profile.length} saved line(s), ${state.pendingMemory.length} proposal(s), and saved filter judgments? This cannot be undone.`),
             button("Cancel", "s-link", () => {
               confirmingClear = false;
               rerender();

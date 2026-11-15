@@ -15,6 +15,7 @@ interface Live {
   undo: Undo[];
   reapply: Reapply[];
   note?: Promise<string>;
+  adoptReapply?: () => void;
 }
 
 // live is null while the change's schedule is off; the change stays registered so it can switch on without a reload.
@@ -79,7 +80,7 @@ interface LiveOp {
   undo: Undo;
 }
 
-function liveOp(op: DomOp): LiveOp {
+function liveOp(op: DomOp, hint = ""): LiveOp {
   const seen = new WeakSet<Element>();
   const undoSteps: Undo[] = [];
   const labels = new WeakMap<Element, HTMLLabelElement>();
@@ -140,7 +141,20 @@ function liveOp(op: DomOp): LiveOp {
           break;
       }
     }
-    if (op.op === "reorder") sortItems(op, elements, originalOrder, undoSteps);
+    if (op.op === "reorder") {
+      // A tile that loads later is the only node in the reapply root, so pull in its matching siblings.
+      // Walk each parent once; scanning every child for every item is quadratic on a large grid.
+      const parents = new Set<Element>();
+      for (const item of elements) if (item.parentElement) parents.add(item.parentElement);
+      const withSiblings = new Set(elements);
+      for (const parent of parents) {
+        for (const child of parent.children) {
+          if (child.matches(op.selector)) withSiblings.add(child);
+        }
+      }
+      const problem = sortItems(op, [...withSiblings], originalOrder, undoSteps, hint);
+      if (problem) throw new Error(problem);
+    }
     return elements.length;
   };
 
@@ -159,15 +173,19 @@ function materialize(change: Change, matched: Record<string, number>): Live {
   try {
     if (change.css) live.undo.push(applyCss(change, matched));
     for (const op of change.dom ?? []) {
-      const dom = liveOp(op);
-      matched[`${op.op} ${op.selector}`] = dom.run([document]);
+      const dom = liveOp(op, `${change.summary} ${change.reason}`);
+      // Register undo before run so a check that fails after moving nodes can put them back.
       live.undo.push(dom.undo);
+      matched[`${op.op} ${op.selector}`] = dom.run([document]);
       live.reapply.push((roots) => void dom.run(roots));
     }
     if (change.block) {
       const block = applyBlock(change.block);
       live.undo.push(block.undo);
       if (block.reapply) live.reapply.push(block.reapply);
+      live.adoptReapply = () => {
+        if (block.reapply && !live.reapply.includes(block.reapply)) live.reapply.push(block.reapply);
+      };
       if (block.note) live.note = block.note;
       if (block.matched && change.block.name === "contentFilter") {
         matched[`contentFilter ${change.block.itemSelector ?? "all item groups"}`] = block.matched();
@@ -191,18 +209,72 @@ export function keyText(item: Element, keySelector: string | null) {
 
 function compareKeys(op: Extract<DomOp, { op: "reorder" }>) {
   const direction = op.direction === "asc" ? 1 : -1;
-  if (!op.ranking) return (a: Element, b: Element) => collator.compare(keyText(a, op.keySelector), keyText(b, op.keySelector)) * direction;
-  const ranks = new Map(op.ranking.map((entry) => [entry.key.replace(/\s+/g, " ").trim().toLowerCase(), entry.rank]));
-  const rankOf = (item: Element) => ranks.get(keyText(item, op.keySelector).toLowerCase());
+  const promoted = op.keywords?.length ? keywordPattern(op.keywords) : null;
+  const ranking = op.ranking?.length ? op.ranking : null;
+  if (!ranking) {
+    return (a: Element, b: Element) => {
+      if (promoted) {
+        const left = promoted.test(keyText(a, op.keySelector)) ? 0 : 1;
+        const right = promoted.test(keyText(b, op.keySelector)) ? 0 : 1;
+        if (left !== right) return left - right;
+      }
+      return collator.compare(keyText(a, op.keySelector), keyText(b, op.keySelector)) * direction;
+    };
+  }
+  const ranks = new Map(ranking.map((entry) => [entry.key.replace(/\s+/g, " ").trim().toLowerCase(), entry.rank]));
+  const front = Math.min(...ranking.map((entry) => entry.rank));
+  const rankOf = (item: Element) => {
+    const listed = ranks.get(keyText(item, op.keySelector).toLowerCase());
+    if (listed !== undefined) return listed;
+    // A cooking video that loads later was not in the ranking, but it is still the kind the user put first.
+    if (promoted?.test(keyText(item, op.keySelector))) return front;
+    return undefined;
+  };
   return (a: Element, b: Element) => {
     const [x, y] = [rankOf(a), rankOf(b)];
-    // Items the model did not rank (for example ones that loaded later) keep their order at the end.
     if (x === undefined || y === undefined) return x === undefined ? (y === undefined ? 0 : 1) : -1;
     return x - y;
   };
 }
 
-function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], originalOrder: Map<Element, Element[]>, undoSteps: Undo[]) {
+function matchesGroup(row: Element, groupSelector: string | null): boolean {
+  if (!groupSelector) return false;
+  try {
+    return row.matches(groupSelector);
+  } catch {
+    return false;
+  }
+}
+
+function storyCluster(item: Element, selected: Set<Element>, groupSelector: string | null): Element[] {
+  const cluster = [item];
+  let next = item.nextElementSibling;
+  while (next && cluster.length < 4 && !selected.has(next) && matchesGroup(next, groupSelector)) {
+    cluster.push(next);
+    next = next.nextElementSibling;
+  }
+  return cluster;
+}
+
+function metricKind(hint: string): "points" | "comments" | null {
+  if (/\balphabet/i.test(hint) || /\bignor(?:e|ing)\s+(?:the\s+)?points?\b/i.test(hint)) return null;
+  if (/\bcomments?\b/i.test(hint) && !/\bpoints?\b/i.test(hint)) return "comments";
+  if (/\bpoints?\b/i.test(hint)) return "points";
+  return null;
+}
+
+function metricValue(text: string, kind: "points" | "comments"): number | null {
+  const match = text.match(kind === "comments" ? /(\d[\d,]*)\s+comments?\b/i : /(\d[\d,]*)\s+points?\b/i);
+  if (!match) return null;
+  const value = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function clusterText(item: Element, clusters: Map<Element, Element[]>): string {
+  return (clusters.get(item) ?? [item]).map((node) => node.textContent ?? "").join(" ");
+}
+
+function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], originalOrder: Map<Element, Element[]>, undoSteps: Undo[], hint: string): string | null {
   const byParent = new Map<Element, Element[]>();
   for (const item of items) {
     if (!item.parentElement) continue;
@@ -210,12 +282,31 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
     group.push(item);
     byParent.set(item.parentElement, group);
   }
+  const selected = new Set(items);
+  const groupSelector = op.groupSelector ?? null;
+  const clusters = new Map(items.map((item) => [item, storyCluster(item, selected, groupSelector)]));
+  const kind = metricKind(hint);
+  const descending = /\b(highest|most)\b/i.test(hint) || (!/\b(lowest|fewest)\b/i.test(hint) && op.direction !== "asc");
   for (const [parent, group] of byParent) {
     if (group.length < 2) continue;
     const current = [...parent.children].filter((child) => group.includes(child));
-    const sorted = [...current].sort(compareKeys(op));
+    const scoreOf = (item: Element) => (kind ? metricValue(clusterText(item, clusters), kind) : null);
+    const known = current.map(scoreOf).filter((score): score is number => score != null);
+    const ranked = Boolean(op.ranking?.length);
+    const enough = known.length >= Math.ceil(current.length * 0.6);
+    if (kind && !ranked && !enough) return `Could not read a ${kind} count on enough rows to sort them. Nothing was kept.`;
+    const numeric = Boolean(kind) && !ranked && enough;
+    const sorted = numeric
+      ? [...current].sort((a, b) => {
+          const left = scoreOf(a);
+          const right = scoreOf(b);
+          if (left == null || right == null) return left == null ? 1 : -1;
+          return descending ? right - left : left - right;
+        })
+      : [...current].sort(compareKeys(op));
     // Only move nodes when out of order, so our own moves do not retrigger the observer forever.
-    if (sorted.every((item, i) => item === current[i])) continue;
+    const already = sorted.every((item, index) => item === current[index]);
+    if (!already) {
     if (!originalOrder.has(parent)) {
       originalOrder.set(parent, [...parent.children]);
       undoSteps.push(() => {
@@ -227,11 +318,42 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
     const anchor = current[0].previousElementSibling;
     let cursor: Element | null = anchor;
     for (const item of sorted) {
-      if (cursor) cursor.after(item);
-      else parent.prepend(item);
-      cursor = item;
+      for (const node of clusters.get(item) ?? [item]) {
+        if (cursor) cursor.after(node);
+        else parent.prepend(node);
+        cursor = node;
+      }
+    }
+    }
+    const domOrder = already ? current : [...parent.children].filter((child) => current.includes(child));
+    if (kind) {
+      const sequence = domOrder.map((item) => metricValue([item, ...followingTail(item, groupSelector)].map((node) => node.textContent ?? "").join(" "), kind));
+      const scored = sequence.filter((score): score is number => score != null);
+      const ordered = scored.every((score, index) => index === 0 || (descending ? scored[index - 1]! >= score : scored[index - 1]! <= score));
+      if (!ordered) return `The ${kind} are not in order (${sequence.map((score) => score ?? "?").slice(0, 8).join(", ")}). Rank by that number and move each title row with the rows under it. Nothing was kept.`;
+    }
+    if (op.ranking?.length) {
+      const rankOf = (item: Element) => op.ranking?.find((entry) => entry.key.replace(/\s+/g, " ").trim().toLowerCase() === keyText(item, op.keySelector).toLowerCase())?.rank;
+      let previous: number | null = null;
+      for (const item of domOrder) {
+        const rank = rankOf(item);
+        if (rank == null) continue;
+        if (previous != null && rank < previous) return `The ranking did not land in order. Nothing was kept.`;
+        previous = rank;
+      }
     }
   }
+  return null;
+}
+
+function followingTail(item: Element, groupSelector: string | null): Element[] {
+  const tail: Element[] = [];
+  let next = item.nextElementSibling;
+  while (next && tail.length < 3 && matchesGroup(next, groupSelector)) {
+    tail.push(next);
+    next = next.nextElementSibling;
+  }
+  return tail;
 }
 
 function revertNow(id: string): boolean {
@@ -401,12 +523,13 @@ function startObserving() {
       for (const node of record.addedNodes) {
         if (node instanceof Element && !isOwn(node)) pendingRoots.add(node);
       }
+      if (record.type === "attributes" && record.target instanceof Element && !isOwn(record.target)) pendingRoots.add(record.target);
       const removedOwn = [...record.removedNodes].some((node) => node instanceof Element && node.hasAttribute(OWN_ATTR));
       if (removedOwn && record.target instanceof Element) pendingRoots.add(record.target);
     }
     if (pendingRoots.size && flushTimer === undefined) flushTimer = setTimeout(flush, 120);
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
 }
 
 function stopObservingIfIdle() {
@@ -432,8 +555,11 @@ async function installChange(entry: Applied, matched: Record<string, number>, an
     if (entry.live?.reapply.length) startObserving();
     manageScheduleTimer();
   }, animate);
+  const note = await entry.live?.note;
+  entry.live?.adoptReapply?.();
+  if (entry.live?.reapply.length) startObserving();
   publishFocus();
-  return entry.live?.note;
+  return note;
 }
 
 // View transitions and pulses can introduce temporary animations during verification.

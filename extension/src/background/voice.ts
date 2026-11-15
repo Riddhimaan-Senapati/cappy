@@ -11,6 +11,17 @@ let hold = false;
 let setupTab: number | undefined;
 let permissionRetried = false;
 let openingSetup = false;
+let live = false;
+// Runs a request heard in a GPT-Live conversation on the tab that started voice, and resolves with what to say back.
+let liveTaskRunner: ((tabId: number, text: string) => Promise<string>) | null = null;
+
+export function setLiveTaskRunner(runner: (tabId: number, text: string) => Promise<string>) {
+  liveTaskRunner = runner;
+}
+
+export function liveActive(): boolean {
+  return live && owner !== null;
+}
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId !== setupTab) return;
@@ -51,6 +62,7 @@ async function startRecognition() {
   try {
     await ensureOffscreen();
     const { voiceProvider, serverUrl } = await load();
+    live = voiceProvider === "live";
     if (owner) await chrome.runtime.sendMessage({ target: "offscreen", kind: "voiceStart", lang: language, hold, voiceProvider, serverUrl });
   } catch {
     deliver({ type: "error", error: "start-failed" });
@@ -79,11 +91,26 @@ async function onRecognitionEvent(raw: unknown) {
   deliver(event);
   if (event.type === "ended" || (event.type === "error" && event.error === "microphone-setup")) {
     owner = null;
+    live = false;
   }
 }
 
-export function handleVoiceRequest(request: BackgroundRequest, sender: chrome.runtime.MessageSender, respond: (accepted: boolean) => void): boolean {
+export function handleVoiceRequest(request: BackgroundRequest, sender: chrome.runtime.MessageSender, respond: (response: unknown) => void): boolean {
   switch (request.kind) {
+    case "liveTask": {
+      // Only the extension's own offscreen document speaks for a live session.
+      if (sender.id !== chrome.runtime.id || sender.tab) return false;
+      const tabId = owner && "tabId" in owner ? owner.tabId : undefined;
+      if (tabId === undefined || !liveTaskRunner || typeof request.text !== "string") {
+        respond({ text: "Open a web page first, then ask again." });
+        return true;
+      }
+      void liveTaskRunner(tabId, request.text.slice(0, 1_000)).then(
+        (text) => respond({ text }),
+        () => respond({ text: "That did not work. Nothing was changed." }),
+      );
+      return true;
+    }
     case "voiceStart":
       if (owner) {
         respond(false);

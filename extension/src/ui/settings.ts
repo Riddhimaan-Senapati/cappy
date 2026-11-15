@@ -293,7 +293,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         if (url && !url.value.trim()) return;
         ctx.setKey(provider.id, input.value.trim(), url?.value.trim() || null);
         // Voice falls back to these keys, so a new key needs a fresh audio check.
-        if (provider.id === "openai-key" && state.voiceProvider === "openai") void save({ voiceProvider: "chrome", openAIVoiceVerified: false });
+        if (provider.id === "openai-key" && (state.voiceProvider === "openai" || state.voiceProvider === "live")) void save({ voiceProvider: "chrome", openAIVoiceVerified: false });
         if (provider.id === "gemini" && state.voiceProvider === "gemini") void save({ voiceProvider: "chrome", geminiVoiceVerified: false });
         editingKey = null;
         keyDraft = "";
@@ -314,7 +314,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let speechError = "";
   let voiceCheck = "";
   let checkingVoice = false;
-  let pendingVoice: "openai" | "gemini" | undefined;
+  let pendingVoice: "openai" | "gemini" | "live" | undefined;
 
   const paint = paintOnce(async (current) => {
     const [state, changes, status, voices] = await Promise.all([
@@ -427,14 +427,16 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
 
     const voiceProvider = h("select", "s-select");
     voiceProvider.setAttribute("aria-label", "Voice provider");
-    for (const [id, label] of [["chrome", "Chrome"], ["openai", "OpenAI"], ["gemini", "Gemini"]]) {
+    for (const [id, label] of [["chrome", "Chrome"], ["openai", "OpenAI"], ["gemini", "Gemini"], ["live", "GPT-Live conversation (OpenAI)"]]) {
       const option = h("option", "", label);
       option.value = id;
       voiceProvider.append(option);
     }
     const activeVoice = state.voiceProvider;
-    voiceProvider.value = activeVoice;
-    const provider = pendingVoice ?? (activeVoice === "gemini" ? "gemini" : "openai");
+    voiceProvider.value = pendingVoice ?? activeVoice;
+    // GPT-Live runs on the same OpenAI key, so it is verified as OpenAI audio.
+    const wanted = pendingVoice ?? (activeVoice === "chrome" ? "openai" : activeVoice);
+    const provider = wanted === "gemini" ? "gemini" : "openai";
     const label = provider === "gemini" ? "Gemini" : "OpenAI";
     voiceProvider.disabled = checkingVoice;
     voiceProvider.addEventListener("change", () => {
@@ -442,7 +444,11 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         pendingVoice = undefined;
         voiceCheck = "";
         void save({ voiceProvider: "chrome" });
-      } else if (voiceProvider.value === "gemini" || voiceProvider.value === "openai") {
+      } else if (voiceProvider.value === "live" && state.openAIVoiceVerified) {
+        pendingVoice = undefined;
+        voiceCheck = "";
+        void save({ voiceProvider: "live" });
+      } else if (voiceProvider.value === "gemini" || voiceProvider.value === "openai" || voiceProvider.value === "live") {
         pendingVoice = voiceProvider.value;
         voiceCheck = "";
         queue();
@@ -469,7 +475,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       try {
         const result = await chrome.runtime.sendMessage({ kind: "verifyVoice", key, provider } satisfies BackgroundRequest);
         if (!result?.ok) throw new Error(result?.error ?? "Could not verify OpenAI audio.");
-        await save(provider === "openai" ? { voiceProvider: provider, openAIVoiceVerified: true } : { voiceProvider: provider, geminiVoiceVerified: true });
+        await save(provider === "openai" ? { voiceProvider: wanted === "live" ? "live" : "openai", openAIVoiceVerified: true } : { voiceProvider: provider, geminiVoiceVerified: true });
         pendingVoice = undefined;
         voiceCheck = `${label} audio verified.`;
       } catch (error) {
@@ -483,6 +489,9 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       h("div", "grow", "", [h("div", "", "Voice provider"), h("small", "", "OpenAI and Gemini process recorded audio and spoken text through their APIs. Verification uses a short sample and may incur API usage.")]),
       voiceProvider,
     ]);
+    const liveNote = voiceProvider.value === "live"
+      ? [h("div", "s-note", "GPT-Live listens and talks back, and keeps talking while Cappy changes the page. Start voice from the bar and talk; stop it with the mic button. It costs $0.05 a minute on your OpenAI key, plus the agent's own model use.")]
+      : [];
     const verificationStatus = h("div", "s-note", voiceCheck);
     verificationStatus.setAttribute("role", "status");
 
@@ -611,7 +620,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           h("div", "s-foot", "", [testVoice]),
           ...(speechError ? [h("div", "s-note s-error", speechError)] : []),
         ),
-        more("Speech provider", [voiceProviderRow, ...(voiceProvider.value !== "chrome" || pendingVoice ? [voiceKeyField, verify] : []), verificationStatus]),
+        more("Speech provider", [voiceProviderRow, ...liveNote, ...(voiceProvider.value !== "chrome" || pendingVoice ? [voiceKeyField, verify] : []), verificationStatus]),
       ],
       camera: () => [cameraSection(state)],
     };

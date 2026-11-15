@@ -142,6 +142,69 @@ describe("invert keeps images the original color", () => {
   });
 });
 
+describe("invert keeps colored surfaces and dark boxes", () => {
+  it("re-inverts a dark box once, leaves the photo inside it, and ignores a white divider", async () => {
+    const { preserveSurfaces } = await import("../extension/src/content/dark-mode.js");
+    document.body.innerHTML = `
+      <div id="popup" style="background-color: rgb(34, 34, 34); color: rgb(221, 221, 221)">
+        <img id="photo" alt="">
+        <b>Don't miss a story</b>
+      </div>
+      <div id="bar" style="background-color: rgb(255, 59, 59); color: rgb(255, 255, 255)">News</div>
+      <span id="chip" style="background-color: rgb(76, 175, 80)"></span>
+      <div id="rule" style="background-color: rgb(255, 255, 255)"></div>
+      <div id="nav" style="background-color: rgb(20, 20, 20)">
+        <div id="menu" style="position: absolute">Item</div>
+      </div>
+      <div id="news" style="position: relative; background-color: rgb(34, 34, 34)">
+        <button id="close" style="position: absolute">x</button>
+        <div id="hero" style="background-image: url(https://example.com/a.png)"></div>
+      </div>
+      <div id="shell" style="background-color: rgb(20, 20, 20)">
+        <div id="toast" style="position: fixed">Hi</div>
+      </div>`;
+    const marks = preserveSurfaces(document);
+    const filterOf = (id: string) => document.getElementById(id)?.style.getPropertyValue("filter");
+    assert.equal(filterOf("popup"), "invert(1)");
+    assert.equal(filterOf("photo"), "none");
+    assert.equal(filterOf("bar"), "invert(1)");
+    assert.equal(filterOf("chip"), "invert(1)");
+    assert.equal(filterOf("rule"), "");
+    assert.equal(filterOf("nav"), "");
+    assert.equal(filterOf("news"), "invert(1)");
+    assert.equal(filterOf("hero"), "none");
+    assert.equal(filterOf("shell"), "");
+    assert.equal(document.getElementById("popup")?.querySelector("b")?.getAttribute("style"), null);
+
+    const popup = document.getElementById("popup")!;
+    popup.style.setProperty("filter", "blur(2px)");
+    marks.forEach((mark) => mark.undo());
+    assert.equal(popup.style.getPropertyValue("filter"), "blur(2px)");
+    assert.equal(filterOf("bar"), "");
+  });
+
+  it("preserves a popup that appears after dark mode", async () => {
+    const { preserveSurfaces } = await import("../extension/src/content/dark-mode.js");
+    document.body.innerHTML = `<div id="early" style="background-color: rgb(34, 34, 34)">Now</div>`;
+    preserveSurfaces(document);
+    const late = document.createElement("div");
+    late.id = "late";
+    late.style.backgroundColor = "rgb(34, 34, 34)";
+    const photo = document.createElement("img");
+    photo.id = "late-photo";
+    late.append(photo);
+    document.body.append(late);
+    preserveSurfaces(document, [late]);
+    assert.equal(late.style.getPropertyValue("filter"), "invert(1)");
+    assert.equal(photo.style.getPropertyValue("filter"), "none");
+    const extra = document.createElement("img");
+    extra.id = "extra-photo";
+    late.append(extra);
+    preserveSurfaces(document, [extra]);
+    assert.equal(extra.style.getPropertyValue("filter"), "none");
+  });
+});
+
 describe("strategy order", () => {
   it("tries the remembered strategy first", () => {
     assert.deepEqual(strategyOrder(undefined), ["class", "media", "invert"]);

@@ -13,7 +13,7 @@ export interface AppliedSummary {
 }
 
 export type UiEvent =
-  | { type: "start"; runId: string; trigger: Trigger; message: string; thread?: string }
+  | { type: "start"; runId: string; trigger: Trigger; message: string; thread?: string; claimKey?: string }
   | { type: "queued"; runId: string; message: string; thread?: string }
   | { type: "cancelled"; runId: string; reason?: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
@@ -106,7 +106,8 @@ export type BackgroundRequest =
   | { kind: "storedChange"; op: "apply"; origin: string; change: ActiveChange }
   | { kind: "storedChange"; op: "revert"; origin: string; id: string }
   | { kind: "storedChange"; op: "forget"; host: string | null; id: string }
-  | { kind: "storedChange"; op: "recipe"; key: string; recipe: { message: string; changes: ActiveChange[]; at: number } };
+  | { kind: "storedChange"; op: "recipe"; key: string; recipe: { message: string; changes: ActiveChange[]; at: number } }
+  | { kind: "liveTask"; id: string; text: string };
 
 export type DebugPortMessage =
   | { type: "inspection"; snapshot?: PageInspection; error?: string }

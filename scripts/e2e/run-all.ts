@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..", "..");
 const runner = process.execPath;
-const tests = ["site-controls", "gate", "injection", "replay", "replay-trap", "form", "verification", "preferences", "history", "options", "voice-point", "profiles", "schedule", "bar-enter", "saved-changes", "page-load", "ask-first"];
+const tests = ["site-controls", "gate", "injection", "replay", "replay-trap", "form", "verification", "preferences", "history", "options", "voice-point", "profiles", "schedule", "bar-enter", "saved-changes", "page-load", "ask-first", "request-counts", "voice-live"];
 
 execFileSync("bun", ["run", "build:ext"], { cwd: root, stdio: "inherit" });
 
