@@ -46,7 +46,7 @@ export function darkOutcomeNote(outcome: DarkOutcome): string {
 }
 
 // Tries the site's own dark theme before inverting colors. Every step is undoable.
-export function applyDarkMode(doc: Document = document): { undo: () => void; note: Promise<string> } {
+export function applyDarkMode(doc: Document = document): { undo: () => void; note: Promise<string>; reapply: (roots: Element[]) => void } {
   const session = new DarkSession(doc);
   const note = session
     .run()
@@ -56,7 +56,7 @@ export function applyDarkMode(doc: Document = document): { undo: () => void; not
       return "none" as DarkOutcome;
     })
     .then((outcome) => darkOutcomeNote(outcome));
-  return { undo: () => session.undo(), note };
+  return { undo: () => session.undo(), note, reapply: (roots) => session.reapply(roots) };
 }
 
 // Snapshots element attributes before a change so undo restores them exactly.
@@ -90,6 +90,11 @@ class DarkSession {
   private readonly undos: Array<() => void> = [];
   private cancelled = false;
   private undone = false;
+  private reapplySurfaces: ((roots: Element[]) => void) | null = null;
+
+  reapply(roots: Element[]) {
+    this.reapplySurfaces?.(roots);
+  }
 
   constructor(private readonly doc: Document) {}
 
@@ -155,38 +160,123 @@ class DarkSession {
   private injectInvert(): void {
     const style = injectStyle(this.doc, INVERT_CSS);
     const preserved = preserveSurfaces(this.doc);
+    this.reapplySurfaces = (roots) => {
+      preserved.push(...preserveSurfaces(this.doc, roots));
+    };
     this.undos.push(() => {
+      this.reapplySurfaces = null;
       for (const undo of preserved) undo();
       style.remove();
     });
   }
 }
 
+const MEDIA = "img, video, picture, canvas, svg, iframe";
+const SURFACE_ATTR = "data-ba-surface";
+
 // A second invert brings a surface back to its own colors. Charts are already re-inverted as svg;
 // legend chips and already-dark boxes (a red bar, a dark newsletter) need the same so they do not flip.
-export function preserveSurfaces(doc: Document): Array<() => void> {
+export function preserveSurfaces(doc: Document, roots?: Array<Element | ParentNode>): Array<() => void> {
+  const scopes = roots?.length ? roots : [doc.body ?? doc.documentElement];
   const undos: Array<() => void> = [];
-  const marked: HTMLElement[] = [];
-  const win = doc.defaultView ?? window;
-  for (const el of doc.body?.querySelectorAll<HTMLElement>("*") ?? []) {
-    if (el.closest(`[${OWN_ATTR}]`)) continue;
-    if (el.matches("img, video, picture, canvas, svg, iframe")) continue;
-    if (marked.some((parent) => parent.contains(el))) continue;
-    const inline = el.getAttribute("style") ?? "";
-    const swatch = /background/i.test(inline) && !(el.textContent ?? "").trim();
-    const parsed = parseColor(win.getComputedStyle(el).backgroundColor, doc);
-    const dark = Boolean(parsed && parsed.a > 0.5 && relativeLuminance(parsed) < 0.4);
-    if (!swatch && !dark) continue;
-    const previous = el.style.getPropertyValue("filter");
-    const priority = el.style.getPropertyPriority("filter");
-    el.style.setProperty("filter", "invert(1)", "important");
-    marked.push(el);
-    undos.push(() => {
-      if (previous) el.style.setProperty("filter", previous, priority);
-      else el.style.removeProperty("filter");
-    });
+  for (const scope of scopes) {
+    if (scope instanceof HTMLElement) undos.push(...preserveRoot(doc, scope));
   }
   return undos;
+}
+
+function preserveRoot(doc: Document, root: HTMLElement): Array<() => void> {
+  const win = doc.defaultView ?? window;
+  const order = walkElements(root);
+  const subtreePositioned = new Set<HTMLElement>();
+  const chosen = new Set<HTMLElement>();
+  const undos: Array<() => void> = [];
+  // Post-order: a child is decided before its parent, so a dark box is one mark, not one per descendant.
+  for (const el of order) {
+    if (el.hasAttribute(OWN_ATTR)) continue;
+    const host = el.closest(`[${OWN_ATTR}]`);
+    if (host && host !== el) continue;
+    const surface = el.closest(`[${SURFACE_ATTR}]`);
+    if (surface && surface !== el) {
+      if (el.matches(MEDIA)) neutralizeMedia(el, undos);
+      continue;
+    }
+    const style = win.getComputedStyle(el);
+    let positioned = style.position === "fixed" || style.position === "absolute";
+    for (const child of el.children) {
+      if (child instanceof HTMLElement && subtreePositioned.has(child)) positioned = true;
+    }
+    if (positioned) subtreePositioned.add(el);
+    // filter on a box makes it the containing block for fixed and absolute descendants, so those boxes stay unmarked.
+    if (positioned || el === doc.body || el === doc.documentElement || el.matches(MEDIA)) continue;
+    if (!isPreservedSurface(el, style, doc)) continue;
+    forgetChosen(el, chosen);
+    chosen.add(el);
+  }
+  for (const el of chosen) markSurface(el, undos);
+  return undos;
+}
+
+function forgetChosen(el: HTMLElement, chosen: Set<HTMLElement>) {
+  for (const child of el.children) {
+    if (!(child instanceof HTMLElement)) continue;
+    chosen.delete(child);
+    forgetChosen(child, chosen);
+  }
+}
+
+function walkElements(root: HTMLElement): HTMLElement[] {
+  const order: HTMLElement[] = [];
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  if (!root.hasAttribute(OWN_ATTR)) order.push(root);
+  let current = walker.nextNode();
+  while (current) {
+    if (current instanceof HTMLElement && !current.hasAttribute(OWN_ATTR)) order.push(current);
+    current = walker.nextNode();
+  }
+  order.reverse();
+  return order;
+}
+
+function isPreservedSurface(el: HTMLElement, style: CSSStyleDeclaration, doc: Document): boolean {
+  const parsed = parseColor(style.backgroundColor, doc);
+  if (!parsed || parsed.a <= 0.5) return false;
+  if (relativeLuminance(parsed) < 0.4) return true;
+  // A legend chip is a small saturated empty inline color. A white divider or gray skeleton is not.
+  if ((el.textContent ?? "").trim()) return false;
+  if (!/background/i.test(el.getAttribute("style") ?? "")) return false;
+  const chroma = Math.max(parsed.r, parsed.g, parsed.b) - Math.min(parsed.r, parsed.g, parsed.b);
+  return chroma >= 40;
+}
+
+function markSurface(el: HTMLElement, undos: Array<() => void>) {
+  if (el.hasAttribute(SURFACE_ATTR)) return;
+  const previous = el.style.getPropertyValue("filter");
+  const priority = el.style.getPropertyPriority("filter");
+  el.style.setProperty("filter", "invert(1)", "important");
+  el.setAttribute(SURFACE_ATTR, "");
+  undos.push(() => {
+    el.removeAttribute(SURFACE_ATTR);
+    if (el.style.getPropertyValue("filter") !== "invert(1)") return;
+    if (previous) el.style.setProperty("filter", previous, priority);
+    else el.style.removeProperty("filter");
+  });
+  for (const node of el.querySelectorAll<HTMLElement>(MEDIA)) neutralizeMedia(node, undos);
+}
+
+// The page invert plus this box is already two flips. The media rule would add a third and show a negative.
+function neutralizeMedia(node: HTMLElement, undos: Array<() => void>) {
+  if (node.getAttribute(SURFACE_ATTR) === "media") return;
+  const previous = node.style.getPropertyValue("filter");
+  const priority = node.style.getPropertyPriority("filter");
+  node.style.setProperty("filter", "none", "important");
+  node.setAttribute(SURFACE_ATTR, "media");
+  undos.push(() => {
+    node.removeAttribute(SURFACE_ATTR);
+    if (node.style.getPropertyValue("filter") !== "none") return;
+    if (previous) node.style.setProperty("filter", previous, priority);
+    else node.style.removeProperty("filter");
+  });
 }
 
 function classToken(name: string): { token: ThemeToken; pattern: RegExp } {

@@ -169,7 +169,7 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return stopMotion();
     case "darkMode": {
       const dark = applyDarkMode();
-      return { undo: dark.undo, note: dark.note };
+      return { undo: dark.undo, note: dark.note, reapply: dark.reapply };
     }
     case "contentFilter":
       return contentFilter(block);
