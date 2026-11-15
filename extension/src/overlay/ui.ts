@@ -1,6 +1,7 @@
 import type { UiEvent } from "../messages.js";
 import type { MemoryScope, Suggestion } from "../../../shared/protocol.js";
-import { forgetLine } from "../memory.js";
+import { forgetLine, rejectProposal } from "../memory.js";
+import { rescopeStoredChanges } from "../storage.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { countdownRing, paintCountdown } from "../voice/button.js";
 import { adoptStyles, cappyLogo, h, icon } from "../ui/dom.js";
@@ -244,17 +245,24 @@ export class OverlayUi {
         for (const line of lines) await forgetLine(line);
       });
     }
+    const place = async (next: "page" | "site" | "everywhere") => {
+      await rescopeStoredChanges(location.origin, undoIds, next, location.pathname);
+    };
     const actions = scopeChoices(lines, host, scope).map((choice) => ({
       label: choice.label,
       run: async () => {
         const outcome = await choice.run();
+        await place(outcome.saved ? outcome.scope : "page");
         this.showToast(`${outcomeText(outcome, host)}: ${text}`, []);
       },
     }));
-    this.showToast(`Save this preference? ${text}`, undoIds, false, undefined, actions, true);
+    this.showToast(`Save this preference? ${text}`, undoIds, false, undefined, actions, true, async () => {
+      for (const line of lines) await rejectProposal(line);
+      await place("page");
+    });
   }
 
-  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>, action?: ToastAction | ToastAction[], sticky = false) {
+  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>, action?: ToastAction | ToastAction[], sticky = false, onDismiss?: () => Promise<void>) {
     window.clearTimeout(this.toastTimer);
     const previous = this.toast;
     if (previous) {
@@ -294,7 +302,10 @@ export class OverlayUi {
 
     const toast = h("div", `toast${isError ? " error" : ""}${stacked ? " stack" : ""}`, "", nodes);
     toast.setAttribute("role", "status");
-    close.addEventListener("click", () => this.dismissToast());
+    close.addEventListener("click", () => {
+      void onDismiss?.();
+      this.dismissToast();
+    });
     this.toast = toast;
     this.shadow.append(toast);
     this.placeNudge();

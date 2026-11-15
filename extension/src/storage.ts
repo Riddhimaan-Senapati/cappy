@@ -274,6 +274,34 @@ function writeSite(siteChanges: Record<string, ActiveChange[]>, origin: string, 
   return next;
 }
 
+// The save prompt decides where a change lives. "Only on this site" must not leave it in the everywhere list.
+export async function rescopeStoredChanges(origin: string, ids: readonly string[], scope: "page" | "site" | "everywhere", pagePath: string) {
+  if (!ids.length) return;
+  const state = await load();
+  const wanted = new Set(ids);
+  const taken: ActiveChange[] = [];
+  const globalChanges = state.globalChanges.filter((change) => {
+    if (!wanted.has(change.id)) return true;
+    taken.push(change);
+    return false;
+  });
+  let siteChanges = { ...state.siteChanges };
+  for (const [key, list] of Object.entries(siteChanges)) {
+    const next = list.filter((change) => {
+      if (!wanted.has(change.id)) return true;
+      taken.push(change);
+      return false;
+    });
+    siteChanges = writeSite(siteChanges, key, next);
+  }
+  for (const change of taken) {
+    const next = { ...change, scope, pagePath: scope === "page" ? pagePath : undefined };
+    if (scope === "everywhere") globalChanges.push(next);
+    else siteChanges = writeSite(siteChanges, origin, [...(siteChanges[origin] ?? []), next]);
+  }
+  await save({ globalChanges, siteChanges });
+}
+
 export async function recordApplied(origin: string, change: ActiveChange) {
   const state = await load();
   const site = without(state.siteChanges[origin] ?? [], change.id);

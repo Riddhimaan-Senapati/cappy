@@ -25,6 +25,16 @@ test("receiveMemory always proposes new lines and remembers where they came from
   assert.deepEqual(decision.pendingSites, { b: site });
 });
 
+test("receiveMemory keeps only the latest unanswered proposals", () => {
+  const incoming = Array.from({ length: 10 }, (_, index) => `Line ${index}`);
+  const decision = receiveMemory({ profile: [], pendingMemory: [], ...empty }, incoming, site);
+  assert.equal(decision.pendingMemory.length, 8);
+  assert.equal(decision.pendingMemory[0], "Line 2");
+  assert.equal(decision.pendingMemory.at(-1), "Line 9");
+  assert.equal(decision.pendingSites["line 0"], undefined);
+  assert.ok(decision.pendingSites["line 9"]);
+});
+
 test("receiveMemory ignores lines already saved, saved for this site, or already proposed", () => {
   const decision = receiveMemory({ profile: ["A", "On news.example: D"], pendingMemory: ["B"], ...empty }, ["a", "b", "C", "d"], site);
   assert.deepEqual(decision.pendingMemory, ["B", "C"]);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { ActiveChange, Change } from "../shared/adaptation.js";
-import { DEFAULTS, load, recipeKey, recordApplied, recordReverted, saveRecipe, savedChangesFor } from "../extension/src/storage.js";
+import { DEFAULTS, load, recipeKey, recordApplied, recordReverted, rescopeStoredChanges, saveRecipe, savedChangesFor } from "../extension/src/storage.js";
 import { prepareSavedChange, savedChangeOnThisPage } from "../shared/validate.js";
 
 const originalChrome = globalThis.chrome;
@@ -159,5 +159,17 @@ describe("undo drops the saved change and its recipe", () => {
     assert.equal(state.globalChanges.some((item) => item.id === change.id), false);
     assert.ok(state.recipes[recipeKey("http://127.0.0.1:8787", "make the text bigger")], "a recipe saved on another origin stays");
     assert.equal(data.recipes[key], undefined);
+  });
+});
+
+describe("the save prompt moves the change with the answer", () => {
+  it("moves an everywhere change onto this site when the user picks only this site", async () => {
+    storage();
+    await recordApplied(origin, saved("bigger-text", "Larger text", "everywhere", undefined, { name: "textScale", scale: 1.3 }));
+    await rescopeStoredChanges(origin, ["bigger-text"], "site", "/demo/campus.html");
+    const state = await load();
+    assert.equal(state.globalChanges.length, 0);
+    assert.equal(state.siteChanges[origin]?.[0]?.scope, "site");
+    assert.equal(state.siteChanges[origin]?.[0]?.pagePath, undefined);
   });
 });
