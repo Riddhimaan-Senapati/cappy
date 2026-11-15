@@ -22,6 +22,7 @@ export const DomOp = z.discriminatedUnion("op", [
     op: z.literal("reorder"),
     selector: z.string().describe("Selector for the items to sort, e.g. the video tiles. Items are sorted within their own parent."),
     keySelector: z.string().nullable().describe("Selector inside each item whose text identifies it (e.g. the title). null = the item's own text."),
+    groupSelector: z.string().nullish().describe("Selector for the sibling rows that belong under an item, such as tr:has(.subtext), tr.spacer. null when each item is a single element."),
     direction: z.enum(["asc", "desc"]).describe("Only for alphabetical sorting (ranking null). Ignored when ranking is given."),
     ranking: z
       .array(z.object({ key: z.string().describe("The item's key text exactly as list_items returned it."), rank: z.number().describe("Position in the final order: 1 is shown first.") }))

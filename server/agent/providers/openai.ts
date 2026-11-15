@@ -87,8 +87,6 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
       input.push({ type: "function_call_output", call_id: call.call_id, output: result });
     }
     if (session.escalation) return "";
-    const stop = session.shouldStop();
-    if (stop) return stop;
   }
   return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
 }

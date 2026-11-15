@@ -61,10 +61,7 @@ export function createAnthropicProvider(): AgentProvider {
 
       for await (const message of runner) {
         reportUsage({ calls: 1, inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0), outputTokens: message.usage.output_tokens });
-        if (session.shouldStop()) break;
       }
-      const stop = session.shouldStop();
-      if (stop) return stop;
       const finalMessage = await runner;
       if (finalMessage.stop_reason === "refusal") return "I can't help with that one.";
       return finalMessage.content

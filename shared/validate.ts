@@ -110,6 +110,7 @@ export function validateChange(change: Change): string | null {
       if (op.ranking.some((entry) => typeof entry.key !== "string" || entry.key.length > 300 || !Number.isFinite(entry.rank))) return "each ranking entry needs a key and a numeric rank";
     }
     if (op.op === "reorder" && op.keySelector !== null && typeof op.keySelector !== "string") return "bad reorder keySelector";
+    if (op.op === "reorder" && op.groupSelector != null && (typeof op.groupSelector !== "string" || op.groupSelector.length > 400 || /[{};@\\<]/.test(op.groupSelector))) return "bad reorder groupSelector";
     if (op.op === "setAttribute" && op.value.length > LIMITS.attrChars) return "attribute value too long";
   }
   if (change.block && !BLOCKS.has(change.block.name)) return `unknown block "${change.block.name}"`;

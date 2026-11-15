@@ -172,8 +172,9 @@ function materialize(change: Change, matched: Record<string, number>): Live {
     if (change.css) live.undo.push(applyCss(change, matched));
     for (const op of change.dom ?? []) {
       const dom = liveOp(op, `${change.summary} ${change.reason}`);
-      matched[`${op.op} ${op.selector}`] = dom.run([document]);
+      // Register undo before run so a check that fails after moving nodes can put them back.
       live.undo.push(dom.undo);
+      matched[`${op.op} ${op.selector}`] = dom.run([document]);
       live.reapply.push((roots) => void dom.run(roots));
     }
     if (change.block) {
@@ -214,24 +215,27 @@ function compareKeys(op: Extract<DomOp, { op: "reorder" }>) {
   };
 }
 
-function storyCluster(item: Element, selected: Set<Element>): Element[] {
+function matchesGroup(row: Element, groupSelector: string | null): boolean {
+  if (!groupSelector) return false;
+  try {
+    return row.matches(groupSelector);
+  } catch {
+    return false;
+  }
+}
+
+function storyCluster(item: Element, selected: Set<Element>, groupSelector: string | null): Element[] {
   const cluster = [item];
-  if (item.tagName !== "TR") return cluster;
   let next = item.nextElementSibling;
-  while (next && cluster.length < 4 && !selected.has(next) && isStoryTail(next)) {
+  while (next && cluster.length < 4 && !selected.has(next) && matchesGroup(next, groupSelector)) {
     cluster.push(next);
-    if (next.classList.contains("spacer")) break;
     next = next.nextElementSibling;
   }
   return cluster;
 }
 
-function isStoryTail(row: Element): boolean {
-  if (row.classList.contains("spacer") || row.querySelector(".subtext, .score")) return true;
-  return /\d[\d,]*\s+(?:points?|comments?)\b/i.test(row.textContent ?? "");
-}
-
 function metricKind(hint: string): "points" | "comments" | null {
+  if (/\balphabet/i.test(hint) || /\bignor(?:e|ing)\s+(?:the\s+)?points?\b/i.test(hint)) return null;
   if (/\bcomments?\b/i.test(hint) && !/\bpoints?\b/i.test(hint)) return "comments";
   if (/\bpoints?\b/i.test(hint)) return "points";
   return null;
@@ -257,7 +261,8 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
     byParent.set(item.parentElement, group);
   }
   const selected = new Set(items);
-  const clusters = new Map(items.map((item) => [item, storyCluster(item, selected)]));
+  const groupSelector = op.groupSelector ?? null;
+  const clusters = new Map(items.map((item) => [item, storyCluster(item, selected, groupSelector)]));
   const kind = metricKind(hint);
   const descending = /\b(highest|most)\b/i.test(hint) || (!/\b(lowest|fewest)\b/i.test(hint) && op.direction !== "asc");
   for (const [parent, group] of byParent) {
@@ -300,8 +305,9 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
     }
     const domOrder = already ? current : [...parent.children].filter((child) => current.includes(child));
     if (kind) {
-      const sequence = domOrder.map((item) => metricValue([item, ...followingTail(item)].map((node) => node.textContent ?? "").join(" "), kind));
-      const ordered = sequence.every((score, index) => score != null && (index === 0 || (descending ? sequence[index - 1]! >= score : sequence[index - 1]! <= score)));
+      const sequence = domOrder.map((item) => metricValue([item, ...followingTail(item, groupSelector)].map((node) => node.textContent ?? "").join(" "), kind));
+      const scored = sequence.filter((score): score is number => score != null);
+      const ordered = scored.every((score, index) => index === 0 || (descending ? scored[index - 1]! >= score : scored[index - 1]! <= score));
       if (!ordered) return `The ${kind} are not in order (${sequence.map((score) => score ?? "?").slice(0, 8).join(", ")}). Rank by that number and move each title row with the rows under it. Nothing was kept.`;
     }
     if (op.ranking?.length) {
@@ -318,12 +324,11 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
   return null;
 }
 
-function followingTail(item: Element): Element[] {
+function followingTail(item: Element, groupSelector: string | null): Element[] {
   const tail: Element[] = [];
   let next = item.nextElementSibling;
-  while (next && tail.length < 3 && isStoryTail(next)) {
+  while (next && tail.length < 3 && matchesGroup(next, groupSelector)) {
     tail.push(next);
-    if (next.classList.contains("spacer")) break;
     next = next.nextElementSibling;
   }
   return tail;
@@ -496,12 +501,13 @@ function startObserving() {
       for (const node of record.addedNodes) {
         if (node instanceof Element && !isOwn(node)) pendingRoots.add(node);
       }
+      if (record.type === "attributes" && record.target instanceof Element && !isOwn(record.target)) pendingRoots.add(record.target);
       const removedOwn = [...record.removedNodes].some((node) => node instanceof Element && node.hasAttribute(OWN_ATTR));
       if (removedOwn && record.target instanceof Element) pendingRoots.add(record.target);
     }
     if (pendingRoots.size && flushTimer === undefined) flushTimer = setTimeout(flush, 120);
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
 }
 
 function stopObservingIfIdle() {

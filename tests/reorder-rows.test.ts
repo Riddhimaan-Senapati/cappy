@@ -14,10 +14,12 @@ if (typeof matchMedia !== "function") {
   });
 }
 
-const story = (rank: string, title: string, points: number) =>
+const story = (rank: string, title: string, points: number | null) =>
   `<tr class="athing"><td class="title"><span class="rank">${rank}</span></td><td><a>${title}</a></td></tr>` +
-  `<tr><td colspan="2" class="subtext"><span class="score">${points} points</span> by someone</td></tr>` +
+  `<tr><td colspan="2" class="subtext">${points == null ? "job" : `<span class="score">${points} points</span> by someone`}</td></tr>` +
   `<tr class="spacer"></tr>`;
+
+const storyGroup = "tr:has(.subtext), tr.spacer";
 
 describe("reorder keeps a multi-row story together and sorts by points", () => {
   it("moves the title, subtext, and spacer as one group when there is no ranking", async () => {
@@ -29,7 +31,7 @@ describe("reorder keeps a multi-row story together and sorts by points", () => {
       reason: "User asked to sort by number of points, highest first",
       scope: "page",
       css: null,
-      dom: [{ op: "reorder", selector: "tr.athing", keySelector: "a", direction: "desc", ranking: null }],
+      dom: [{ op: "reorder", selector: "tr.athing", keySelector: "a", groupSelector: storyGroup, direction: "desc", ranking: null }],
       block: null,
     };
     const outcome = await applyChange(change, false);
@@ -60,6 +62,7 @@ describe("reorder keeps a multi-row story together and sorts by points", () => {
         op: "reorder",
         selector: "tr.athing",
         keySelector: "a",
+        groupSelector: storyGroup,
         direction: "asc",
         ranking: [
           { key: "Low score story", rank: 1 },
@@ -92,6 +95,59 @@ describe("reorder keeps a multi-row story together and sorts by points", () => {
     const texts = [...document.querySelectorAll("tbody tr td")].map((node) => node.textContent);
     assert.deepEqual(texts, ["Alpha", "Bravo", "footnote"]);
   });
+
+  it("sorts by points when one row has no score and puts the table back if the check fails", async () => {
+    document.body.innerHTML = `<table><tbody>${story("1.", "Low score story", 10)}${story("2.", "Job post", null)}${story("3.", "High score story", 900)}${story("4.", "Mid score story", 100)}</tbody></table>`;
+    const { applyChange } = await import("../extension/src/content/engine.js");
+    const change: Change = {
+      id: "sort-with-job",
+      summary: "Sort stories by points, highest first",
+      reason: "User asked to sort by number of points, highest first",
+      scope: "page",
+      css: null,
+      dom: [{ op: "reorder", selector: "tr.athing", keySelector: "a", groupSelector: storyGroup, direction: "desc", ranking: null }],
+      block: null,
+    };
+    const outcome = await applyChange(change, false);
+    assert.equal(outcome.ok, true, outcome.error ?? "");
+    assert.deepEqual([...document.querySelectorAll("tr.athing a")].map((node) => node.textContent), ["High score story", "Mid score story", "Low score story", "Job post"]);
+
+    document.body.innerHTML = `<table><tbody>${story("1.", "High score story", 900)}${story("2.", "Low score story", 10)}</tbody></table>`;
+    const rejected = await applyChange({
+      ...change,
+      id: "sort-rejected",
+      dom: [{
+        op: "reorder" as const,
+        selector: "tr.athing",
+        keySelector: "a",
+        groupSelector: storyGroup,
+        direction: "asc" as const,
+        ranking: [
+          { key: "Low score story", rank: 1 },
+          { key: "High score story", rank: 2 },
+        ],
+      }],
+    }, false);
+    assert.equal(rejected.ok, false);
+    assert.match(rejected.error ?? "", /points are not in order/);
+    assert.equal(document.querySelector("tr.athing a")?.textContent, "High score story");
+  });
+
+  it("sorts alphabetically when the wording mentions points only to ignore them", async () => {
+    document.body.innerHTML = `<ul><li>Bravo</li><li>Alpha</li></ul>`;
+    const { applyChange } = await import("../extension/src/content/engine.js");
+    const outcome = await applyChange({
+      id: "sort-alpha-ignore",
+      summary: "Sorted alphabetically, ignoring points",
+      reason: "Alphabetical order",
+      scope: "page",
+      css: null,
+      dom: [{ op: "reorder", selector: "li", keySelector: null, direction: "asc", ranking: null }],
+      block: null,
+    }, false);
+    assert.equal(outcome.ok, true, outcome.error ?? "");
+    assert.deepEqual([...document.querySelectorAll("li")].map((node) => node.textContent), ["Alpha", "Bravo"]);
+  });
 });
 
 describe("contrast block", () => {
@@ -122,5 +178,25 @@ describe("contrast block", () => {
     const second = await again({ ...change, id: "contrast-dark" }, false);
     assert.equal(second.ok, true, second.error ?? "");
     assert.equal(dark.getAttribute("data-ba-contrast"), "paper");
+  });
+
+  it("switches a marked line when the background turns dark", async () => {
+    document.body.innerHTML = `<p id="faint" style="color:rgb(180, 180, 180);background:rgb(255, 255, 255)">Hard to read</p>`;
+    const { applyChange } = await import("../extension/src/content/engine.js");
+    const outcome = await applyChange({
+      id: "contrast-theme",
+      summary: "Increase contrast",
+      reason: "User asked to increase the contrast",
+      scope: "page",
+      css: null,
+      dom: null,
+      block: { name: "contrast", minRatio: 4.5 },
+    }, false);
+    assert.equal(outcome.ok, true, outcome.error ?? "");
+    const faint = document.getElementById("faint");
+    assert.equal(faint?.getAttribute("data-ba-contrast"), "ink");
+    faint?.setAttribute("style", "color:rgb(40, 40, 40);background:rgb(20, 20, 20)");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(faint?.getAttribute("data-ba-contrast"), "paper");
   });
 });

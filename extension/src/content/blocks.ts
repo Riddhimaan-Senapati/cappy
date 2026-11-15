@@ -186,17 +186,24 @@ function contrastFix(minRatio: number): LiveBlock {
   document.documentElement.append(style);
   const paint = (elements: HTMLElement[]) => {
     for (const el of elements) {
-      if (marked.has(el) || !el.textContent?.trim()) continue;
+      if (!el.isConnected || !el.textContent?.trim()) {
+        if (marked.delete(el)) el.removeAttribute("data-ba-contrast");
+        continue;
+      }
       let info: ReturnType<typeof contrastInfo>;
       try {
         info = contrastInfo(el);
       } catch {
         continue;
       }
-      if (!Number.isFinite(info.ratio) || info.ratio >= minRatio) continue;
+      if (!Number.isFinite(info.ratio) || info.ratio >= minRatio) {
+        if (marked.delete(el)) el.removeAttribute("data-ba-contrast");
+        continue;
+      }
       const luminance = backgroundLuminance(info.background);
       if (luminance == null) continue;
-      el.setAttribute("data-ba-contrast", luminance < 0.5 ? "paper" : "ink");
+      const tone = luminance < 0.5 ? "paper" : "ink";
+      if (el.getAttribute("data-ba-contrast") !== tone) el.setAttribute("data-ba-contrast", tone);
       marked.add(el);
     }
   };
