@@ -1,4 +1,5 @@
 import type { ClassifyMessage, UsageReporter } from "../../shared/protocol.js";
+// Bump CLASSIFY_CACHE_VERSION in shared/classify-cache.ts when SYSTEM changes what a match means.
 import { detectInjectionText } from "../../shared/safety.js";
 import type { AgentProvider } from "./providers/types.js";
 

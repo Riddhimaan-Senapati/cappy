@@ -1,4 +1,6 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
+import { CLASSIFY_CACHE_LOAD_MS, CLASSIFY_CACHE_MATCHES, CLASSIFY_CACHE_TEXTS, CLASSIFY_CACHE_TTL_MS, type ClassifyHostCache } from "../../../shared/classify-cache.js";
+import { activeProfileId, loadClassifyHost, saveClassifyVerdicts } from "../storage.js";
 import { isOwn } from "./dom.js";
 import { findItemGroups } from "./item-groups.js";
 
@@ -101,73 +103,81 @@ function pauseIfNeeded(match: string) {
 }
 
 const verdictKey = (match: string, text: string) => `${match}\u0000${text}`;
-const CACHE_MATCHES = 8;
-const CACHE_TEXTS = 300;
-const CACHE_KEY = "classifyCache";
 
 export function classifyTextKey(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 240);
 }
 
-type SiteVerdicts = Record<string, Record<string, boolean>>;
-type ClassifyCacheFile = Record<string, SiteVerdicts>;
-
 let cacheHost = "";
+let cacheProfile = "default";
 let cacheReady = true;
 let cacheWrite: ReturnType<typeof setTimeout> | undefined;
 const cacheWaiters = new Set<() => void>();
-const siteVerdicts: SiteVerdicts = {};
+const pendingWrites: Record<string, Record<string, boolean>> = {};
 
-function storageArea(): { get: (key: string) => Promise<Record<string, unknown>>; set: (value: Record<string, unknown>) => Promise<void> } | undefined {
-  const chromeApi = (globalThis as { chrome?: typeof chrome }).chrome;
-  const area = chromeApi?.storage?.local;
-  if (!area) return undefined;
-  return area;
+function wakeCacheWaiters() {
+  cacheReady = true;
+  for (const wake of cacheWaiters) wake();
 }
 
-// Saved verdicts are per site, so a reload or a new tab does not ask the model about items it already judged.
+function adoptCache(cache: ClassifyHostCache | null) {
+  if (!cache) return;
+  const now = Date.now();
+  for (const [match, rows] of Object.entries(cache.matches)) {
+    for (const [text, row] of Object.entries(rows)) {
+      if (!row || typeof row.verdict !== "boolean" || now - row.at >= CLASSIFY_CACHE_TTL_MS) continue;
+      const key = verdictKey(match, text);
+      if (!verdicts.has(key)) verdicts.set(key, row.verdict);
+    }
+  }
+}
+
+// Saved verdicts are per profile and site, one storage key per site, so a reload does not ask again.
 export function beginClassifyCache(host: string): Promise<void> {
   cacheHost = host;
-  const area = storageArea();
-  if (!area || !host) return Promise.resolve();
+  if (!host) return Promise.resolve();
   cacheReady = false;
-  return area.get(CACHE_KEY).then((stored) => {
-    const file = (stored[CACHE_KEY] ?? {}) as ClassifyCacheFile;
-    const site = file[host] ?? {};
-    for (const [match, rows] of Object.entries(site)) {
-      siteVerdicts[match] = { ...rows };
-      for (const [text, verdict] of Object.entries(rows)) {
-        if (typeof verdict === "boolean") verdicts.set(verdictKey(match, text), verdict);
-      }
-    }
-  }).catch(() => undefined).then(() => {
-    cacheReady = true;
-    for (const wake of cacheWaiters) wake();
-    cacheWaiters.clear();
+  let settled = false;
+  let finish = () => undefined;
+  const done = new Promise<void>((resolve) => {
+    finish = () => {
+      if (settled) return;
+      settled = true;
+      wakeCacheWaiters();
+      resolve();
+    };
   });
+  const timeout = setTimeout(finish, CLASSIFY_CACHE_LOAD_MS);
+  void activeProfileId().then((profileId) => {
+    cacheProfile = profileId;
+    return loadClassifyHost(profileId, host);
+  }).then((cache) => {
+    adoptCache(cache);
+  }).catch(() => undefined).then(() => {
+    clearTimeout(timeout);
+    finish();
+  });
+  return done;
 }
 
 function rememberVerdict(match: string, text: string, verdict: boolean) {
   const key = classifyTextKey(text);
-  if (!siteVerdicts[match]) siteVerdicts[match] = {};
-  siteVerdicts[match][key] = verdict;
-  const texts = Object.keys(siteVerdicts[match]);
-  for (const old of texts.slice(0, Math.max(0, texts.length - CACHE_TEXTS))) delete siteVerdicts[match][old];
-  const matches = Object.keys(siteVerdicts);
-  for (const old of matches.slice(0, Math.max(0, matches.length - CACHE_MATCHES))) delete siteVerdicts[old];
+  if (!pendingWrites[match]) pendingWrites[match] = {};
+  const texts = pendingWrites[match];
+  delete texts[key];
+  texts[key] = verdict;
+  const extra = Object.keys(texts);
+  for (const old of extra.slice(0, Math.max(0, extra.length - CLASSIFY_CACHE_TEXTS))) delete texts[old];
+  const matches = Object.keys(pendingWrites);
+  for (const old of matches.slice(0, Math.max(0, matches.length - CLASSIFY_CACHE_MATCHES))) delete pendingWrites[old];
   verdicts.set(verdictKey(match, key), verdict);
-  if (!cacheHost || !storageArea()) return;
+  if (!cacheHost) return;
   clearTimeout(cacheWrite);
   cacheWrite = setTimeout(() => {
-    const area = storageArea();
-    if (!area) return;
-    void area.get(CACHE_KEY).then((stored) => {
-      const file = { ...((stored[CACHE_KEY] ?? {}) as ClassifyCacheFile) };
-      file[cacheHost] = { ...siteVerdicts };
-      const hosts = Object.keys(file);
-      for (const old of hosts.slice(0, Math.max(0, hosts.length - 40))) delete file[old];
-      return area.set({ [CACHE_KEY]: file });
-    }).catch(() => undefined);
+    const updates: Record<string, Record<string, boolean>> = {};
+    for (const [name, rows] of Object.entries(pendingWrites)) updates[name] = { ...rows };
+    for (const name of Object.keys(pendingWrites)) delete pendingWrites[name];
+    void saveClassifyVerdicts(cacheProfile, cacheHost, updates).then((merged) => adoptCache(merged)).catch(() => undefined);
   }, 200);
 }
 
@@ -175,7 +185,7 @@ export function clearClassifyMemory() {
   verdicts.clear();
   inFlight.clear();
   queued.clear();
-  for (const key of Object.keys(siteVerdicts)) delete siteVerdicts[key];
+  for (const key of Object.keys(pendingWrites)) delete pendingWrites[key];
 }
 
 export function onClassifyCacheReady(wake: () => void): () => void {
@@ -189,9 +199,12 @@ const TITLE = "h1, h2, h3, h4, [id*='title' i], [class*='title' i]";
 // Leading with the title keeps durations and badges from crowding out what the item is about.
 function formatMark(el: HTMLElement): string {
   const links = [el, ...Array.from(el.querySelectorAll("a[href]"))].map((node) => node.getAttribute("href") ?? "").join(" ");
-  const label = `${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("class") ?? ""}`;
-  if (el.hasAttribute("data-shorts") || /\/shorts\//i.test(links) || /\bshorts\b/i.test(label)) return "[shorts] ";
-  if (el.hasAttribute("data-reel") || /\/reels?\//i.test(links) || /\breels?\b/i.test(label)) return "[reel] ";
+  const aria = el.getAttribute("aria-label") ?? "";
+  const raw = `${el.tagName} ${el.getAttribute("class") ?? ""}`.toLowerCase();
+  const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
+  // YouTube's Shorts tile is ytd-reel-item-renderer. "reel" in that name is not an Instagram reel.
+  if (raw.includes("ytd-reel") || el.hasAttribute("data-shorts") || /\/shorts\//i.test(links) || tokens.includes("shorts") || /\bshorts\b/i.test(aria)) return "[shorts] ";
+  if (el.hasAttribute("data-reel") || /\/reels?\//i.test(links) || tokens.includes("reel") || tokens.includes("reels") || /\breels?\b/i.test(aria)) return "[reel] ";
   return "";
 }
 
