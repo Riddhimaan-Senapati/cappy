@@ -492,7 +492,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           toggle("Act on page load", "Fix new pages before you ask", state.proactive, set("proactive")),
           toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
         ),
-        section("Focus rules", ...focusRows),
+        section("Focus rules", h("div", "s-note", "Time-based rules that hide clutter while you study or work. They turn on and off with the clock, and the bar shows Focus while one is on."), ...focusRows),
         section(`On this page${changes.length ? ` · ${changes.length}` : ""}`, ...changeRows),
       ],
       memory: () => [

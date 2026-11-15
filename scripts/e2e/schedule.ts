@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { openDemo, openSidePanel, runE2E, sendChat, shadowTextVisible, waitFor } from "./lib.js";
+import { openDemo, openSidePanel, runE2E, sendChat, shadowClassShown, shadowTextVisible, waitFor } from "./lib.js";
 
 const hhmm = (offsetHours: number) => {
   const at = new Date(Date.now() + offsetHours * 3_600_000);
@@ -31,6 +31,7 @@ await runE2E("schedule", async ({ browser }) => {
   await demo.bringToFront();
   await worker.evaluate((id) => chrome.tabs.sendMessage(id!, { kind: "toggleSpotlight" }), tabId);
   await demo.waitForTimeout(600);
+  await waitFor("the bar marking focus while a timed rule is on", () => shadowClassShown(demo, "focus-tag"));
   await demo.keyboard.press("ArrowRight");
   await waitFor("change history saying the podcast rule is on", () => shadowTextVisible(demo, "on now"));
   await waitFor("change history saying the shorts rule is off", () => shadowTextVisible(demo, "off right now"));

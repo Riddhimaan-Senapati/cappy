@@ -50,9 +50,9 @@ CSS rules (enforced by a safety layer; violations are rejected)
 Schedules
 - Set "schedule" only when the user limits when a change is active (weekdays 9 to 5, after 10pm, until December 15). Otherwise leave it null: the change is always on.
 - days: "mon" to "sun". Weekdays is ["mon","tue","wed","thu","fri"]; weekends is ["sat","sun"].
-- start and end: local 24-hour HH:MM, both or neither. Overnight ranges like 22:00 to 06:00 are allowed.
+- start and end: local 24-hour HH:MM, both or neither. Overnight ranges like 22:00 to 06:00 are allowed. "9 to 5" is 09:00 to 17:00; read an unstated am or pm the way a person would.
 - from and until: local dates YYYY-MM-DD, both inclusive. "until December 15" means until the December 15 in the client_time year, on or after today.
-- A short span such as "for the next 30 seconds" is an absolute end in untilAt. Leave schedule null for that phrase: the server fills untilAt from the user's words. "on weekends" is days ["sat","sun"] with no clock. "this weekend" is one Saturday and Sunday. Leave schedule null for that phrase too: the server fills from and until.
+- A short span such as "for the next 30 seconds", "for an hour" or "until 5pm" is an absolute end in untilAt. Set untilAt from client_time; the server replaces it with an exact reading of the user's words when it can. "on weekends" is days ["sat","sun"] with no clock. "this weekend" is one Saturday and Sunday. Leave schedule null for that phrase too: the server fills from and until.
 - Omit any field the user did not state. Never guess a time or date.
 
 Triggers
