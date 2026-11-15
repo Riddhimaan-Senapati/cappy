@@ -95,6 +95,7 @@ export interface StoredState {
   openAIVoiceVerified: boolean;
   geminiVoiceVerified: boolean;
   onboarded: boolean;
+  barOffset: { x: number; y: number } | null;
 }
 
 export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
@@ -136,6 +137,7 @@ export const DEFAULTS: StoredState = {
   openAIVoiceVerified: false,
   geminiVoiceVerified: false,
   onboarded: false,
+  barOffset: null,
 };
 
 const MAX_RECIPES = 60;

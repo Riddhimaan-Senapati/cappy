@@ -385,6 +385,8 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return;
     case "toggleSpotlight":
       return ensureOverlay().spotlight.toggle();
+    case "openSettings":
+      return ensureOverlay().spotlight.openSettings();
     case "ui": {
       recordRun(request.event);
       const handled = (overlay ?? ensureOverlay()).handleEvent(request.event);

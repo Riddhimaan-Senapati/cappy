@@ -1,6 +1,6 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { TargetElement } from "../../../shared/protocol.js";
-import type { BackgroundRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
+import type { BackgroundRequest, ContentRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
 import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, type RequestSession } from "../storage.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
@@ -88,21 +88,50 @@ function onWelcomePage(tab: chrome.tabs.Tab | undefined, command: string) {
   return true;
 }
 
+// Tabs opened before the extension was (re)loaded have no content script yet; a fresh one needs a moment to start listening.
+async function reachTab(tabId: number, request: ContentRequest): Promise<boolean> {
+  try {
+    await sendToTab(tabId, request);
+    return true;
+  } catch {
+    // fall through to injecting the content script
+  }
+  try {
+    await injectContent(tabId);
+  } catch {
+    return false;
+  }
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    try {
+      await sendToTab(tabId, request);
+      return true;
+    } catch {
+      // still starting up
+    }
+  }
+  return false;
+}
+
+async function flagUnavailable(tabId: number) {
+  await chrome.action.setBadgeText({ tabId, text: "!" }).catch(() => undefined);
+  await chrome.action.setTitle({ tabId, title: "The bar can't open on this page. Chrome blocks extensions here." }).catch(() => undefined);
+  setTimeout(() => {
+    void chrome.action.setBadgeText({ tabId, text: "" }).catch(() => undefined);
+    void chrome.action.setTitle({ tabId, title: "Adaptive Agent" }).catch(() => undefined);
+  }, 4000);
+}
+
+async function openBarSettings(tab: chrome.tabs.Tab | undefined) {
+  if (!tab?.id) return;
+  if (!(await reachTab(tab.id, { kind: "openSettings" }))) await flagUnavailable(tab.id);
+}
+
+chrome.action.onClicked.addListener((tab) => void openBarSettings(tab));
+
 async function toggleSpotlight(tab: chrome.tabs.Tab | undefined) {
   if (!tab?.id || onWelcomePage(tab, "toggle-spotlight")) return;
-  try {
-    await sendToTab(tab.id, { kind: "toggleSpotlight" });
-    return;
-  } catch {
-    // tabs opened before the extension was (re)loaded have no content script yet
-  }
-  try {
-    await injectContent(tab.id);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    await sendToTab(tab.id, { kind: "toggleSpotlight" });
-  } catch {
-    await chrome.action.openPopup().catch(() => undefined);
-  }
+  if (!(await reachTab(tab.id, { kind: "toggleSpotlight" }))) await flagUnavailable(tab.id);
 }
 
 // An earlier version made the toolbar icon open the side panel, and Chrome persists that choice.

@@ -72,6 +72,6 @@ export function createProfilesView(rerender: () => void) {
       );
     }
     if (error) rows.push(h("div", "s-note s-error", error));
-    return h("section", "s-sec", "", [h("h3", "", "Profile"), ...rows]);
+    return h("section", "s-sec", "", rows);
   };
 }

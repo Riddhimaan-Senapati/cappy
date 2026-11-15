@@ -132,9 +132,9 @@ function cameraSection(state: StoredState): Node {
   return h("section", "s-sec", "", [h("h3", "", "Camera"), ...rows]);
 }
 
-type Tab = "page" | "you" | "ai" | "voice" | "camera";
-const TABS: Array<[Tab, string]> = [["page", "Page"], ["you", "You"], ["ai", "AI"], ["voice", "Voice"], ["camera", "Camera"]];
-let currentTab: Tab = "page";
+type Tab = "general" | "memory" | "ai" | "voice" | "camera";
+const TABS: Array<[Tab, string]> = [["general", "General"], ["memory", "Memory"], ["ai", "AI"], ["voice", "Voice"], ["camera", "Camera"]];
+let currentTab: Tab | null = null;
 
 function tabBar(onPick: (tab: Tab) => void): HTMLElement {
   const bar = h("div", "s-tabs");
@@ -428,20 +428,22 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     const verificationStatus = h("div", "s-note", voiceCheck);
     verificationStatus.setAttribute("role", "status");
 
+    currentTab ??= status.connected && status.activeProvider ? "general" : "ai";
     const number = (value: number) => value.toLocaleString("en-US");
     const usageRow = h("div", "s-row", "", [
       h("div", "grow", "", [h("div", "", "Usage on this browser"), h("small", "", `${number(state.usage.calls)} calls · ${number(state.usage.inputTokens)} in · ${number(state.usage.outputTokens)} out tokens`)]),
     ]);
     const panels: Record<Tab, () => Node[]> = {
-      page: () => [
-        section("On this page", ...changeRows),
+      general: () => [
+        profiles(state),
         section(
           "Automatic",
           toggle("Act on page load", "Fix new pages before you ask", state.proactive, set("proactive")),
           toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
         ),
+        section(`On this page${changes.length ? ` · ${changes.length}` : ""}`, ...changeRows),
       ],
-      you: () => [profiles(state), memory.render(state, toggle)],
+      memory: () => [memory.render(state, toggle)],
       ai: () => [
         ...providerSection(status, state),
         section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...(status.activeProvider ? [more("Choose models", modelPickers(state, status))] : [])),

@@ -43,6 +43,7 @@ export type ContentRequest =
   | { kind: "busy"; on: boolean }
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
+  | { kind: "openSettings" }
   | { kind: "startVoice" }
   | { kind: "targetContextElement" }
   | { kind: "pickElement" }

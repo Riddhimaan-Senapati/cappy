@@ -101,12 +101,3 @@ export const SETTINGS_CSS = `
 .s-foot { display: flex; gap: 8px; flex-wrap: wrap; }
 @media (prefers-reduced-motion: reduce) { .s *, .s *::after { animation: none !important; transition: none !important; } }
 `;
-
-export const POPUP_CSS = `
-html, body { margin: 0; background: #121217; }
-body { box-sizing: border-box; width: 400px; padding: 20px; background: radial-gradient(ellipse at top left, rgba(139,155,255,0.07), transparent 45%), #121217; font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f4f4f7; }
-.pop-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-.pop-logo { width: 36px; height: 36px; border-radius: 12px; display: grid; place-items: center; background: var(--grad); color: #0d0d12; }
-.pop-head h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
-.pop-head small { display: block; color: var(--muted); font-size: 11.5px; }
-`;

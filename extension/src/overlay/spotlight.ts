@@ -108,6 +108,9 @@ export class Spotlight {
   private home = h("button", "home");
   private pill = h("button", "pill");
   private pickButton = h("button", "pick");
+  private gear = h("button", "pick");
+  private grip = h("div", "grip");
+  private offset = { x: 0, y: 0 };
   private chip = h("div", "target-chip");
   private target: TargetElement | null = null;
   private body = h("div", "body");
@@ -166,7 +169,15 @@ export class Spotlight {
     this.pickButton.setAttribute("aria-label", "Choose an element on the page");
     this.pickButton.append(icon("target", 15));
     this.pickButton.addEventListener("click", () => this.startPicking());
-    this.bar.append(h("div", "row", "", [this.orb, this.chip, this.input, this.mic, this.pickButton, this.home, this.pill]), this.body, this.hints, this.live);
+    this.gear.type = "button";
+    this.gear.title = "Settings";
+    this.gear.setAttribute("aria-label", "Settings");
+    this.gear.append(icon("settings", 15));
+    this.gear.addEventListener("click", () => (this.view === "settings" ? this.goHome() : this.setView("settings")));
+    this.grip.title = "Drag to move · double-click to reset";
+    this.grip.setAttribute("aria-hidden", "true");
+    this.makeMovable();
+    this.bar.append(this.grip, h("div", "row", "", [this.orb, this.chip, this.input, this.mic, this.pickButton, this.gear, this.home, this.pill]), this.body, this.hints, this.live);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
 
@@ -238,6 +249,12 @@ export class Spotlight {
     else void this.show().catch(reportExtensionError);
   }
 
+  openSettings() {
+    if (this.opened && this.view === "settings") this.hide();
+    else if (this.opened) this.setView("settings");
+    else void this.show("settings").catch(reportExtensionError);
+  }
+
   async show(view?: View) {
     if (!this.deps.ensureAlive()) return;
     this.previousFocus = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
@@ -261,6 +278,7 @@ export class Spotlight {
     this.selected = 0;
     this.setView(view ?? (this.working ? "run" : "list"));
     this.layer.classList.add("open");
+    this.placeBar(this.cache?.barOffset ?? { x: 0, y: 0 });
     this.onToggle(true);
     requestAnimationFrame(() => this.input.focus({ preventScroll: true }));
   }
@@ -326,6 +344,45 @@ export class Spotlight {
     this.render();
   }
 
+  // Dragging moves the whole bar; the spot is remembered across pages until reset with a double-click.
+  private makeMovable() {
+    let start: { x: number; y: number; dx: number; dy: number } | null = null;
+    this.grip.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.grip.setPointerCapture(event.pointerId);
+      start = { x: event.clientX, y: event.clientY, dx: this.offset.x, dy: this.offset.y };
+      this.bar.classList.add("dragging");
+    });
+    this.grip.addEventListener("pointermove", (event) => {
+      if (!start) return;
+      this.placeBar({ x: start.dx + event.clientX - start.x, y: start.dy + event.clientY - start.y });
+    });
+    const finish = () => {
+      if (!start) return;
+      start = null;
+      this.bar.classList.remove("dragging");
+      void save({ barOffset: { ...this.offset } });
+    };
+    this.grip.addEventListener("pointerup", finish);
+    this.grip.addEventListener("pointercancel", finish);
+    this.grip.addEventListener("dblclick", () => {
+      this.placeBar({ x: 0, y: 0 });
+      void save({ barOffset: null });
+    });
+  }
+
+  private placeBar(next: { x: number; y: number }) {
+    this.offset = next;
+    this.bar.style.setProperty("translate", `${next.x}px ${next.y}px`);
+    const rect = this.bar.getBoundingClientRect();
+    const fixX = rect.left < 8 ? 8 - rect.left : rect.right > innerWidth - 8 ? innerWidth - 8 - rect.right : 0;
+    const fixY = rect.top < 8 ? 8 - rect.top : rect.top > innerHeight - 60 ? innerHeight - 60 - rect.top : 0;
+    if (fixX || fixY) {
+      this.offset = { x: next.x + fixX, y: next.y + fixY };
+      this.bar.style.setProperty("translate", `${this.offset.x}px ${this.offset.y}px`);
+    }
+  }
+
   private goHome() {
     window.clearTimeout(this.closeTimer);
     this.sessionRequest = "";
@@ -336,6 +393,7 @@ export class Spotlight {
   private render() {
     this.layer.classList.toggle("running", this.view === "run");
     this.input.readOnly = this.view === "settings" || this.view === "history" || this.view === "commands";
+    this.bar.classList.toggle("tall", this.view === "settings");
     this.mic.disabled = this.input.readOnly;
     this.input.placeholder =
       this.view === "settings"
@@ -354,6 +412,8 @@ export class Spotlight {
     this.orb.classList.toggle("work", this.working);
     this.home.hidden = this.view !== "run";
     this.pickButton.hidden = this.view !== "list" && this.view !== "run";
+    this.gear.hidden = this.view !== "list" && this.view !== "run" && this.view !== "settings";
+    this.gear.setAttribute("aria-pressed", String(this.view === "settings"));
     this.renderPill();
     if (this.view === "settings") this.renderSettingsView();
     else if (this.view === "history") this.renderHistory();
