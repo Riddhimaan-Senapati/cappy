@@ -101,7 +101,8 @@ export type BackgroundRequest =
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }
   | { kind: "voicePermissionGranted" }
-  | { kind: "recognitionEvent"; event: unknown };
+  | { kind: "recognitionEvent"; event: unknown }
+  | { kind: "liveTask"; id: string; text: string };
 
 export type DebugPortMessage =
   | { type: "inspection"; snapshot?: PageInspection; error?: string }

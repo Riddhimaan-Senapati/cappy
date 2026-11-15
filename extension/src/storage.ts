@@ -96,7 +96,8 @@ export interface StoredState {
   ttsRate: number;
   voiceAutoSend: boolean;
   voiceLang: string;
-  voiceProvider: "chrome" | "openai" | "gemini";
+  // "live" is a GPT-Live conversation: it listens and talks back, and hands page requests to the agent.
+  voiceProvider: "chrome" | "openai" | "gemini" | "live";
   openAIVoiceVerified: boolean;
   geminiVoiceVerified: boolean;
   onboarded: boolean;
@@ -180,7 +181,7 @@ export async function load(): Promise<StoredState> {
   try {
     const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
     const state = { ...DEFAULTS, ...stored } as StoredState;
-    if ((state.voiceProvider === "openai" && !state.openAIVoiceVerified) || (state.voiceProvider === "gemini" && !state.geminiVoiceVerified)) state.voiceProvider = "chrome";
+    if (((state.voiceProvider === "openai" || state.voiceProvider === "live") && !state.openAIVoiceVerified) || (state.voiceProvider === "gemini" && !state.geminiVoiceVerified)) state.voiceProvider = "chrome";
     return state;
   } catch {
     return { ...DEFAULTS };
