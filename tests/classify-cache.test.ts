@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { createHash } from "node:crypto";
 import { CLASSIFY_CACHE_HOSTS, CLASSIFY_CACHE_TTL_MS, CLASSIFY_CACHE_VERSION, CLASSIFY_INDEX_KEY, classifyCacheKey, classifyTextHash, mergeClassifyHost, mergeClassifyIndex } from "../shared/classify-cache.js";
-import { importClassifyCaches, loadClassifyHost, saveClassifyVerdicts } from "../extension/src/storage.js";
+import { clearClassifyCaches, importClassifyCaches, loadClassifyHost, saveClassifyVerdicts } from "../extension/src/storage.js";
 import { SYSTEM } from "../server/agent/classify.js";
 
 const originalChrome = globalThis.chrome;
@@ -15,7 +15,8 @@ function storage() {
   globalThis.chrome = {
     storage: {
       local: {
-        get: async (key: string | string[]) => {
+        get: async (key?: string | string[] | null) => {
+          if (key == null) return { ...data };
           const keys = Array.isArray(key) ? key : [key];
           return Object.fromEntries(keys.filter((entry) => data[entry] !== undefined).map((entry) => [entry, data[entry]]));
         },
@@ -74,7 +75,7 @@ describe("classify cache limits", () => {
     await importClassifyCaches({
       profile: { version: 1, matches: {} },
       siteChanges: { version: 1, matches: { shorts: {} } },
-      [classifyCacheKey("default", "news.ycombinator.com")]: { version: 1, matches: { shorts: { abcd: { verdict: true, at: 1 } } } },
+      [classifyCacheKey("default", "news.ycombinator.com")]: { version: CLASSIFY_CACHE_VERSION, matches: { shorts: { abcd: { verdict: true, at: 1 } } } },
     } as never);
     assert.deepEqual(data.profile, ["keep me"]);
     assert.ok(data[classifyCacheKey("default", "news.ycombinator.com")]);
@@ -121,6 +122,25 @@ describe("classify cache limits", () => {
     assert.deepEqual(keys, [other, classifyCacheKey("default", "news.ycombinator.com")].sort());
   });
 
+  it("keeps a local site when another site is imported, and clear removes orphaned blobs", async () => {
+    const data = storage();
+    await saveClassifyVerdicts("default", "local.example", { shorts: { ab: true } }, 1);
+    const localKey = classifyCacheKey("default", "local.example");
+    const imported = classifyCacheKey("default", "imported.example");
+    const orphan = classifyCacheKey("default", "orphan.example");
+    await importClassifyCaches({
+      [imported]: { version: CLASSIFY_CACHE_VERSION, matches: { shorts: { cd: { verdict: true, at: 2 } } } },
+    });
+    data[orphan] = { version: CLASSIFY_CACHE_VERSION, matches: {} };
+    const index = (data[CLASSIFY_INDEX_KEY] as Array<{ key: string }>).map((entry) => entry.key).sort();
+    assert.deepEqual(index, [imported, localKey].sort());
+    await clearClassifyCaches();
+    assert.equal(data[localKey], undefined);
+    assert.equal(data[imported], undefined);
+    assert.equal(data[orphan], undefined);
+    assert.deepEqual(data[CLASSIFY_INDEX_KEY], []);
+  });
+
   it("keeps both sites when two index updates start from the same list", () => {
     const hostA = classifyCacheKey("default", "a.example");
     const hostB = classifyCacheKey("default", "b.example");
@@ -132,7 +152,7 @@ describe("classify cache limits", () => {
   });
 });
 
-const RECORDED_CLASSIFY_PROMPT = { version: 1, hash: "b5c830bdb864a419724095fb78ca8920bc27ac7b6497618e74a7f9a3a8e76093" };
+const RECORDED_CLASSIFY_PROMPT = { version: 2, hash: "b5c830bdb864a419724095fb78ca8920bc27ac7b6497618e74a7f9a3a8e76093" };
 
 describe("classify prompt", () => {
   it("records the prompt hash with the cache version", () => {

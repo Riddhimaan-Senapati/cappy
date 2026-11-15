@@ -1,5 +1,5 @@
-// Bump this when server/agent/classify.ts changes what a verdict means. Old rows are then ignored.
-export const CLASSIFY_CACHE_VERSION = 1;
+// Bump this when a verdict's meaning or the row key format changes. Old rows are then ignored.
+export const CLASSIFY_CACHE_VERSION = 2;
 export const CLASSIFY_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 // chrome.storage.local is 10 MB unless the manifest asks for unlimitedStorage.
 // 12 sites, 4 descriptions, 60 texts stays near 1 MB so profile and saved changes can still be written.

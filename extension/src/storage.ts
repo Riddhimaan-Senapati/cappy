@@ -216,10 +216,16 @@ async function touchClassifyIndex(key: string, now: number) {
 
 export async function clearClassifyCaches() {
   try {
-    const keys = (await readIndex()).map((entry) => entry.key).filter(isClassifyCacheKey);
+    const stored = await chrome.storage.local.get(null);
+    const keys = Object.keys(stored).filter(isClassifyCacheKey);
     if (keys.length) await chrome.storage.local.remove(keys);
   } catch {
-    // The index is cleared below even when the blobs were already gone.
+    try {
+      const keys = (await readIndex()).map((entry) => entry.key).filter(isClassifyCacheKey);
+      if (keys.length) await chrome.storage.local.remove(keys);
+    } catch {
+      // The index is cleared below even when the blobs were already gone.
+    }
   }
   await chrome.storage.local.set({ [CLASSIFY_INDEX_KEY]: [] });
 }
@@ -247,9 +253,16 @@ export async function importClassifyCaches(caches: Record<string, ClassifyHostCa
     .slice(-CLASSIFY_CACHE_HOSTS);
   if (!entries.length) return;
   await chrome.storage.local.set(Object.fromEntries(entries));
-  await chrome.storage.local.set({
-    [CLASSIFY_INDEX_KEY]: entries.map(([key], index) => ({ key, at: now + index })),
-  });
+  let index = await readIndex();
+  const dropped: string[] = [];
+  for (const [offset, [key]] of entries.entries()) {
+    const merged = mergeClassifyIndex(index, key, now + offset);
+    index = merged.index;
+    dropped.push(...merged.dropped);
+  }
+  const safeDrop = dropped.filter((key) => isClassifyCacheKey(key) && !index.some((entry) => entry.key === key));
+  if (safeDrop.length) await chrome.storage.local.remove(safeDrop);
+  await chrome.storage.local.set({ [CLASSIFY_INDEX_KEY]: index });
 }
 
 export async function forgetSiteNotes(host: string) {
