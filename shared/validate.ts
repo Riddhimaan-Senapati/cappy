@@ -56,12 +56,11 @@ const SITE_WIDE = new RegExp(
 );
 const ALL_SITES = /\b(?:all (?:sites|websites)|every (?:site|website)|everywhere)\b/i;
 const THIS_PAGE = /\beverywhere on this page\b|\bon this page\b|\bthis page only\b/i;
-const NEGATED_PAGE = /\bnot (?:just |only )?(?:everywhere on this page|on this page|this page only)\b/i;
 const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
 
-// "not just on this page" is the opposite of a one-off. An explicit site or all-sites phrase then wins.
-function askedForThisPage(message: string): boolean {
-  return THIS_PAGE.test(message) && !NEGATED_PAGE.test(message);
+// Drop "on this page" before looking for a site or all-sites phrase, so the broader request wins.
+function withoutThisPage(message: string): string {
+  return message.replace(new RegExp(THIS_PAGE.source, "gi"), " ");
 }
 
 export function requestedSiteWide(message: string): boolean {
@@ -71,8 +70,8 @@ export function requestedSiteWide(message: string): boolean {
 // "everywhere" and "across all websites" mean every website. "everywhere on youtube" is one site.
 // "everywhere on this page" is a one-off, so it is neither.
 export function requestedEverywhere(message: string): boolean {
-  if (askedForThisPage(message)) return false;
-  return ALL_SITES.test(message) && !SITE_WIDE.test(message);
+  const rest = withoutThisPage(message);
+  return ALL_SITES.test(rest) && !SITE_WIDE.test(rest);
 }
 
 export function normalizePagePath(path: string): string {
@@ -103,18 +102,17 @@ export function prepareSavedChange<T extends { scope: string; pagePath?: string 
 ): T {
   let scope = change.scope;
   if (trigger === "chat" && (scope === "site" || scope === "everywhere")) {
-    if (askedForThisPage(message)) {
-      scope = "page";
-    } else {
-    const namedSite = requestedSiteWide(message);
+    const rest = withoutThisPage(message);
+    const mentionedPage = THIS_PAGE.test(message);
+    const namedSite = requestedSiteWide(rest);
     const siteSpecificFilter = change.block?.name === "contentFilter" && Boolean(change.block.itemSelector);
     // A schedule keeps a portable all-sites filter (no host selector) on every site. A selector is this site only.
-    const portableEverywhere = scope === "everywhere" && change.schedule != null && !namedSite && !siteSpecificFilter;
-    const preferenceEverywhere = scope === "everywhere" && PREFERENCE.test(message) && !namedSite;
-    const everywhere = requestedEverywhere(message) || preferenceEverywhere || portableEverywhere;
-    const siteWide = !everywhere && (namedSite || change.schedule != null || siteSpecificFilter);
+    // Saying "on this page" does not shrink a request that also names the site or every site.
+    const portableEverywhere = scope === "everywhere" && change.schedule != null && !namedSite && !siteSpecificFilter && !mentionedPage;
+    const preferenceEverywhere = scope === "everywhere" && PREFERENCE.test(rest) && !namedSite;
+    const everywhere = requestedEverywhere(rest) || preferenceEverywhere || portableEverywhere;
+    const siteWide = !everywhere && (namedSite || (!mentionedPage && (change.schedule != null || siteSpecificFilter)));
     scope = everywhere ? "everywhere" : siteWide ? "site" : "page";
-    }
   }
   if (scope === "page") return { ...change, scope, pagePath: normalizePagePath(pathname || change.pagePath || "/") };
   return { ...change, scope, pagePath: undefined };
