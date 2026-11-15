@@ -14,7 +14,7 @@ import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
 import { setFilterClassifier } from "./content-filter.js";
-import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
 import { inspectPage, recordActivity, recordChange, recordRun, recordUsage, setEventTracking } from "./inspection.js";
@@ -470,6 +470,7 @@ function start() {
       }).catch(() => undefined);
     }
     if (changes.trackEvents) setEventTracking(changes.trackEvents.newValue !== false);
+    if (changes.focusMode) setFocusMode(changes.focusMode.newValue === true);
     if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
     if (changes.camera || changes.paused) void load().then((state) => whenReady(() => syncCamera(state.camera, state.paused)));
   });
@@ -482,6 +483,7 @@ function start() {
   (async () => {
     const state = await load();
     setEventTracking(state.trackEvents);
+    setFocusMode(state.focusMode);
     recordActivity(state.paused ? "Adaptations paused; saved changes were not restored." : "Restoring saved site and global changes locally.");
     whenReady(() => {
       if (state.floatingButton) ensureOverlay().setFab(true);

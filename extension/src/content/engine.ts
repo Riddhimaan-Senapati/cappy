@@ -257,10 +257,23 @@ function nextScheduleDelay(now = Date.now()): number {
 }
 
 let focusOn = false;
+let focusMode = false;
 const focusListeners = new Set<(on: boolean) => void>();
 
+// Focus mode keeps every focus rule on, ignoring its times, until the user turns it off.
+function scheduleOn(schedule: Change["schedule"], now: Date): boolean {
+  return focusMode || isScheduleActive(schedule, now);
+}
+
+export function setFocusMode(on: boolean) {
+  if (focusMode === on) return;
+  focusMode = on;
+  syncSchedules();
+  publishFocus();
+}
+
 export function focusLive(): boolean {
-  return [...applied.values()].some((entry) => entry.change.schedule != null && entry.live !== null);
+  return focusMode || [...applied.values()].some((entry) => entry.change.schedule != null && entry.live !== null);
 }
 
 export function onFocusLive(listener: (on: boolean) => void): () => void {
@@ -301,7 +314,7 @@ function manageScheduleTimer() {
 // Switches scheduled changes on or off to match the clock. Runs on a timer, on visibilitychange and after each apply.
 function syncSchedules() {
   const now = new Date();
-  const due = [...applied.values()].filter((entry) => entry.change.schedule && isScheduleActive(entry.change.schedule, now) !== (entry.live !== null));
+  const due = [...applied.values()].filter((entry) => entry.change.schedule && scheduleOn(entry.change.schedule, now) !== (entry.live !== null));
   if (due.length) {
     void transition(() => {
       for (const entry of due) {
@@ -405,7 +418,7 @@ function stopObservingIfIdle() {
 async function installChange(entry: Applied, matched: Record<string, number>, animate: boolean): Promise<string | undefined> {
   await transition(() => {
     revertNow(entry.change.id);
-    const waiting = entry.change.schedule != null && !isScheduleActive(entry.change.schedule, new Date());
+    const waiting = entry.change.schedule != null && !scheduleOn(entry.change.schedule, new Date());
     if (isOneShot(entry.change.schedule) && waiting) {
       changeLog.delete(entry.change.id);
       return;

@@ -85,6 +85,7 @@ export interface StoredState {
   proactive: boolean;
   floatingButton: boolean;
   trackEvents: boolean;
+  focusMode: boolean;
   routing: Routing;
   provider: string | null;
   modelChoices: Record<string, Partial<Record<Tier, string>>>;
@@ -129,6 +130,7 @@ export const DEFAULTS: StoredState = {
   proactive: true,
   floatingButton: true,
   trackEvents: true,
+  focusMode: false,
   routing: "auto",
   provider: null,
   modelChoices: {},

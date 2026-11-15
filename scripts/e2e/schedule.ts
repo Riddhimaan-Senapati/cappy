@@ -36,6 +36,13 @@ await runE2E("schedule", async ({ browser }) => {
   await waitFor("change history saying the podcast rule is on", () => shadowTextVisible(demo, "on now"));
   await waitFor("change history saying the shorts rule is off", () => shadowTextVisible(demo, "off right now"));
 
+  await worker.evaluate(() => chrome.storage.local.set({ focusMode: true }));
+  await waitFor("focus mode turning on the shorts rule outside its window", () => short.isHidden());
+  assert.ok(await podcast.isHidden(), "rules already on stay on in focus mode");
+  await worker.evaluate(() => chrome.storage.local.set({ focusMode: false }));
+  await waitFor("shorts back on their clock once focus mode is off", () => short.isVisible());
+  assert.ok(await podcast.isHidden(), "the podcast rule keeps following its own window");
+
   await sendChat(panel, demo, "don't show shorts for the next 8 seconds");
   await waitFor("shorts hidden for the short span", () => short.isHidden());
   await waitFor("shorts return when the span ends", () => short.isVisible(), 15_000);
