@@ -68,6 +68,24 @@ describe("isScheduleActive", () => {
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 22, 3, 0)), false, "Sunday 03:00 is Saturday night");
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 19, 23, 0)), false, "Thursday 23:00");
   });
+
+  it("keeps Saturday night across the US daylight-saving transitions", () => {
+    const sat: Schedule = { days: ["sat"], start: "22:00", end: "06:00" };
+    const instants = [
+      new Date("2026-10-31T22:30:00-04:00"),
+      new Date("2026-11-01T01:30:00-04:00"),
+      new Date("2026-11-01T01:30:00-05:00"),
+      new Date("2026-11-01T03:30:00-05:00"),
+      new Date("2026-03-07T22:30:00-05:00"),
+      new Date("2026-03-08T01:30:00-05:00"),
+      new Date("2026-03-08T03:30:00-04:00"),
+    ];
+    // Wall-clock checks only mean this in a US Eastern process. UTC CI skips them.
+    if (instants.some((date) => date.getHours() !== 1 && date.getHours() !== 3 && date.getHours() !== 22)) return;
+    for (const date of instants) assert.equal(isScheduleActive(sat, date), true, date.toISOString());
+    assert.equal(isScheduleActive(sat, new Date("2026-11-01T06:00:00-05:00")), false);
+    assert.equal(isScheduleActive(sat, new Date("2026-03-08T06:00:00-04:00")), false);
+  });
 });
 
 describe("describeSchedule", () => {

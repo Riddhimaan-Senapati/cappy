@@ -140,7 +140,18 @@ function liveOp(op: DomOp): LiveOp {
           break;
       }
     }
-    if (op.op === "reorder") sortItems(op, elements, originalOrder, undoSteps);
+    if (op.op === "reorder") {
+      // A tile that loads later is the only node in the reapply root, so pull in its matching siblings.
+      const withSiblings = new Set(elements);
+      for (const item of elements) {
+        const parent = item.parentElement;
+        if (!parent) continue;
+        for (const child of parent.children) {
+          if (child.matches(op.selector)) withSiblings.add(child);
+        }
+      }
+      sortItems(op, [...withSiblings], originalOrder, undoSteps);
+    }
     return elements.length;
   };
 
@@ -193,10 +204,17 @@ function compareKeys(op: Extract<DomOp, { op: "reorder" }>) {
   const direction = op.direction === "asc" ? 1 : -1;
   if (!op.ranking) return (a: Element, b: Element) => collator.compare(keyText(a, op.keySelector), keyText(b, op.keySelector)) * direction;
   const ranks = new Map(op.ranking.map((entry) => [entry.key.replace(/\s+/g, " ").trim().toLowerCase(), entry.rank]));
-  const rankOf = (item: Element) => ranks.get(keyText(item, op.keySelector).toLowerCase());
+  const front = Math.min(...op.ranking.map((entry) => entry.rank));
+  const promoted = op.keywords?.length ? keywordPattern(op.keywords) : null;
+  const rankOf = (item: Element) => {
+    const listed = ranks.get(keyText(item, op.keySelector).toLowerCase());
+    if (listed !== undefined) return listed;
+    // A cooking video that loads later was not in the ranking, but it is still the kind the user put first.
+    if (promoted?.test(keyText(item, op.keySelector))) return front;
+    return undefined;
+  };
   return (a: Element, b: Element) => {
     const [x, y] = [rankOf(a), rankOf(b)];
-    // Items the model did not rank (for example ones that loaded later) keep their order at the end.
     if (x === undefined || y === undefined) return x === undefined ? (y === undefined ? 0 : 1) : -1;
     return x - y;
   };

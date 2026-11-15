@@ -28,11 +28,12 @@ const agent = new AgentClient({
       const request = sessionRequests.get(event.runId);
       if (request) request.options = { question: event.question, options: event.options };
     }
-    if (event.type === "done" && event.trigger === "page_load") {
+    if ((event.type === "done" && event.trigger === "page_load") || event.type === "error" || event.type === "cancelled") {
       const checked = proactivePending.get(tabId);
-      if (checked) void markChecked(checked);
+      if (checked && event.type === "done" && event.trigger === "page_load") void markChecked(checked).finally(() => checksInFlight.delete(checked));
+      else if (checked) checksInFlight.delete(checked);
+      proactivePending.delete(tabId);
     }
-    if ((event.type === "done" && event.trigger === "page_load") || event.type === "error" || event.type === "cancelled") proactivePending.delete(tabId);
     if (event.type === "done" || event.type === "error") {
       const message = sessionRequests.get(event.runId);
       sessionRequests.delete(event.runId);
@@ -211,6 +212,8 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 const CHECKED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
 // Tab id to the site and profile its page-load run is checking; saved as checked once that run finishes.
 const proactivePending = new Map<number, string>();
+// Origin+profile keys whose check has started but not finished. Two tabs must not both call the model.
+const checksInFlight = new Set<string>();
 
 const checkedKey = (state: { activeProfileId: string; profile: string[] }, origin: string) => JSON.stringify([state.activeProfileId, origin, state.profile]);
 
@@ -248,13 +251,20 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
     return;
   }
   const checked = checkedKey(state, origin);
+  if (checksInFlight.has(checked)) {
+    await note("Automatic page adaptation skipped: another tab is already checking this site.");
+    return;
+  }
+  checksInFlight.add(checked);
   if (!profileChanged && (await checkedRecently(checked))) {
+    checksInFlight.delete(checked);
     await note("Automatic page adaptation skipped: this profile already checked this site in the last week.");
     return;
   }
   // Asking first costs nothing until the user accepts; the offer counts as this week's check so it does not repeat on every visit.
   if (state.askBeforeAdapting && !profileChanged) {
     await markChecked(checked);
+    checksInFlight.delete(checked);
     await sendToTab(tabId, { kind: "offerAdapt" }).catch(() => undefined);
     await note("Offered to adapt this page instead of adapting it automatically.");
     return;
@@ -264,7 +274,10 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
     await note("Automatic page adaptation started: enabled, profile present, no saved site adaptation, first check for this site and profile in this tab.");
     const { proactiveSeen: seen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
     await chrome.storage.session.set({ proactiveSeen: [...seen.filter((entry) => entry !== key).slice(-100), key] });
-  } else proactivePending.delete(tabId);
+  } else {
+    proactivePending.delete(tabId);
+    checksInFlight.delete(checked);
+  }
 }
 
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {

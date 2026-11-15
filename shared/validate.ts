@@ -109,6 +109,10 @@ export function validateChange(change: Change): string | null {
       if (!Array.isArray(op.ranking) || op.ranking.length > 300) return "reorder ranking must be a list of at most 300 items";
       if (op.ranking.some((entry) => typeof entry.key !== "string" || entry.key.length > 300 || !Number.isFinite(entry.rank))) return "each ranking entry needs a key and a numeric rank";
     }
+    if (op.op === "reorder" && op.keywords != null) {
+      if (!Array.isArray(op.keywords) || op.keywords.length > 12) return "reorder keywords must be a list of at most 12";
+      if (op.keywords.some((keyword) => typeof keyword !== "string" || keyword.trim().length < 2 || keyword.length > 40)) return "reorder keyword must be 2 to 40 characters";
+    }
     if (op.op === "reorder" && op.keySelector !== null && typeof op.keySelector !== "string") return "bad reorder keySelector";
     if (op.op === "setAttribute" && op.value.length > LIMITS.attrChars) return "attribute value too long";
   }

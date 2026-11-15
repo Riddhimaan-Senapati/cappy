@@ -82,6 +82,8 @@ export class AgentClient {
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
   private classifications = new Map<string, (verdicts: boolean[] | null) => void>();
   private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
+  // command id + origin, claimed before the run is stored, so two tabs cannot both start it.
+  private commandClaims = new Set<string>();
 
   constructor(private hooks: AgentHooks) {}
 
@@ -284,6 +286,7 @@ export class AgentClient {
   }
 
   private fail(run: Run, message: string) {
+    if (run.commandId) this.commandClaims.delete(this.commandKey(run.commandId, run.origin));
     this.finish(run);
     this.emit(run, { type: "error", runId: run.runId, message });
   }
@@ -451,12 +454,26 @@ export class AgentClient {
     await save({ commands: commands.map((command) => (command.id === run.commandId && !command.appliedOrigins.includes(run.origin) ? { ...command, appliedOrigins: [...command.appliedOrigins, run.origin] } : command)) });
   }
 
+  private commandKey(commandId: string, origin: string) {
+    return `${commandId}\n${origin}`;
+  }
+
   // Commands set to run on every site run once per new site; undoing one on a site keeps it from coming back there.
   async runEverywhereCommands(tab: chrome.tabs.Tab, origin: string) {
     const { commands, paused } = await load();
-    if (paused) return;
-    for (const command of commands.filter((candidate) => candidate.everywhere && !candidate.appliedOrigins.includes(origin))) {
-      await this.startRun(tab, "chat", command.prompt, { commandId: command.id });
+    if (paused || !tab.id) return;
+    const due = [];
+    for (const command of commands) {
+      if (!command.everywhere || command.appliedOrigins.includes(origin)) continue;
+      const key = this.commandKey(command.id, origin);
+      if (this.commandClaims.has(key)) continue;
+      this.commandClaims.add(key);
+      due.push(command);
+    }
+    for (const command of due) {
+      const started = await this.startRun(tab, "chat", command.prompt, { commandId: command.id });
+      const queued = (this.queues.get(tab.id) ?? []).some((item) => item.commandId === command.id);
+      if (!started && !queued) this.commandClaims.delete(this.commandKey(command.id, origin));
     }
   }
 
