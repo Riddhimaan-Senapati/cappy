@@ -141,9 +141,12 @@ function liveOp(op: DomOp, hint = ""): LiveOp {
       }
     }
     if (op.op === "reorder") {
+      // Walk each parent once. Scanning every child for every item is quadratic on a large grid.
+      const parents = new Set<Element>();
+      for (const item of elements) if (item.parentElement) parents.add(item.parentElement);
       const withSiblings = new Set(elements);
-      for (const item of elements) {
-        for (const child of item.parentElement?.children ?? []) {
+      for (const parent of parents) {
+        for (const child of parent.children) {
           if (child.matches(op.selector)) withSiblings.add(child);
         }
       }
