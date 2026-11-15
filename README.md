@@ -1,4 +1,4 @@
-# Cappy
+# Cappy (your loyal captain of web browsing)
 
 Take control of the web with AI agents.
 
