@@ -46,18 +46,19 @@ export function darkOutcomeNote(outcome: DarkOutcome): string {
 }
 
 // Tries the site's own dark theme before inverting colors. Every step is undoable.
-export function applyDarkMode(doc: Document = document): { undo: () => void; note: Promise<string>; reapply?: (roots: Element[]) => void } {
+type DarkApplied = { undo: () => void; note: Promise<string>; noop: Promise<boolean>; reapply?: (roots: Element[]) => void };
+
+export function applyDarkMode(doc: Document = document): DarkApplied {
   const session = new DarkSession(doc);
-  const result: { undo: () => void; note: Promise<string>; reapply?: (roots: Element[]) => void } = {
+  const outcome = session.run().catch((err: unknown) => {
+    console.warn("dark mode failed", err);
+    session.undo();
+    return "none" as DarkOutcome;
+  });
+  const result: DarkApplied = {
     undo: () => session.undo(),
-    note: session
-      .run()
-      .catch((err: unknown) => {
-        console.warn("dark mode failed", err);
-        session.undo();
-        return "none" as DarkOutcome;
-      })
-      .then((outcome) => darkOutcomeNote(outcome)),
+    note: outcome.then((value) => darkOutcomeNote(value)),
+    noop: outcome.then((value) => value === "already-dark"),
   };
   session.armInvert = (reapply) => {
     result.reapply = reapply;

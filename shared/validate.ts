@@ -47,10 +47,31 @@ export function scanCss(css: string): string | null {
   return null;
 }
 
-const SITE_WIDE = /\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:all of )?(?:the |this )?[\w.-]+|everywhere on [\w.-]+|all over [\w.-]+|on all of [\w.-]+)\b/i;
+// A named place is one site. "all", "the web", and "this page" are not site names.
+const NAMED_SITE = String.raw`(?!all\b|every\b|the\b|this\b|websites?\b|sites?\b|web\b|pages?\b|page\b|internet\b)[\w.-]+`;
+const THIS_SITE = String.raw`(?:this|the) (?:site|website)`;
+const SITE_WIDE = new RegExp(
+  String.raw`\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:all of )?${NAMED_SITE}|across ${THIS_SITE}|everywhere on ${NAMED_SITE}|everywhere on ${THIS_SITE}|all over ${NAMED_SITE}|on all of ${NAMED_SITE})\b`,
+  "i",
+);
+const ALL_SITES = /\b(?:all (?:sites|websites)|every (?:site|website)|everywhere)\b/i;
+const THIS_PAGE = /\beverywhere on this page\b|\bon this page\b|\bthis page only\b/i;
+const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
+
+// Drop "on this page" before looking for a site or all-sites phrase, so the broader request wins.
+function withoutThisPage(message: string): string {
+  return message.replace(new RegExp(THIS_PAGE.source, "gi"), " ");
+}
 
 export function requestedSiteWide(message: string): boolean {
   return SITE_WIDE.test(message);
+}
+
+// "everywhere" and "across all websites" mean every website. "everywhere on youtube" is one site.
+// "everywhere on this page" is a one-off, so it is neither.
+export function requestedEverywhere(message: string): boolean {
+  const rest = withoutThisPage(message);
+  return ALL_SITES.test(rest) && !SITE_WIDE.test(rest);
 }
 
 export function normalizePagePath(path: string): string {
@@ -72,6 +93,7 @@ export function scopeLabel(scope: string): string {
 }
 
 // One-off chat edits stay on this page, for a block and for CSS alike. A site-wide or scheduled change is the exception, and the UI names it.
+// All-sites is only for an explicit "everywhere" or a stated preference ("I prefer"). The memory prompt is what asks for consent.
 export function prepareSavedChange<T extends { scope: string; pagePath?: string | null; schedule?: unknown; block?: { name?: string; itemSelector?: string | null } | null }>(
   change: T,
   message: string,
@@ -79,14 +101,26 @@ export function prepareSavedChange<T extends { scope: string; pagePath?: string 
   pathname: string,
 ): T {
   let scope = change.scope;
-  if (trigger === "chat" && scope === "site") {
-    const siteWide = requestedSiteWide(message)
-      || change.schedule != null
-      || (change.block?.name === "contentFilter" && Boolean(change.block.itemSelector));
-    scope = siteWide ? "site" : "page";
+  if (trigger === "chat" && (scope === "site" || scope === "everywhere")) {
+    const rest = withoutThisPage(message);
+    const mentionedPage = THIS_PAGE.test(message);
+    const namedSite = requestedSiteWide(rest);
+    const siteSpecificFilter = change.block?.name === "contentFilter" && Boolean(change.block.itemSelector);
+    // A schedule keeps a portable all-sites filter (no host selector) on every site. A selector is this site only.
+    // Saying "on this page" does not shrink a request that also names the site or every site.
+    const portableEverywhere = scope === "everywhere" && change.schedule != null && !namedSite && !siteSpecificFilter && !mentionedPage;
+    const preferenceEverywhere = scope === "everywhere" && PREFERENCE.test(rest) && !namedSite;
+    const everywhere = requestedEverywhere(rest) || preferenceEverywhere || portableEverywhere;
+    const siteWide = !everywhere && (namedSite || (!mentionedPage && (change.schedule != null || siteSpecificFilter)));
+    scope = everywhere ? "everywhere" : siteWide ? "site" : "page";
   }
   if (scope === "page") return { ...change, scope, pagePath: normalizePagePath(pathname || change.pagePath || "/") };
   return { ...change, scope, pagePath: undefined };
+}
+
+// Dark mode looks at the painted page, so it has to run after CSS that may have already darkened it.
+export function changesWithDarkModeLast<T extends { block?: { name?: string } | null }>(changes: readonly T[]): T[] {
+  return [...changes.filter((change) => change.block?.name !== "darkMode"), ...changes.filter((change) => change.block?.name === "darkMode")];
 }
 
 export function validateChange(change: Change): string | null {

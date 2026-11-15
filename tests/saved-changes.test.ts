@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { ActiveChange, Change } from "../shared/adaptation.js";
 import { DEFAULTS, load, recipeKey, recordApplied, recordReverted, saveRecipe, savedChangesFor } from "../extension/src/storage.js";
-import { prepareSavedChange, savedChangeOnThisPage } from "../shared/validate.js";
+import { replyAfterTools } from "../server/agent/session.js";
+import { changesWithDarkModeLast, prepareSavedChange, savedChangeOnThisPage } from "../shared/validate.js";
 
 const originalChrome = globalThis.chrome;
 afterEach(() => {
@@ -97,6 +98,46 @@ describe("one-off scope is the same for every change type", () => {
     const everywhere = prepareSavedChange({ ...text, scope: "everywhere" }, "I prefer larger text", "chat", "/demo/campus.html");
     assert.equal(everywhere.scope, "everywhere");
     assert.equal(prepareSavedChange(dark, "dark mode", "page_load", "/demo/form.html").scope, "site");
+
+    const oneOffs = ["dark mode", "make the text bigger", "stop motion"] as const;
+    for (const message of oneOffs) {
+      const saved = prepareSavedChange({ ...text, scope: "everywhere" }, message, "chat", "/demo/campus.html");
+      assert.equal(saved.scope, "page", message);
+      assert.equal(saved.pagePath, "/demo/campus.html");
+    }
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode on this site", "chat", "/demo/campus.html").scope, "site");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere on youtube.com", "chat", "/demo/campus.html").scope, "site");
+    assert.equal(prepareSavedChange({ ...text, scope: "everywhere" }, "make the text bigger across all websites", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "site" }, "dark mode everywhere on the web", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere on this page", "chat", "/demo/campus.html").scope, "page");
+    assert.equal(prepareSavedChange({ ...text, scope: "everywhere" }, "make the text bigger across the whole site, not just on this page", "chat", "/demo/campus.html").scope, "site");
+    assert.equal(prepareSavedChange({ ...text, scope: "everywhere" }, "bigger text everywhere, not just on this page", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode on all sites, including on this page", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere, starting on this page", "chat", "/demo/campus.html").scope, "everywhere");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "don't just do it on this page, do the whole site", "chat", "/demo/campus.html").scope, "site");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere", schedule: { start: "22:00", end: "06:00" } }, "dark mode on this page after 10pm", "chat", "/demo/campus.html").scope, "page");
+    const weekdays = { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "17:00" };
+    const portable = prepareSavedChange(
+      { ...text, scope: "everywhere", schedule: weekdays, block: { name: "contentFilter", keywords: ["shorts"], itemSelector: null, action: "hide" } },
+      "hide Shorts on weekdays 9 to 5",
+      "chat",
+      "/demo/campus.html",
+    );
+    assert.equal(portable.scope, "everywhere");
+    const hosted = prepareSavedChange(
+      { ...text, scope: "everywhere", schedule: weekdays, block: { name: "contentFilter", keywords: ["shorts"], itemSelector: "ytd-rich-item-renderer", action: "hide" } },
+      "hide Shorts on weekdays 9 to 5",
+      "chat",
+      "/demo/campus.html",
+    );
+    assert.equal(hosted.scope, "site");
+  });
+
+  it("restores dark mode after CSS so an already-dark page is not inverted", () => {
+    const css = { id: "dim", block: null };
+    const dark = { id: "dark-mode", block: { name: "darkMode" } };
+    assert.deepEqual(changesWithDarkModeLast([dark, css, { id: "motion", block: { name: "stopMotion" } }]).map((change) => change.id), ["dim", "motion", "dark-mode"]);
   });
 
   it("refuses to apply a page-scoped change on a different document", async () => {
@@ -159,5 +200,13 @@ describe("undo drops the saved change and its recipe", () => {
     assert.equal(state.globalChanges.some((item) => item.id === change.id), false);
     assert.ok(state.recipes[recipeKey("http://127.0.0.1:8787", "make the text bigger")], "a recipe saved on another origin stays");
     assert.equal(data.recipes[key], undefined);
+  });
+});
+
+describe("a no-op does not get to claim it changed the page", () => {
+  it("replaces the reply when nothing was applied", () => {
+    assert.equal(replyAfterTools("I have enabled dark mode across all websites.", 0, ["The page is already dark."]), "The page is already dark.");
+    assert.equal(replyAfterTools("Dimmed the page.", 1, ["The page is already dark."]), "Dimmed the page.");
+    assert.equal(replyAfterTools("Done.", 0, []), "Done.");
   });
 });

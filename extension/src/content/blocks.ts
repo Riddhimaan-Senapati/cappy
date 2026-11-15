@@ -11,6 +11,8 @@ export interface LiveBlock {
   undo: Undo;
   reapply?: (roots: Element[]) => void;
   note?: Promise<string>;
+  // True when the block looked and left the page as it was, such as dark mode on an already-dark page.
+  noop?: Promise<boolean>;
   matched?: () => number;
 }
 
@@ -90,8 +92,101 @@ interface ScaledRecord {
   px: number;
 }
 
+// Inline !important beats site CSS, so a later font-size rule has to take those elements back explicitly.
+interface FontScaler {
+  release(element: HTMLElement): void;
+  rescale(elements: readonly HTMLElement[]): void;
+}
+
+const fontScalers = new Set<FontScaler>();
+
+export function releaseScaledFont(elements: Iterable<Element>) {
+  for (const element of elements) {
+    if (!(element instanceof HTMLElement)) continue;
+    for (const scaler of fontScalers) scaler.release(element);
+  }
+}
+
+export function rescaleFonts(elements: readonly HTMLElement[]) {
+  for (const scaler of fontScalers) scaler.rescale(elements);
+}
+
+const STATE_PSEUDO = /:(?:hover|focus-visible|focus-within|focus|active|visited)\b/;
+const TEXT_PSEUDO = /::?(?:before|after|placeholder|selection|marker|first-line|first-letter)\b/;
+
+function splitSelectorList(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < selector.length; index++) {
+    const char = selector[index];
+    if (char === "(") depth++;
+    else if (char === ")" && depth > 0) depth--;
+    else if (char === "," && depth === 0) {
+      parts.push(selector.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  const last = selector.slice(start).trim();
+  if (last) parts.push(last);
+  return parts;
+}
+
+function withoutNot(selector: string): string {
+  let out = "";
+  for (let index = 0; index < selector.length; index++) {
+    if (!selector.startsWith(":not(", index)) {
+      out += selector[index];
+      continue;
+    }
+    let depth = 1;
+    index += 4;
+    while (index + 1 < selector.length && depth > 0) {
+      index++;
+      if (selector[index] === "(") depth++;
+      else if (selector[index] === ")") depth--;
+    }
+  }
+  return out;
+}
+
+// Hover and focus rules must not release text scale on every matching element while the pointer is elsewhere.
+// :not(:hover) is a resting rule. Commas inside :is() and :not() stay in one selector.
+export function restingFontSizeSelector(selector: string): string | null {
+  const parts = splitSelectorList(selector).filter((part) => !STATE_PSEUDO.test(withoutNot(part)) && !TEXT_PSEUDO.test(withoutNot(part)));
+  return parts.length ? parts.join(", ") : null;
+}
+
+const fontSizeSelectors: string[] = [];
+
+export function watchFontSizeSelector(selector: string): () => void {
+  fontSizeSelectors.push(selector);
+  return () => {
+    const index = fontSizeSelectors.lastIndexOf(selector);
+    if (index >= 0) fontSizeSelectors.splice(index, 1);
+  };
+}
+
+export function releaseRuledFonts(roots: ParentNode[]) {
+  for (const selector of fontSizeSelectors) {
+    const found: HTMLElement[] = [];
+    for (const root of roots) {
+      try {
+        if (root instanceof HTMLElement && root.matches(selector)) found.push(root);
+        for (const element of root.querySelectorAll(selector)) {
+          if (element instanceof HTMLElement) found.push(element);
+        }
+      } catch {
+        // One bad selector should not stop the others.
+      }
+    }
+    releaseScaledFont(found);
+  }
+}
+
 function textScale(scale: number): LiveBlock {
   const scaled = new Map<HTMLElement, ScaledRecord>();
+  const handedOff = new WeakSet<HTMLElement>();
 
   const restoreInline = (element: HTMLElement, record: ScaledRecord) => {
     if (record.value) element.style.setProperty("font-size", record.value, record.priority);
@@ -99,7 +194,7 @@ function textScale(scale: number): LiveBlock {
   };
 
   const scaleElements = (elements: HTMLElement[]) => {
-    const fresh = elements.filter((element) => element.isConnected && !scaled.has(element));
+    const fresh = elements.filter((element) => element.isConnected && !scaled.has(element) && !handedOff.has(element));
     if (!fresh.length) return;
 
     const scaledAncestors = new Set<HTMLElement>();
@@ -120,10 +215,31 @@ function textScale(scale: number): LiveBlock {
     });
   };
 
+  const scaler: FontScaler = {
+    release(element) {
+      const record = scaled.get(element);
+      if (!record) return;
+      restoreInline(element, record);
+      scaled.delete(element);
+      handedOff.add(element);
+    },
+    rescale(elements) {
+      const back = elements.filter((element) => handedOff.has(element));
+      for (const element of back) handedOff.delete(element);
+      scaleElements(back);
+    },
+  };
+  fontScalers.add(scaler);
   scaleElements(textElements());
+  // A font-size rule that is already on the page keeps those elements, including ones that load later.
+  releaseRuledFonts([document]);
   return {
-    reapply: (roots) => scaleElements(textElements(1500, roots)),
+    reapply: (roots) => {
+      scaleElements(textElements(1500, roots));
+      releaseRuledFonts(roots);
+    },
     undo: () => {
+      fontScalers.delete(scaler);
       for (const [element, record] of scaled) restoreInline(element, record);
       scaled.clear();
     },
