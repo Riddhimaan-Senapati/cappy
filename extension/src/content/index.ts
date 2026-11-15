@@ -171,20 +171,28 @@ function mutate<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
+function forThisRequest(change: Change, source: string): Change {
+  if (change.scope !== "page") return change.pagePath ? { ...change, pagePath: undefined } : change;
+  const askedHere = source.startsWith("Generated") || source.startsWith("Reapplied");
+  const pagePath = askedHere ? location.pathname : (change.pagePath || location.pathname);
+  return pagePath === change.pagePath ? change : { ...change, pagePath };
+}
+
 async function apply(change: Change, source = "Reapplied from page history locally (no LLM call)") {
-  if (change.block?.name === "textScale" && change.id !== learnedTextScale.id) {
+  const scoped = forThisRequest(change, source);
+  if (scoped.block?.name === "textScale" && scoped.id !== learnedTextScale.id) {
     await revertChange(learnedTextScale.id, false);
   }
-  const outcome = await applyChange(change);
-  const stored = activeChanges().find((active) => active.id === change.id);
+  const outcome = await applyChange(scoped);
+  const stored = activeChanges().find((active) => active.id === scoped.id);
   if (outcome.ok && stored && !isOneShot(stored.schedule)) {
     await recordApplied(origin, stored);
-    recordChange(change.id, source);
-  } else if (outcome.ok && isOneShot(change.schedule)) {
-    if (!stored) await recordReverted(origin, change.id);
-  } else recordActivity(`Could not apply ${change.id}: ${outcome.error ?? "No active change"}`);
+    recordChange(scoped.id, source);
+  } else if (outcome.ok && isOneShot(scoped.schedule)) {
+    if (!stored) await recordReverted(origin, scoped.id);
+  } else recordActivity(`Could not apply ${scoped.id}: ${outcome.error ?? "No active change"}`);
   for (const id of outcome.replaced ?? []) await recordReverted(origin, id);
-  if (change.block?.name === "textScale") await syncLearnedText();
+  if (scoped.block?.name === "textScale") await syncLearnedText();
   return outcome;
 }
 
@@ -281,7 +289,7 @@ async function restore() {
     return 0;
   }
   let restored = 0;
-  for (const change of await savedChangesFor(origin)) {
+  for (const change of await savedChangesFor(origin, location.pathname)) {
     if ((await applyChange(change, false)).ok) {
       restored++;
       recordChange(change.id, "Saved change restored locally (no LLM call)");

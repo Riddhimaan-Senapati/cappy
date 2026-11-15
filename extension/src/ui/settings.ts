@@ -2,7 +2,7 @@ import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
 import { DEFAULTS, forgetStoredChange, load, save, type StoredState } from "../storage.js";
-import { isScheduleActive, scheduleStatus } from "../../../shared/validate.js";
+import { isScheduleActive, scheduleStatus, scopeLabel } from "../../../shared/validate.js";
 import { h } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 import { createProfilesView } from "./profiles.js";
@@ -346,7 +346,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
             queue();
           });
           return h("div", "s-change", "", [
-            h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", change.scope === "everywhere" ? "all sites" : "this site"), undo]),
+            h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", scopeLabel(change.scope)), undo]),
             ...(change.schedule ? [h("div", "why", scheduleStatus(change.schedule) ?? "")] : []),
             h("div", "why", change.reason),
           ]);

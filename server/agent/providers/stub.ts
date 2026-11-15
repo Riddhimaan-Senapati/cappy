@@ -1,6 +1,7 @@
 import type { ActiveChange, Change, PageOutline, Schedule } from "../../../shared/adaptation.js";
 import type { TargetElement, Trigger } from "../../../shared/protocol.js";
 import { parseSpokenSchedule } from "../schedule.js";
+import { requestedSiteWide } from "../../../shared/validate.js";
 import type { AgentSession } from "../session.js";
 import { tools, type AgentTool } from "../tools.js";
 import type { AgentProvider } from "./types.js";
@@ -111,7 +112,7 @@ export function planStubRun(input: StubInput): StubPlan {
         id: red ? "target-red" : "target-hidden",
         summary: red ? `Made ${label} red` : `Hid ${label}`,
         reason: `Request: "${message.slice(0, 100)}"`,
-        scope: "site",
+        scope: "page",
         css: red ? `${selector} { color: #c00000 !important; }` : `${selector} { display: none !important; }`,
       }) } }],
       reply: red ? `Stub: made ${label} red.` : `Stub: hid ${label}.`,
@@ -130,7 +131,7 @@ export function planStubRun(input: StubInput): StubPlan {
   const reason = `Request: "${message.slice(0, 100)}"`;
   const siteOnly = SITE_ONLY.test(message);
   const preference = PREFERENCE.test(message);
-  const scope = preference && !siteOnly ? "everywhere" : "site";
+  const scope = preference && !siteOnly ? "everywhere" : requestedSiteWide(message) ? "site" : "page";
   const done: string[] = [];
   const remember = (line: string) => calls.push({ name: "remember", input: { lines: [line], scope: siteOnly ? "site" : "everywhere" } });
 
@@ -148,7 +149,7 @@ export function planStubRun(input: StubInput): StubPlan {
     calls.push({
       name: "apply_change",
       input: { change: change({
-        id: "easier-form", summary: "More accessible form", reason, scope: "site",
+        id: "easier-form", summary: "More accessible form", reason, scope: "page",
         block: { name: "formFixer", minTargetPx: 44, addLabels: true, clearErrors: true, oneQuestionMode: /one question at a time/i.test(message) },
       }) },
     });
@@ -156,7 +157,7 @@ export function planStubRun(input: StubInput): StubPlan {
   }
 
   if (INVERT.test(message)) {
-    calls.push({ name: "apply_change", input: { change: change({ id: "invert-page", summary: "Inverted colors", reason, scope: "site", css: "html { filter: invert(1) hue-rotate(180deg); }" }) } });
+    calls.push({ name: "apply_change", input: { change: change({ id: "invert-page", summary: "Inverted colors", reason, scope: "page", css: "html { filter: invert(1) hue-rotate(180deg); }" }) } });
     done.push("inverted the colors");
   }
 

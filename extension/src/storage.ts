@@ -1,6 +1,7 @@
 import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
 import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier, TokenUsage } from "../../shared/protocol.js";
+import { savedChangeOnThisPage } from "../../shared/validate.js";
 
 export interface Recipe {
   message: string;
@@ -252,12 +253,20 @@ export function suggestRequests(state: Pick<StoredState, "history" | "submittedR
   return search.search(query, { limit: 5 }).map(({ item }) => item);
 }
 
-export async function savedChangesFor(origin: string): Promise<ActiveChange[]> {
+export async function savedChangesFor(origin: string, pathname?: string): Promise<ActiveChange[]> {
   const state = await load();
-  return [...state.globalChanges, ...(state.siteChanges[origin] ?? [])];
+  const fits = (change: ActiveChange) => pathname === undefined || savedChangeOnThisPage(change, pathname);
+  return [...state.globalChanges.filter(fits), ...(state.siteChanges[origin] ?? []).filter(fits)];
 }
 
 const without = (changes: ActiveChange[], id: string) => changes.filter((change) => change.id !== id);
+
+function writeSite(siteChanges: Record<string, ActiveChange[]>, origin: string, site: ActiveChange[]) {
+  const next = { ...siteChanges };
+  if (site.length) next[origin] = site;
+  else delete next[origin];
+  return next;
+}
 
 export async function recordApplied(origin: string, change: ActiveChange) {
   const state = await load();
@@ -265,7 +274,7 @@ export async function recordApplied(origin: string, change: ActiveChange) {
   const globalChanges = without(state.globalChanges, change.id);
   if (change.scope === "everywhere") globalChanges.push(change);
   else site.push(change);
-  await save({ globalChanges, siteChanges: { ...state.siteChanges, [origin]: site } });
+  await save({ globalChanges, siteChanges: writeSite(state.siteChanges, origin, site) });
 }
 
 export async function forgetStoredChange(host: string | null, id: string) {
@@ -281,9 +290,18 @@ export async function forgetStoredChange(host: string | null, id: string) {
 
 export async function recordReverted(origin: string, id: string) {
   const state = await load();
+  const recipes = { ...state.recipes };
+  const prefix = `${origin}::`;
+  for (const [key, recipe] of Object.entries(recipes)) {
+    if (!key.startsWith(prefix) || !recipe.changes.some((change) => change.id === id)) continue;
+    const changes = recipe.changes.filter((change) => change.id !== id);
+    if (changes.length) recipes[key] = { ...recipe, changes };
+    else delete recipes[key];
+  }
   await save({
     globalChanges: without(state.globalChanges, id),
-    siteChanges: { ...state.siteChanges, [origin]: without(state.siteChanges[origin] ?? [], id) },
+    siteChanges: writeSite(state.siteChanges, origin, without(state.siteChanges[origin] ?? [], id)),
+    recipes,
   });
 }
 

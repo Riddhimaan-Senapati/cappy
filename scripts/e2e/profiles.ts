@@ -101,7 +101,7 @@ try {
     return state.activeProfileId === "default" && state.profiles.default.name === "My setup" && state.submittedRequests[0] === "Gaming request";
   }));
   await waitFor("renamed profile in command menu", () => shadowTextVisible(page, "Select profile: My setup"));
-  for (const page of pages) assert.equal(await page.locator(".study").isVisible(), false);
+  for (const page of pages) await waitFor("gaming layout after renaming", async () => !(await page.locator(".study").isVisible()));
   const clickProfileButton = async (label: string) => {
     await cdp.send("Runtime.callFunctionOn", {
       objectId: object.objectId!,
