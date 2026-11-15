@@ -57,6 +57,20 @@ sequenceDiagram
 
 Each request runs as one tool-use loop. The agent reads an outline of the page, applies a change, looks at how many elements matched and how the accessibility stats moved, then keeps, fixes or reverts the change. Saved changes replay on page load without a model call. API keys stay on the local server and never ship in the extension.
 
+## The hardest parts
+
+### Latency
+
+Our first version ran the model on every new tab and blurred the page for up to 8 seconds while it thought. Reapplying 12 saved changes took 2.8 seconds because each one was re-verified. We stopped re-checking work that was already verified, so those 12 changes now come back in 0.19 seconds with no model call. A site is also checked once per profile, not on every visit, and the blur lifts after 1.5 seconds at most. The first visit costs a moment. Every later one is instant and free. Each of these claims has a test that fails if it stops being true.
+
+### Getting rid of Shorts
+
+"Hide Shorts" sounds easy until you look at a real page. Shorts show up as a shelf with its own heading, and hiding only the tiles leaves an empty titled box behind. We now match items by their links (`/shorts/...`), remove a shelf by its heading, and never hide a container that also holds videos you want. The bigger fix was honesty. After every filter, Cappy counts the matching links still on screen and tells the agent. It can no longer say "hidden" while something shows. On later pages a toast says "still showing here" with a Fix it button.
+
+### Voice
+
+Two things were hard. Knowing when you're done talking: we track loudness against a noise floor and your own speaking level, and send after about 1.2 seconds of quiet. And GPT-Live, which hears you and replies at once. It asks the backend to act before your sentence is fully transcribed, so we wait for the transcript to go quiet first. Several requests for one sentence share one answer. Cappy's own voice coming out of your speakers must not interrupt it, so barge-in follows what the transcript heard, not microphone volume. The API key never leaves the local server.
+
 ## Safety
 
 - The model never writes JavaScript. CSS is scanned before use, and DOM operations and attributes come from an allowlist.
