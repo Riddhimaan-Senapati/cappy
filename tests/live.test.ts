@@ -3,8 +3,8 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import { WebSocket, WebSocketServer } from "ws";
-import { bridgeLive, LIVE_RATE, parseFromClient, TaskText, TASK_QUIET_MS } from "../server/live.js";
-import { floatToPcm16, liveUrl, loudness, pcm16ToFloat } from "../extension/src/voice/pcm.js";
+import { bridgeLive, LIVE_RATE, parseFromClient, SharedReplies, TaskText, TASK_QUIET_MS, TASK_SHARE_MS } from "../server/live.js";
+import { floatToPcm16, liveUrl, parseLiveMessage, pcm16ToFloat } from "../extension/src/voice/pcm.js";
 
 describe("GPT-Live task text", () => {
   it("waits for transcription to go quiet, then takes only what was said since the last task", () => {
@@ -30,6 +30,36 @@ describe("GPT-Live task text", () => {
   });
 });
 
+describe("GPT-Live shared replies", () => {
+  it("lets a delegation with no new words share the task that just started", () => {
+    const replies = new SharedReplies();
+    replies.open("first", 1_000);
+    assert.equal(replies.join("second", 1_000 + TASK_SHARE_MS - 1), true);
+    assert.deepEqual(replies.close("first"), ["first", "second"]);
+    assert.deepEqual(replies.close("first"), ["first"], "a result is shared once");
+  });
+
+  it("does not attach a late or orphan delegation", () => {
+    const replies = new SharedReplies();
+    assert.equal(replies.join("alone", 0), false);
+    replies.open("first", 1_000);
+    assert.equal(replies.join("late", 1_000 + TASK_SHARE_MS), false);
+    replies.close("first");
+    assert.equal(replies.join("after", 1_100), false, "nothing to join once the task answered");
+  });
+});
+
+describe("GPT-Live socket messages", () => {
+  it("keeps well-formed server messages and drops the rest", () => {
+    assert.deepEqual(parseLiveMessage(JSON.stringify({ type: "task", id: "a", text: "hide ads" })), { type: "task", id: "a", text: "hide ads" });
+    assert.deepEqual(parseLiveMessage(JSON.stringify({ type: "heard", text: "" })), { type: "heard", text: "" });
+    assert.deepEqual(parseLiveMessage(JSON.stringify({ type: "ready" })), { type: "ready" });
+    assert.equal(parseLiveMessage(JSON.stringify({ type: "task", id: 1, text: "x" })), null);
+    assert.equal(parseLiveMessage(JSON.stringify({ type: "unknown" })), null);
+    assert.equal(parseLiveMessage("not json"), null);
+  });
+});
+
 describe("GPT-Live audio helpers", () => {
   it("round-trips PCM16 and clamps out-of-range samples", () => {
     const samples = new Float32Array([0, 0.5, -0.5, 1.5, -1.5]);
@@ -38,7 +68,6 @@ describe("GPT-Live audio helpers", () => {
     assert.ok(Math.abs(back[1]! - 0.5) < 0.001);
     assert.ok(Math.abs(back[2]! + 0.5) < 0.001);
     assert.ok(back[3]! <= 1 && back[4]! >= -1);
-    assert.equal(loudness(new Float32Array(10)), 0);
   });
 
   it("puts the live socket next to the agent socket on the same server", () => {

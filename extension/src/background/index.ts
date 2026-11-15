@@ -20,30 +20,26 @@ function broadcast(message: DebugPortMessage) {
   for (const port of debugPorts) port.postMessage(message);
 }
 
-// A GPT-Live task waits for the next chat run on its tab to finish, then says the reply.
+// Each GPT-Live task waits for its own run, by id, so another request finishing on the tab never answers it.
 const LIVE_TASK_MS = 90_000;
-type LiveWaiter = { runId?: string; resolve: (text: string) => void };
-const liveWaiters = new Map<number, LiveWaiter>();
+const liveWaiters = new Map<string, (text: string) => void>();
 
-function settleLiveTask(tabId: number, event: UiEvent) {
-  const waiter = liveWaiters.get(tabId);
-  if (!waiter) return;
-  if (event.type === "start" && event.trigger === "chat" && !waiter.runId) waiter.runId = event.runId;
-  // A repeat served from storage may finish without a start event, so an unmatched run id only counts once one is known.
-  if (!("runId" in event) || (waiter.runId && event.runId !== waiter.runId)) return;
-  if (!waiter.runId && event.type !== "done" && event.type !== "error") return;
+function settleLiveTask(event: UiEvent) {
+  if (!("runId" in event)) return;
+  const resolve = liveWaiters.get(event.runId);
+  if (!resolve) return;
   const said = event.type === "done"
     ? event.reply || (event.applied.length ? `Done: ${event.applied.map((change) => change.summary).join(", ")}.` : "Done. Nothing needed changing.")
     : event.type === "error" ? `It did not work: ${event.message}`
     : event.type === "cancelled" ? "Stopped." : null;
   if (said === null) return;
-  liveWaiters.delete(tabId);
-  waiter.resolve(said);
+  liveWaiters.delete(event.runId);
+  resolve(said);
 }
 
 const agent = new AgentClient({
   event(tabId: number, event: UiEvent) {
-    settleLiveTask(tabId, event);
+    settleLiveTask(event);
     if (event.type === "start" && event.trigger === "chat") sessionRequests.set(event.runId, { message: event.message, thread: event.thread });
     if (event.type === "cancelled") sessionRequests.delete(event.runId);
     if (event.type === "options") {
@@ -102,26 +98,32 @@ async function changeProfile(action: ProfileAction) {
 setLiveTaskRunner(async (tabId, text) => {
   const tab = await chrome.tabs.get(tabId).catch(() => undefined);
   if (!tab?.url?.startsWith("http")) return "Open a web page first, then ask again.";
-  liveWaiters.get(tabId)?.resolve("Replaced by a newer request.");
+  const runId = crypto.randomUUID();
   const reply = new Promise<string>((resolve) => {
-    liveWaiters.set(tabId, { resolve });
+    liveWaiters.set(runId, resolve);
     setTimeout(() => {
-      if (liveWaiters.get(tabId)?.resolve !== resolve) return;
-      liveWaiters.delete(tabId);
+      if (!liveWaiters.delete(runId)) return;
       resolve("Still working on it. Check the bar for the result.");
     }, LIVE_TASK_MS);
   });
-  await submitChat(tab, text, false);
+  // submitChat can return without starting a run (empty text, a profile switch), so say so instead of waiting out the timer.
+  if (!(await submitChat(tab, text, false, false, undefined, undefined, runId))) {
+    liveWaiters.delete(runId);
+    return "I could not start that request. Try again in a moment.";
+  }
   return reply;
 });
 
-async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement) {
-  if (switchingProfile) return;
-  if (!message.trim()) return;
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement, runId?: string): Promise<boolean> {
+  if (switchingProfile) return false;
+  if (!message.trim()) return false;
   const lasting = lastingRequest(message);
   await recordSubmittedRequest(lasting ?? message).catch(() => console.warn("Could not save the submitted request to local history."));
   if (lasting) await save({ lastingSuggestion: lasting }).catch(() => undefined);
-  if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target });
+  if (!tab) return false;
+  // Every path after this emits start, queued or error for the run, so a waiter on runId always hears back.
+  await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target, runId });
+  return true;
 }
 
 async function injectContent(tabId: number) {

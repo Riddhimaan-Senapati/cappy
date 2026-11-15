@@ -40,19 +40,14 @@ const liveWss = new WebSocketServer({ noServer: true });
 server.on("upgrade", (request, socket, head) => {
   const { pathname } = new URL(request.url ?? "/", "http://localhost");
   const target = pathname === "/agent" ? wss : pathname === "/live" ? liveWss : null;
-  if (!target) {
+  if (!target || !(request.headers.origin ?? "").startsWith("chrome-extension://")) {
+    socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     socket.destroy();
     return;
   }
   target.handleUpgrade(request, socket, head, (ws) => target.emit("connection", ws, request));
 });
-liveWss.on("connection", (socket, request) => {
-  if (!(request.headers.origin ?? "").startsWith("chrome-extension://")) {
-    socket.close(1008, "Only the extension may connect");
-    return;
-  }
-  bridgeLive(socket);
-});
+liveWss.on("connection", (socket) => bridgeLive(socket));
 
 const sendTo = (socket: WebSocket, message: ServerMessage) => {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -120,12 +115,7 @@ function safeProviderError(error: unknown): string {
   return message;
 }
 
-wss.on("connection", (socket, request) => {
-  if (!(request.headers.origin ?? "").startsWith("chrome-extension://")) {
-    socket.close(1008, "Only the extension may connect");
-    return;
-  }
-
+wss.on("connection", (socket) => {
   sockets.add(socket);
   const sessions = new Map<string, AgentSession>();
   void describeProviders().then((providers) => sendTo(socket, { type: "providers", providers, defaultProvider: defaultProviderId() }));

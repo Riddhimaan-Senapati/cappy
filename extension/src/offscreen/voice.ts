@@ -1,7 +1,8 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { VoiceEvent } from "../voice/core.js";
 import { ENDPOINT, startEndpoint, stepEndpoint, stripDoneKeyword } from "../voice/endpoint.js";
-import { floatToPcm16, LIVE_RATE, liveUrl, loudness, pcm16ToFloat } from "../voice/pcm.js";
+import { floatToPcm16, LIVE_RATE, liveUrl, parseLiveMessage, pcm16ToFloat } from "../voice/pcm.js";
+import type { LiveFromClient } from "../../../shared/protocol.js";
 
 interface RecognitionResult {
   isFinal: boolean;
@@ -255,10 +256,7 @@ async function record(provider: "openai" | "gemini", serverUrl: string, hold: bo
 // A GPT-Live conversation: the microphone streams to the server, the reply audio plays back, and page requests go to the agent.
 const LIVE_IDLE_MS = 3 * 60_000;
 const LIVE_MAX_MS = 20 * 60_000;
-// Speaking over the reply cuts it off; GPT-Live stops on its own, but audio it already sent is still queued here.
-const BARGE_IN_LEVEL = 0.05;
-const BARGE_IN_MS = 250;
-let stopLive: (() => void) | null = null;
+let stopLive: ((error?: string) => void) | null = null;
 
 function micError(error: unknown): string {
   const code = error instanceof DOMException ? {
@@ -289,7 +287,6 @@ async function startLive(serverUrl: string) {
   const playing = new Set<AudioBufferSourceNode>();
   let playAt = 0;
   let ready = false;
-  let loudSince = 0;
   let heardAt = Date.now();
   let stopped = false;
 
@@ -319,7 +316,7 @@ async function startLive(serverUrl: string) {
     if (error) emit({ type: "error", error });
     emit({ type: "ended" });
   };
-  stopLive = () => stop();
+  stopLive = stop;
   const startedAt = Date.now();
   const idle = setInterval(() => {
     if (Date.now() - heardAt > LIVE_IDLE_MS || Date.now() - startedAt > LIVE_MAX_MS) stop();
@@ -330,10 +327,6 @@ async function startLive(serverUrl: string) {
     event.outputBuffer.getChannelData(0).fill(0);
     if (!ready || socket.readyState !== WebSocket.OPEN) return;
     socket.send(floatToPcm16(input));
-    if (playing.size && loudness(input) > BARGE_IN_LEVEL) {
-      loudSince ||= Date.now();
-      if (Date.now() - loudSince >= BARGE_IN_MS) flushPlayback();
-    } else loudSince = 0;
   };
   source.connect(processor);
   processor.connect(context.destination);
@@ -355,25 +348,25 @@ async function startLive(serverUrl: string) {
 
   socket.onmessage = (message) => {
     if (message.data instanceof ArrayBuffer) return play(message.data);
-    let event: { type?: string; text?: string; id?: string; message?: string };
-    try {
-      event = JSON.parse(String(message.data));
-    } catch {
-      return;
-    }
+    const event = parseLiveMessage(String(message.data));
+    if (!event) return;
     if (event.type === "ready") {
       ready = true;
       emit({ type: "listening" });
-    } else if (event.type === "heard" && typeof event.text === "string") {
+    } else if (event.type === "heard") {
       heardAt = Date.now();
+      // Talking over the reply cuts it off. GPT-Live stops on its own, but audio it already sent is still queued here.
+      // Its transcript, not microphone loudness, says the user is talking, so Cappy's own voice through speakers does not count.
+      if (event.text && playing.size) flushPlayback();
       emit({ type: "interim", text: event.text });
-    } else if (event.type === "task" && typeof event.id === "string" && typeof event.text === "string") {
+    } else if (event.type === "task") {
       const id = event.id;
       heardAt = Date.now();
       void chrome.runtime.sendMessage({ target: "background", kind: "liveTask", id, text: event.text })
         .then((reply: { text?: string } | undefined) => reply?.text ?? "Done.", () => "That did not work. Nothing was changed.")
         .then((text) => {
-          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "result", id, text }));
+          const result: LiveFromClient = { type: "result", id, text };
+          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(result));
         });
     } else if (event.type === "error") {
       stop("live-unavailable");
