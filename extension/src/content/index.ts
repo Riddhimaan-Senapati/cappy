@@ -10,7 +10,7 @@ import { forgetLine, hasMemoryLine, rememberLines } from "../memory.js";
 import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
-import { detectInjection } from "../../../shared/safety.js";
+import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
 import { setFilterClassifier } from "./content-filter.js";
@@ -18,7 +18,7 @@ import { activeChanges, applyChange, applySiteControl, changeHistory, clearChang
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
 import { inspectPage, recordActivity, recordChange, recordRun, recordUsage, setEventTracking } from "./inspection.js";
-import { inspect, listItems, readPage } from "./outline.js";
+import { inspect, listItems, readInjectionSurface, readPage } from "./outline.js";
 import { findSiteFeatures } from "./site-controls.js";
 import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
 
@@ -272,7 +272,7 @@ async function syncLearnedText() {
 }
 
 async function restore(animate: boolean) {
-  if (detectInjection(readPage())) {
+  if (detectInjectionFields(readInjectionSurface())) {
     const saved = await savedChangesFor(origin);
     const { paused, profile } = await load();
     if (saved.length || (!paused && hasMemoryLine(profile, LARGER_TEXT))) {

@@ -37,4 +37,12 @@ await runE2E("replay-trap", async ({ browser }) => {
   assert.equal(await shadowTextVisible(trap, "from your saved version"), false);
   assert.equal(await fontSizeOf(trap, "li"), before, "replaying the saved request changed the trap page");
   assert.equal(await trap.evaluate(() => document.querySelectorAll('[data-ba^="change:"]').length), 0);
+
+  const clean = await openDemo(browser, "/demo/form.html");
+  await waitFor("saved enlargement on a clean page of the same host", async () => {
+    const styled = await clean.evaluate(() => document.querySelector("h1")?.getAttribute("style") ?? "");
+    return styled.includes("font-size") ? true : undefined;
+  });
+  await askInBar(clean, REQUEST);
+  await waitFor("the saved version on a clean page", () => shadowTextVisible(clean, "from your saved version"));
 });

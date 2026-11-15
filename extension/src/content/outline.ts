@@ -1,4 +1,5 @@
 import type { OutlineElement, PageOutline, PageStats } from "../../../shared/adaptation.js";
+import type { InjectionSurface } from "../../../shared/safety.js";
 import type { InspectedElement } from "../../../shared/protocol.js";
 import type { ContrastIssue } from "../../../shared/protocol.js";
 import { accessibleName, AD_OR_POPUP, contrastInfo, contrastRatio, cssPath, isOwn, isVisible, LABELLABLE, queryAll, textElements } from "./dom.js";
@@ -65,8 +66,39 @@ function describe(element: Element): OutlineElement {
     selector: cssPath(element),
     tag: element.tagName.toLowerCase(),
     role: element.getAttribute("role") ?? undefined,
-    text: clip(element.matches(LABELLABLE) ? element.getAttribute("name") : element.textContent) || undefined,
+    text: elementText(element) || undefined,
     note: notes.join("; ") || undefined,
+  };
+}
+
+function elementText(element: Element): string {
+  return clip(element.matches(LABELLABLE) ? element.getAttribute("name") : element.textContent);
+}
+
+function headingTexts(): string[] {
+  return queryAll("h1, h2, h3").map((heading) => clip(heading.textContent, 100)).filter(Boolean).slice(0, 25);
+}
+
+function outlineElements(): Element[] {
+  const candidates = queryAll(
+    `header, nav, main, aside, footer, form, [role], h1, h2, h3, ${LABELLABLE}, button, img, video, iframe, svg, canvas, table, ${AD_OR_POPUP}`,
+  ).filter((element) => isVisible(element) && !element.closest("svg *"));
+
+  const fixed = [...document.body.getElementsByTagName("*")]
+    .slice(0, 4000)
+    .filter((element) => !isOwn(element) && ["fixed", "sticky"].includes(getComputedStyle(element).position) && isVisible(element))
+    .slice(0, 10);
+
+  return [...new Set([...fixed, ...candidates])].slice(0, MAX_ELEMENTS);
+}
+
+// Title, heading text, outline text and the page sample. No contrast, groups or style hints.
+export function readInjectionSurface(): InjectionSurface {
+  return {
+    title: document.title,
+    headings: headingTexts(),
+    texts: outlineElements().map((element) => elementText(element)),
+    textSample: pageText(),
   };
 }
 
@@ -82,23 +114,14 @@ function pageText(limit = 1500): string {
 }
 
 export function readPage(): PageOutline {
-  const candidates = queryAll(
-    `header, nav, main, aside, footer, form, [role], h1, h2, h3, ${LABELLABLE}, button, img, video, iframe, svg, canvas, table, ${AD_OR_POPUP}`,
-  ).filter((element) => isVisible(element) && !element.closest("svg *"));
-
-  const fixed = [...document.body.getElementsByTagName("*")]
-    .slice(0, 4000)
-    .filter((element) => !isOwn(element) && ["fixed", "sticky"].includes(getComputedStyle(element).position) && isVisible(element))
-    .slice(0, 10);
-
-  const unique = [...new Set([...fixed, ...candidates])].slice(0, MAX_ELEMENTS);
+  const elements = outlineElements();
   const bodyStyle = getComputedStyle(document.body);
 
   return {
     url: location.href,
     title: document.title,
-    headings: queryAll("h1, h2, h3").map((heading) => clip(heading.textContent, 100)).filter(Boolean).slice(0, 25),
-    elements: unique.map(describe),
+    headings: headingTexts(),
+    elements: elements.map(describe),
     itemGroups: findItemGroups(document),
     stats: computeStats(),
     styleHints: {

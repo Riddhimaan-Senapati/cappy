@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Change } from "../shared/adaptation.js";
-import { detectInjectionText } from "../shared/safety.js";
+import { detectInjection, detectInjectionFields, detectInjectionText } from "../shared/safety.js";
 import { installDom } from "./dom-setup.js";
 
 installDom();
@@ -17,7 +17,8 @@ if (typeof matchMedia !== "function") {
     configurable: true,
   });
 }
-const { applyChange } = await import("../extension/src/content/engine.js");
+const { applyChange, revertChange } = await import("../extension/src/content/engine.js");
+const { readInjectionSurface, readPage } = await import("../extension/src/content/outline.js");
 
 const bigger: Change = {
   id: "bigger-text",
@@ -49,5 +50,23 @@ describe("saved changes on an injection page", () => {
     assert.match(outcome.error ?? "", /Blocked/);
     assert.equal(document.querySelectorAll('[data-ba^="change:"]').length, before);
     assert.equal(document.getElementById("price")?.getAttribute("style"), null);
+  });
+
+  it("reads the same injection result from the lean surface as from the full outline", () => {
+    document.body.innerHTML = trap;
+    assert.equal(detectInjectionFields(readInjectionSurface()), detectInjection(readPage()));
+    assert.match(detectInjectionFields(readInjectionSurface()) ?? "", /ignore all previous instructions/);
+  });
+
+  it("still applies a saved enlargement on a clean page", async () => {
+    document.body.innerHTML = `<h1>Office hours</h1><p id="note">Calculus notes for the week.</p>`;
+    const outcome = await applyChange({ ...bigger, id: "bigger-text-clean" }, false);
+    try {
+      assert.equal(outcome.ok, true);
+      assert.match(document.getElementById("note")?.getAttribute("style") ?? "", /font-size/);
+    } finally {
+      await revertChange("bigger-text-clean", false);
+      document.body.innerHTML = "";
+    }
   });
 });
