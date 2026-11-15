@@ -16,7 +16,7 @@ Most sites decide what you see and in what order. Here you can change that on th
 
 - Rerank what a site recommends: sort videos, posts or results by what you care about. The agent reads each item with `list_items` and reorders them, or sorts alphabetically.
 - Filter or hide content: "hide podcasts", "dim anything about crypto", "hide Shorts". Filters match item text and keep applying as the page loads more.
-- Time-based rules: "hide Shorts and gaming videos on weekdays 9am to 5pm", "dark mode after 10pm", "until December 15". The bar and Settings show each rule's schedule and whether it's on right now.
+- Time-based rules: "hide Shorts and gaming videos on weekdays 9am to 5pm", "dark mode after 10pm", "until December 15". The bar and Settings show each rule's schedule and whether it's on right now. While a rule is on, the bar shows Focus. Turn on Focus mode in Settings to keep every focus rule on, whatever the time, until you turn it off.
 
 ## Features
 
@@ -26,7 +26,10 @@ Most sites decide what you see and in what order. Here you can change that on th
 - Friction detection. Repeated zooming or missed clicks on small targets produce one suggested fix, and the suggestions adjust to what you accept, dismiss or undo.
 - Memory with consent. Each preference asks whether it applies to this site, all sites, or neither.
 - Hands-free control with an air pointer, pinch or dwell click, hand and head scrolling, and swipes for back and forward.
-- Every change can be undone from the toast or the change history, and one switch pauses all of them.
+- Every change can be undone from the toast or the change history, and one switch pauses all of them. A one-off change stays on the page you made it on; say "on this site" to keep it across the site.
+- Setup on first install: connect an AI, pick your needs, try the shortcut and allow the microphone. Settings can open it again.
+- Profiles: type `/profile` in the bar to create or switch profiles, such as one for study and one for a family member. Each keeps its own preferences, saved changes and history.
+- `/always <request>` saves a command that runs once on each new site you visit.
 - Import and export from Settings to move profiles, preferences, saved changes, commands, and request history between computers. Export a JSON file on one computer, then import it on the other. Import replaces the current config; API keys, sign-ins, and the local server address stay on each computer.
 
 ## How it works
