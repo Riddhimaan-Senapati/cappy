@@ -76,7 +76,7 @@ export function createMemoryView(rerender: () => void): MemoryView {
     const { events, sites } = activityOverview(state.activity ?? { buckets: {}, totals: {} }, Date.now());
     const summary = events ? `${events} event${events === 1 ? "" : "s"} across ${sites} site${sites === 1 ? "" : "s"} in the last 6 hours` : "Nothing noticed in the last 6 hours";
     return h("div", "s-row", "", [
-      h("div", "grow", "", [h("div", "", "Activity"), h("small", "", `${summary}. Counts only, used to suggest help and give the agent context.`)]),
+      h("div", "grow", "", [h("div", "", "Activity"), h("small", "", `${summary}. Counts only, used to suggest help and give the agent context. Clear also forgets dismissed suggestions, so the same one can appear again.`)]),
       button("Clear", "s-link", () => void clearActivity()),
     ]);
   };

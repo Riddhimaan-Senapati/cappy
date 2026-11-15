@@ -1,7 +1,8 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { TargetElement } from "../../../shared/protocol.js";
 import type { BackgroundRequest, ContentRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
-import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, type RequestSession } from "../storage.js";
+import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, save, type RequestSession } from "../storage.js";
+import { lastingRequest } from "../../../shared/validate.js";
 import { AgentClient, sendToTab } from "./agent.js";
 import { handleVoiceRequest } from "./voice.js";
 import { registerFriction } from "./friction.js";
@@ -73,7 +74,9 @@ async function changeProfile(action: ProfileAction) {
 async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement) {
   if (switchingProfile) return;
   if (!message.trim()) return;
-  await recordSubmittedRequest(message).catch(() => console.warn("Could not save the submitted request to local history."));
+  const lasting = lastingRequest(message);
+  await recordSubmittedRequest(lasting ?? message).catch(() => console.warn("Could not save the submitted request to local history."));
+  if (lasting) await save({ lastingSuggestion: lasting }).catch(() => undefined);
   if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target });
 }
 

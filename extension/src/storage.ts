@@ -73,6 +73,7 @@ export interface StoredState {
   suggestionFeedback: SuggestionFeedback[];
   history: ChatTurn[];
   submittedRequests: string[];
+  lastingSuggestion: string | null;
   requestSessions: RequestSession[];
   globalChanges: ActiveChange[];
   siteChanges: Record<string, ActiveChange[]>;
@@ -82,6 +83,7 @@ export interface StoredState {
   paused: boolean;
   proactive: boolean;
   floatingButton: boolean;
+  trackEvents: boolean;
   routing: Routing;
   provider: string | null;
   modelChoices: Record<string, Partial<Record<Tier, string>>>;
@@ -98,7 +100,7 @@ export interface StoredState {
   barOffset: { x: number; y: number } | null;
 }
 
-export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
+export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "lastingSuggestion", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
 export type ProfileState = Pick<StoredState, typeof PROFILE_KEYS[number]>;
 
 export const DEFAULTS: StoredState = {
@@ -115,6 +117,7 @@ export const DEFAULTS: StoredState = {
   suggestionFeedback: [],
   history: [],
   submittedRequests: [],
+  lastingSuggestion: null,
   requestSessions: [],
   globalChanges: [],
   siteChanges: {},
@@ -124,6 +127,7 @@ export const DEFAULTS: StoredState = {
   paused: false,
   proactive: true,
   floatingButton: true,
+  trackEvents: true,
   routing: "auto",
   provider: null,
   modelChoices: {},
@@ -262,6 +266,17 @@ export async function recordApplied(origin: string, change: ActiveChange) {
   if (change.scope === "everywhere") globalChanges.push(change);
   else site.push(change);
   await save({ globalChanges, siteChanges: { ...state.siteChanges, [origin]: site } });
+}
+
+export async function forgetStoredChange(host: string | null, id: string) {
+  const state = await load();
+  const siteChanges = { ...state.siteChanges };
+  if (host != null) {
+    const next = without(siteChanges[host] ?? [], id);
+    if (next.length) siteChanges[host] = next;
+    else delete siteChanges[host];
+  }
+  await save({ globalChanges: host == null ? without(state.globalChanges, id) : state.globalChanges, siteChanges });
 }
 
 export async function recordReverted(origin: string, id: string) {

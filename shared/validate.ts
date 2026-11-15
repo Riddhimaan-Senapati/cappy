@@ -106,6 +106,7 @@ function scheduleProblem(s: ScheduleLike): string | null {
   if (s.until != null && !DATE.test(s.until)) return "schedule until must be YYYY-MM-DD";
   if (s.from != null && s.until != null && s.from > s.until) return "schedule from is after until";
   if (s.days != null && (s.days.length === 0 || s.days.some((d) => !(DAY_INDEX as readonly string[]).includes(d)))) return "bad schedule days";
+  if (s.untilAt != null && Number.isNaN(Date.parse(s.untilAt))) return "schedule untilAt must be a datetime";
   return null;
 }
 
@@ -130,5 +131,66 @@ export function isScheduleActive(schedule: Change["schedule"], now: Date): boole
   if (schedule.from != null && date < schedule.from) return false;
   if (schedule.until != null && date > schedule.until) return false;
   if (schedule.days != null && !schedule.days.includes(DAY_INDEX[day.getDay()])) return false;
+  if (schedule.untilAt != null) {
+    const end = Date.parse(schedule.untilAt);
+    if (!Number.isNaN(end) && now.getTime() >= end) return false;
+  }
   return true;
+}
+
+const DAY_LABEL: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
+const WEEK = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const shortDate = (date: string) => {
+  const [, month, day] = date.split("-").map(Number);
+  return month && day ? `${MONTHS[month - 1]} ${day}` : date;
+};
+
+// Plain words for when a scheduled change is on, e.g. "Weekdays 9:00 to 17:00" or "Daily 22:00 to 6:00, until Dec 15".
+// "Weekdays 9:00 to 17:00 · on now" or "... · off right now"; null for an always-on change.
+export function scheduleStatus(schedule: Change["schedule"], now = new Date()): string | null {
+  const text = describeSchedule(schedule);
+  return text ? `${text} · ${isScheduleActive(schedule, now) ? "on now" : "off right now"}` : null;
+}
+
+// A short span such as "for the next 30 seconds" ends once. Repeating days and clocks are not one-time.
+export function isOneShot(schedule: Change["schedule"]): boolean {
+  return Boolean(schedule?.untilAt) && !schedule?.days?.length && schedule?.start == null && schedule?.end == null && schedule?.from == null && schedule?.until == null;
+}
+
+const SPOKEN_SPAN = String.raw`\b(?:(?:for|in)\s+)?(?:the\s+)?(?:next\s+)?\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b`;
+const SPOKEN_WINDOW = String.raw`\b(?:between|from)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+(?:and|to)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b`;
+
+// "hide podcasts for 30 seconds" becomes "hide podcasts". Null when the message has no counted span.
+export function lastingRequest(message: string): string | null {
+  const span = new RegExp(SPOKEN_SPAN, "gi");
+  if (!span.test(message)) return null;
+  const text = message
+    .replace(new RegExp(SPOKEN_SPAN, "gi"), " ")
+    .replace(new RegExp(SPOKEN_WINDOW, "gi"), " ")
+    .replace(/\s+/g, " ")
+    .replace(/\s+([,.;])/g, "$1")
+    .replace(/^[,\s.;:-]+|[,\s.;:-]+$/g, "")
+    .trim();
+  if (!text || text.toLowerCase() === message.trim().toLowerCase()) return null;
+  return text;
+}
+
+export function describeSchedule(schedule: Change["schedule"]): string | null {
+  if (!schedule) return null;
+  const days = schedule.days ? [...schedule.days].sort((a, b) => WEEK.indexOf(a) - WEEK.indexOf(b)) : null;
+  const key = days?.join(",");
+  const dayText = !days || days.length === 7 ? "Daily" : key === "mon,tue,wed,thu,fri" ? "Weekdays" : key === "sat,sun" ? "Weekends" : days.map((day) => DAY_LABEL[day]).join(", ");
+  const time = (value: string) => value.replace(/^0(\d):/, "$1:");
+  const parts = [schedule.start != null && schedule.end != null ? `${dayText} ${time(schedule.start)} to ${time(schedule.end)}` : days ? dayText : ""];
+  if (schedule.from != null && schedule.until != null) parts.push(`${shortDate(schedule.from)} to ${shortDate(schedule.until)}`);
+  else if (schedule.from != null) parts.push(`from ${shortDate(schedule.from)}`);
+  else if (schedule.until != null) parts.push(`until ${shortDate(schedule.until)}`);
+  if (schedule.untilAt != null) {
+    const at = new Date(schedule.untilAt);
+    if (!Number.isNaN(at.getTime())) parts.push(`until ${time(`${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}`)}`);
+  }
+  const text = parts.filter(Boolean).join(", ");
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : null;
 }

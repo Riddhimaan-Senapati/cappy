@@ -2,6 +2,7 @@ import type { ProviderInfo } from "../../../shared/protocol.js";
 import { isSignedIn } from "../../auth/chatgpt.js";
 import { getKey, type KeyName } from "../../keys.js";
 import { createAnthropicProvider } from "./anthropic.js";
+import { createAnthropicCompatibleProvider, createOpenAICompatibleProvider, createXaiProvider, endpointDetail } from "./endpoint.js";
 import { createGeminiProvider } from "./gemini.js";
 import { createStubProvider } from "./stub.js";
 import { createChatGptProvider, createOpenAIKeyProvider } from "./openai.js";
@@ -11,11 +12,21 @@ interface Entry {
   label: string;
   setup: ProviderInfo["setup"];
   key?: KeyName;
+  baseKey?: KeyName;
   ready(): boolean;
   create(): AgentProvider;
 }
 
 const keyed = (label: string, key: KeyName, create: () => AgentProvider): Entry => ({ label, setup: "key", key, ready: () => !!getKey(key), create });
+
+const endpoint = (label: string, key: KeyName, baseKey: KeyName, create: () => AgentProvider): Entry => ({
+  label,
+  setup: "endpoint",
+  key,
+  baseKey,
+  ready: () => !!getKey(key) && !!getKey(baseKey),
+  create,
+});
 
 // Order is the fallback preference when the user has not picked a provider.
 const REGISTRY: Record<string, Entry> = {
@@ -23,6 +34,9 @@ const REGISTRY: Record<string, Entry> = {
   "anthropic-key": keyed("Claude", "ANTHROPIC_API_KEY", createAnthropicProvider),
   "openai-key": keyed("OpenAI API", "OPENAI_API_KEY", createOpenAIKeyProvider),
   gemini: keyed("Gemini", "GEMINI_API_KEY", createGeminiProvider),
+  xai: keyed("SpaceXAI", "XAI_API_KEY", createXaiProvider),
+  "openai-compat": endpoint("OpenAI-compatible", "OPENAI_COMPAT_API_KEY", "OPENAI_COMPAT_BASE_URL", createOpenAICompatibleProvider),
+  "anthropic-compat": endpoint("Anthropic-compatible", "ANTHROPIC_COMPAT_API_KEY", "ANTHROPIC_COMPAT_BASE_URL", createAnthropicCompatibleProvider),
 };
 
 // The deterministic stub is for offline runs and e2e tests, so it only exists when explicitly requested.
@@ -39,10 +53,14 @@ export function wantModels(id: string) {
   wanted.add(id);
 }
 
-const fingerprint = (entry: Entry) => (entry.key ? (getKey(entry.key) ?? "") : String(entry.ready()));
+const fingerprint = (entry: Entry) => `${entry.key ? (getKey(entry.key) ?? "") : String(entry.ready())}\n${entry.baseKey ? (getKey(entry.baseKey) ?? "") : ""}`;
 
 export function keyFor(id: string): KeyName | undefined {
   return registry()[id]?.key;
+}
+
+export function baseKeyFor(id: string): KeyName | undefined {
+  return registry()[id]?.baseKey;
 }
 
 export function forget(id: string) {
@@ -90,9 +108,10 @@ export async function describeProviders(): Promise<ProviderInfo[]> {
   return Promise.all(
     Object.entries(registry()).map(async ([id, entry]) => {
       const provider = getProvider(id);
-      if (!provider) return { id, label: entry.label, setup: entry.setup, ready: false };
+      const detail = entry.baseKey ? endpointDetail(entry.baseKey) : undefined;
+      if (!provider) return { id, label: entry.label, setup: entry.setup, ready: false, ...(detail ? { detail } : {}) };
       const available = wanted.has(id) ? await availableModels(id, provider) : undefined;
-      return { id, label: entry.label, setup: entry.setup, ready: true, models: provider.models, available };
+      return { id, label: entry.label, setup: entry.setup, ready: true, ...(detail ? { detail } : {}), models: provider.models, available };
     }),
   );
 }

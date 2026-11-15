@@ -86,12 +86,15 @@ export const SETTINGS_CSS = `
 .s-x:hover { background: rgba(255, 255, 255, 0.14); color: #fff; }
 @keyframes s-pop { from { opacity: 0; transform: scale(0.85); } }
 .s-add { display: flex; gap: 6px; }
+.s-add.stack { flex-direction: column; align-items: stretch; }
+.s-add.stack .s-btn { align-self: flex-end; }
 .s-add input { flex: 1; min-width: 0; all: unset; box-sizing: border-box; padding: 8px 12px; border-radius: 10px; background: var(--raise); border: 1px solid var(--line); color: var(--text); }
 .s-add input:focus { border-color: var(--accent); }
 .s-add input::placeholder { color: var(--faint); }
 .s-btn { all: unset; box-sizing: border-box; cursor: pointer; padding: 8px 12px; border-radius: 10px; background: var(--raise); border: 1px solid var(--line); color: var(--text); font-weight: 500; display: inline-flex; align-items: center; gap: 8px; transition: background 0.15s; }
 .s-btn:hover { background: var(--raise2); }
 .s-change { padding: 9px 12px; border-radius: 12px; background: var(--raise); border-left: 2px solid var(--accent); animation: s-pop 0.3s var(--spring); }
+.s-change.on { border: 2px solid #e11d48; box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.22); }
 .s-change .top { display: flex; align-items: center; gap: 8px; }
 .s-change b { flex: 1; font-weight: 600; }
 .s-change .why { margin-top: 2px; color: var(--muted); font-size: 12px; }

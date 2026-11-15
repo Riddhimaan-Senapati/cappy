@@ -1,5 +1,6 @@
-import type { ActiveChange, Change, PageOutline } from "../../../shared/adaptation.js";
+import type { ActiveChange, Change, PageOutline, Schedule } from "../../../shared/adaptation.js";
 import type { TargetElement, Trigger } from "../../../shared/protocol.js";
+import { parseSpokenSchedule } from "../schedule.js";
 import type { AgentSession } from "../session.js";
 import { tools, type AgentTool } from "../tools.js";
 import type { AgentProvider } from "./types.js";
@@ -28,7 +29,7 @@ export interface StubInput {
 const BIGGER_TEXT = /\b(bigger|larger)\b[^.!?]*\btext\b|\btext\b[^.!?]*\b(bigger|larger)\b/i;
 const DARK_MODE = /dark mode/i;
 const INVERT = /\binvert\b/i;
-const REMOVE = /\b(?:remove(?: all)?|hide)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30})\b/i;
+const REMOVE = /\b(?:remove(?: all)?|hide|ignore|(?:do not|don['’]t|dont)\s+show)\s+(?:the\s+|all\s+)?([a-z][a-z-]{1,30})\b/i;
 const COLORBLIND = /colou?r[- ]?blind/i;
 const TARGETED = /\b(?:remove|hide|delete|red)\b/i;
 const VAGUE = /^make (?:this|it|the page) easier(?: to (?:read|use|see))?[.!?]?$/i;
@@ -51,11 +52,16 @@ function itemSelectorFor(page: PageOutline, forms: string[]): string | null {
   return hit?.selector ?? null;
 }
 
-function change(fields: Pick<Change, "id" | "summary" | "reason" | "scope"> & Partial<Pick<Change, "css" | "dom" | "block">>): Change {
+function change(fields: Pick<Change, "id" | "summary" | "reason" | "scope"> & Partial<Pick<Change, "css" | "dom" | "block" | "schedule">>): Change {
   return { css: null, dom: null, block: null, ...fields };
 }
 
-function filterChange(word: string, page: PageOutline, reason: string, siteOnly: boolean): Change {
+// Deterministic reading of clock windows, weekends, and "for the next 30 seconds".
+export function stubSchedule(message: string, now = new Date()): Schedule | null {
+  return parseSpokenSchedule(message, now);
+}
+
+function filterChange(word: string, page: PageOutline, reason: string, siteOnly: boolean, schedule: Schedule | null = null): Change {
   const keywords = keywordForms(word);
   const itemSelector = itemSelectorFor(page, keywords);
   return change({
@@ -64,6 +70,7 @@ function filterChange(word: string, page: PageOutline, reason: string, siteOnly:
     reason,
     scope: siteOnly || itemSelector ? "site" : "everywhere",
     block: { name: "contentFilter", keywords, itemSelector, action: "hide" },
+    ...(schedule ? { schedule } : {}),
   });
 }
 
@@ -156,8 +163,9 @@ export function planStubRun(input: StubInput): StubPlan {
   const removal = message.match(REMOVE);
   if (removal) {
     const word = removal[1].toLowerCase();
-    calls.push({ name: "apply_change", input: { change: filterChange(word, input.page, reason, siteOnly) } });
-    remember(`Hide ${word}`);
+    const schedule = stubSchedule(message);
+    calls.push({ name: "apply_change", input: { change: filterChange(word, input.page, reason, siteOnly, schedule) } });
+    if (!schedule?.untilAt) remember(`Hide ${word}`);
     done.push(`hid ${word}`);
   }
 

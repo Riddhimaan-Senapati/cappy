@@ -4,7 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { chromium, type BrowserContext, type CDPSession, type Page } from "playwright";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const EXTENSION_DIR = path.join(ROOT, "extension");
@@ -103,6 +103,10 @@ export async function launchBrowser(name: string, options: E2EOptions = {}): Pro
   let worker = context.serviceWorkers()[0];
   worker ??= await context.waitForEvent("serviceworker", { timeout: 20_000 });
   const extensionId = new URL(worker.url()).host;
+  // A fresh install opens the setup page; tests that query the active tab would otherwise hit it.
+  await worker.evaluate(() => chrome.storage.local.set({ onboarded: true }));
+  const welcome = await context.waitForEvent("page", { predicate: (page) => page.url().includes("/welcome.html"), timeout: 3_000 }).catch(() => context.pages().find((page) => page.url().includes("/welcome.html")));
+  await welcome?.close();
   return {
     context,
     extensionId,
@@ -169,6 +173,7 @@ interface DomNode {
   nodeValue?: string;
   nodeType: number;
   backendNodeId: number;
+  attributes?: string[];
   children?: DomNode[];
   shadowRoots?: DomNode[];
   contentDocument?: DomNode;
@@ -191,6 +196,97 @@ async function pierce(page: Page) {
   const session = await page.context().newCDPSession(page);
   const { root } = (await session.send("DOM.getDocument", { depth: -1, pierce: true })) as { root: DomNode };
   return { session, root };
+}
+
+function attr(node: DomNode, name: string): string | undefined {
+  const list = node.attributes ?? [];
+  for (let i = 0; i < list.length; i += 2) if (list[i] === name) return list[i + 1];
+  return undefined;
+}
+
+async function ensureAttrs(session: CDPSession, node: DomNode) {
+  if (node.attributes) return;
+  const described = (await session.send("DOM.describeNode", { backendNodeId: node.backendNodeId })) as { node: DomNode };
+  node.attributes = described.node.attributes ?? [];
+}
+
+async function resolveAndCall(session: CDPSession, node: DomNode, source: string, args: unknown[] = []) {
+  const { object } = (await session.send("DOM.resolveNode", { backendNodeId: node.backendNodeId })) as { object: { objectId?: string } };
+  if (!object.objectId) throw new Error("Could not resolve an extension UI node");
+  const result = (await session.send("Runtime.callFunctionOn", {
+    objectId: object.objectId,
+    functionDeclaration: source,
+    arguments: args.map((value) => ({ value })),
+    awaitPromise: false,
+  })) as { exceptionDetails?: { text?: string; exception?: { description?: string } } };
+  if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "extension UI call failed");
+}
+
+// Plain Enter in the bar replays a saved request. The side panel always asks the model again.
+export async function askInBar(page: Page, message: string): Promise<void> {
+  await page.bringToFront();
+  const opened = await pierce(page);
+  try {
+    let fab: DomNode | undefined;
+    for (const node of walk(opened.root)) {
+      if (node.nodeName !== "BUTTON") continue;
+      await ensureAttrs(opened.session, node);
+      if ((attr(node, "aria-label") ?? "").includes("Open adaptive agent")) fab = node;
+    }
+    if (!fab) throw new Error("No adaptive agent button on the page");
+    await resolveAndCall(opened.session, fab, "function () { this.click(); }");
+  } finally {
+    await opened.session.detach();
+  }
+
+  await waitFor("the bar to open", async () => {
+    const { session, root } = await pierce(page);
+    try {
+      for (const node of walk(root)) {
+        if (node.nodeName !== "DIV") continue;
+        await ensureAttrs(session, node);
+        const classes = (attr(node, "class") ?? "").split(/\s+/);
+        if (classes.includes("sp") && classes.includes("open")) return true;
+      }
+      return false;
+    } finally {
+      await session.detach();
+    }
+  });
+
+  const typing = await pierce(page);
+  try {
+    let input: DomNode | undefined;
+    for (const node of walk(typing.root)) {
+      if (node.nodeName !== "INPUT") continue;
+      await ensureAttrs(typing.session, node);
+      if ((attr(node, "class") ?? "").split(/\s+/).includes("input")) input = node;
+    }
+    if (!input) throw new Error("The bar has no request field");
+    await resolveAndCall(
+      typing.session,
+      input,
+      `function (message) {
+        this.focus();
+        this.value = message;
+        this.dispatchEvent(new Event("input", { bubbles: true }));
+        this.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, composed: true, cancelable: true }));
+      }`,
+      [message],
+    );
+  } finally {
+    await typing.session.detach();
+  }
+}
+
+export async function shadowButtonVisible(page: Page, label: string): Promise<boolean> {
+  const { session, root } = await pierce(page);
+  try {
+    for (const node of walk(root)) if (node.nodeName === "BUTTON" && textOf(node) === label) return true;
+    return false;
+  } finally {
+    await session.detach();
+  }
 }
 
 export async function shadowTextVisible(page: Page, fragment: string): Promise<boolean> {

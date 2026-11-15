@@ -10,17 +10,20 @@ import { forgetLine, hasMemoryLine, rememberLines } from "../memory.js";
 import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
+import { detectInjection } from "../../../shared/safety.js";
+import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
 import { setFilterClassifier } from "./content-filter.js";
-import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
+import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
-import { inspectPage, recordActivity, recordChange, recordRun, recordUsage } from "./inspection.js";
+import { inspectPage, recordActivity, recordChange, recordRun, recordUsage, setEventTracking } from "./inspection.js";
 import { inspect, listItems, readPage } from "./outline.js";
 import { findSiteFeatures } from "./site-controls.js";
 import { speechActive, onSpeechChange, readPageAloud, stopSpeech } from "./speech.js";
 
 const origin = location.origin;
+onChangeDropped((id) => void recordReverted(origin, id));
 let overlay: OverlayUi | null = null;
 const suggestionCache = new Map<string, Promise<Suggestion | null>>();
 const QUICK_UNDO_MS = 30_000;
@@ -174,9 +177,11 @@ async function apply(change: Change, source = "Reapplied from page history local
   }
   const outcome = await applyChange(change);
   const stored = activeChanges().find((active) => active.id === change.id);
-  if (outcome.ok && stored) {
+  if (outcome.ok && stored && !isOneShot(stored.schedule)) {
     await recordApplied(origin, stored);
     recordChange(change.id, source);
+  } else if (outcome.ok && isOneShot(change.schedule)) {
+    if (!stored) await recordReverted(origin, change.id);
   } else recordActivity(`Could not apply ${change.id}: ${outcome.error ?? "No active change"}`);
   for (const id of outcome.replaced ?? []) await recordReverted(origin, id);
   if (change.block?.name === "textScale") await syncLearnedText();
@@ -267,6 +272,14 @@ async function syncLearnedText() {
 }
 
 async function restore(animate: boolean) {
+  if (detectInjection(readPage())) {
+    const saved = await savedChangesFor(origin);
+    const { paused, profile } = await load();
+    if (saved.length || (!paused && hasMemoryLine(profile, LARGER_TEXT))) {
+      recordActivity("Saved changes were not restored: this page tried to instruct the agent.");
+    }
+    return 0;
+  }
   let restored = 0;
   for (const change of await savedChangesFor(origin)) {
     if ((await applyChange(change, animate)).ok) {
@@ -279,7 +292,8 @@ async function restore(animate: boolean) {
 }
 
 function ensureOverlay(): OverlayUi {
-  overlay ??= new OverlayUi({
+  if (!overlay) {
+    overlay = new OverlayUi({
     ask: (message, fresh, interrupt, thread, target) => void send({ kind: "runChat", message, fresh, interrupt, thread, target }),
     stop: () => void send({ kind: "stopRun" }),
     dequeue: (runId) => void send({ kind: "dequeue", runId }),
@@ -320,12 +334,14 @@ function ensureOverlay(): OverlayUi {
       revert: async (id) => void (await userRevert(id)),
       openDebug: () => void send({ kind: "openDebug" }),
       openShortcuts: () => void send({ kind: "openShortcuts" }),
-      setKey: (provider, key) => void send({ kind: "setKey", provider, key }),
+      setKey: (provider, key, baseURL) => void send({ kind: "setKey", provider, key, ...(baseURL != null ? { baseURL } : {}) }),
       signIn: () => void send({ kind: "chatgptLogin" }),
       signOut: () => void send({ kind: "chatgptLogout" }),
       getStatus: async () => ((await send({ kind: "status" })) as StatusInfo | undefined) ?? { connected: false, busy: false },
     },
   });
+    onFocusLive((on) => overlay?.setFocus(on));
+  }
   return overlay;
 }
 
@@ -424,7 +440,7 @@ function start() {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || tornDown) return;
-    if (changes.activeProfileId) {
+    if (changes.activeProfileId || changes.configImportedAt) {
       accepted = null;
       suggestionCache.clear();
       clearTarget();
@@ -437,13 +453,14 @@ function start() {
         await send({ kind: "pageReady", origin, restored, profileChanged: true });
       }).catch(reportExtensionError);
     } else if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
-    if (changes.paused) {
+    if (changes.paused && !changes.configImportedAt) {
       recordActivity(changes.paused.newValue ? "Adaptations paused; reverting all active changes locally." : "Adaptations resumed; restoring saved changes locally.");
       void mutate(async () => {
         if (changes.paused.newValue) await revertAll();
         else await restore(true);
       }).catch(() => undefined);
     }
+    if (changes.trackEvents) setEventTracking(changes.trackEvents.newValue !== false);
     if (changes.floatingButton && document.body) ensureOverlay().setFab(Boolean(changes.floatingButton.newValue));
     if (changes.camera || changes.paused) void load().then((state) => whenReady(() => syncCamera(state.camera, state.paused)));
   });
@@ -455,6 +472,7 @@ function start() {
 
   (async () => {
     const state = await load();
+    setEventTracking(state.trackEvents);
     recordActivity(state.paused ? "Adaptations paused; saved changes were not restored." : "Restoring saved site and global changes locally.");
     whenReady(() => {
       if (state.floatingButton) ensureOverlay().setFab(true);

@@ -34,10 +34,10 @@ Chrome extension                                        Local Node server (holds
 - A request sent while a tab is busy is queued in the service worker. The queue drains in order only after a successful reply. Send now (Ctrl/Cmd+Enter) cancels the running request instead (the server aborts the model call); Stop cancels it and keeps the queue and any applied changes.
 - Point and speak: with the bar closed, the dictation shortcut listens without covering the page. The element under the camera air pointer (deliberate) or the mouse (only when the request says "this", "that", "here") becomes the request's target, so "make this red" changes that element (`extension/src/voice/point.ts`). With camera control, pinch-and-hold selects and starts listening.
 - Voice ends after about 1.2 s of silence (a ring drains on the mic and the Listening pill; speaking again cancels it), when the user says "done" or "send it", at 15 s, or when a pinch hold is released. Loudness is measured in the offscreen document against an adaptive noise floor and the user's own speaking level, with automatic gain off (`extension/src/voice/endpoint.ts`). For OpenAI and Gemini voice, "done" is spotted live only by Chrome's on-device recognizer.
-- Friction suggestions: content-script sensors (`extension/src/content/sensors.ts`) and zoom events log zoom, pinch-zoom, rage clicks and near-miss clicks as counts in 5-minute buckets for 6 hours plus all-time totals (`extension/src/friction-log.ts`). Two events on a page within 2 minutes (5-minute cooldown) trigger one `suggest` call with those counts and the feedback log; the reply is a chip by the floating orb and the bar's top item. Accept, dismiss and an undo within 30 s are recorded as feedback for later suggestions.
+- Friction suggestions: content-script sensors (`extension/src/content/sensors.ts`) and zoom events log zoom, pinch-zoom, rage clicks and near-miss clicks as counts in 5-minute buckets for 6 hours plus all-time totals (`extension/src/friction-log.ts`). Two events on a page within 2 minutes (5-minute cooldown) trigger one `suggest` call with those counts and the feedback log; the reply is ghost text with a dismiss button above the floating button, and the bar's top item. Accept, dismiss and an undo within 30 s are recorded as feedback for later suggestions. A dismissal is remembered, so the same suggestion stays hidden and that site will not suggest again for 5 minutes. For a demo, open Settings, then Memory, then Activity, then Clear. That forgets the dismissal and resets the wait. Zoom in twice within 2 minutes and the ghost text comes back.
 - Vague requests, or a rejection without a stated alternative, get `offer_options`: 2 to 4 choices that run as follow-ups in the same session and can be edited first.
 - Camera control (main's gestures): air pointer, pinch click, pinch-and-hold to select a target element, dwell click, hand and head scrolling, swipe back and forward, thumbs-down to cancel. The mouse picker and the right-click "Adapt this" menu select targets too; a targeted request changes only that element.
-- LLM usage and the page inspector: providers report token counts per run, shown in Settings (AI tab); the side panel can list what the extension changed on the current page.
+- LLM usage and the page inspector: providers report token counts per run, shown in Settings (AI tab); the side panel can list what the extension changed on the current page. Settings has Track events, on by default, which keeps the inspector's event log (the latest 100). Turning it off stops recording and clears that log. It does not affect friction counts or suggestions.
 - Reopening a saved request continues its session: follow-ups carry up to four earlier successful prompt-and-reply pairs from it.
 - Saved changes replay on page load with no model call. Repeating the same request on a site is served from storage; Shift+Enter asks the model again.
 - DOM ops and text scaling re-apply to content added later (a MutationObserver in `extension/src/content/engine.ts`). CSS keeps applying on its own.
@@ -48,7 +48,7 @@ Chrome extension                                        Local Node server (holds
 Defined in [shared/adaptation.ts](shared/adaptation.ts), validated in [shared/validate.ts](shared/validate.ts) on the server and again in the content script.
 
 ```ts
-Change = { id, summary, reason, css, dom, block, scope: "site" | "everywhere" }
+Change = { id, summary, reason, css, dom, block, scope: "site" | "everywhere", schedule }
 ```
 
 The model decides how to implement a need, in this order of preference:
@@ -87,7 +87,7 @@ Long-term memory (learned preferences, friction signals, Sentient notes) plugs i
 
 Keep what reaches the model short (a few lines), never raw notes or messages. Profile editing in settings keeps working either way.
 
-Nothing is saved to memory without the user. Every `remember` line is proposed with the agent's suggested scope and the user picks **Only on <host>**, **All sites** or **Don't save** (bar, toast, side panel or settings). Site-only lines are stored as `On <host>: <line>` and `profileFor` in `extension/src/memory.ts` sends them only on that host. A suggestion accepted from the friction chip offers its memory line the same way, together with Undo.
+Nothing is saved to memory without the user. Every `remember` line is proposed with the agent's suggested scope and the user picks **Only on <host>**, **All sites** or **Don't save** (bar, toast, side panel or settings). Site-only lines are stored as `On <host>: <line>` and `profileFor` in `extension/src/memory.ts` sends them only on that host. A suggestion accepted from the ghost text offers its memory line the same way, together with Undo.
 
 Runs also carry `<recent_activity>`: one line of friction counts per kind (10 minutes, 1 hour, 6 hours, all time). It never includes page text or other sites' names.
 
@@ -99,7 +99,7 @@ Playbooks for kinds of requests live in `server/skills/*.md` (front matter: `nam
 
 ## Time-based rules
 
-Any change can carry a `schedule` (days, a daily window that may cross midnight, from/until dates) in `shared/adaptation.ts`. `isScheduleActive` in `shared/validate.ts` decides whether it is on; the engine keeps scheduled changes registered and switches them every 30 s and on tab focus. Combined with `contentFilter` this covers rules like "hide Shorts on weekdays 9 to 5". Showing the schedule and "on now / off right now" in the UI is PR #7 (`feat/schedule-status`).
+Any change can carry a `schedule` (days, a daily window that may cross midnight, from/until dates, or an absolute `untilAt` instant) in `shared/adaptation.ts`. `isScheduleActive` in `shared/validate.ts` decides whether it is on; the engine keeps scheduled changes registered and switches them every 30 s, on tab focus, and at a short span's end. The server reads the user's words with chrono-node and date-fns (`server/agent/schedule.ts`) and writes that schedule onto `apply_change`, so "for the next 30 seconds, don't show videos" ends at that instant and "ignore podcasts on weekends" is Saturday and Sunday. Combined with `contentFilter` this also covers rules like "hide Shorts on weekdays 9 to 5". Showing the schedule and "on now / off right now" in the UI is PR #7 (`feat/schedule-status`).
 
 ## Repo layout
 
@@ -109,7 +109,7 @@ server/        Express + WebSocket entry, agent session, tools, prompt, router, 
 extension/src/
   background/  WebSocket client, run orchestration and queue, voice relay, TTS
   content/     page reading, change engine, blocks, sensors, site controls, gestures, picker
-  overlay/     Spotlight bar, floating button, toast, suggestion chip
+  overlay/     Spotlight bar, floating button, toast, suggestion
   voice/       voice controller, pause detection, point-and-speak target choice
   camera/      MediaPipe tracking page
   offscreen/   microphone and speech
@@ -140,7 +140,7 @@ Load `extension/` unpacked at `chrome://extensions`, then set up a provider from
 ## Status against the brief
 
 Done:
-- Plain-language requests install live, with a reason on every change, per-change and global undo, pre-blur on page load, and a proactive page-load run from the saved profile.
+- Plain-language requests install live, with a reason on every change, one Undo for the whole run, pre-blur on page load, and a proactive page-load run from the saved profile.
 - Building blocks: form fixer (axe-checked), colorblind color fix, text scaling and focus (CSS, content filter, stop motion), and hand-gesture scrolling through camera control. Read-aloud is done as well.
 - Verification: matched counts and before/after accessibility stats on every change, with fix-or-revert. Change history toggles each change on and off.
 - Learning from friction (zoom, misclicks), with consent: every memory asks for a scope, the profile is editable in settings, and the injection trap page is blocked.
