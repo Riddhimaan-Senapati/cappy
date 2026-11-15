@@ -66,6 +66,7 @@ export function createGeminiProvider(): AgentProvider {
         }
         contents.push({ role: "user", parts });
         if (session.escalation) return "";
+        if (session.finishNote) return session.finishNote;
       }
       return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
     },

@@ -46,6 +46,10 @@ export const BlockCall = z.discriminatedUnion("name", [
     allowSiteControls: z.boolean().describe("Legacy compatibility flag. Set false. Use find_site_features and use_site_control for native theme controls."),
   }),
   z.object({
+    name: z.literal("contrast"),
+    minRatio: z.number().describe("Contrast ratio to reach in one pass. 4.5 for normal text, 3 for large text."),
+  }),
+  z.object({
     name: z.literal("formFixer"),
     minTargetPx: z.number().describe("Minimum width and height in pixels for form controls, from 24 to 64."),
     addLabels: z.boolean().describe("Add visible labels to unnamed form controls when the page supplies enough information."),

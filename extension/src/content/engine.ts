@@ -79,7 +79,7 @@ interface LiveOp {
   undo: Undo;
 }
 
-function liveOp(op: DomOp): LiveOp {
+function liveOp(op: DomOp, hint = ""): LiveOp {
   const seen = new WeakSet<Element>();
   const undoSteps: Undo[] = [];
   const labels = new WeakMap<Element, HTMLLabelElement>();
@@ -140,7 +140,16 @@ function liveOp(op: DomOp): LiveOp {
           break;
       }
     }
-    if (op.op === "reorder") sortItems(op, elements, originalOrder, undoSteps);
+    if (op.op === "reorder") {
+      const withSiblings = new Set(elements);
+      for (const item of elements) {
+        for (const child of item.parentElement?.children ?? []) {
+          if (child.matches(op.selector)) withSiblings.add(child);
+        }
+      }
+      const problem = sortItems(op, [...withSiblings], originalOrder, undoSteps, hint);
+      if (problem) throw new Error(problem);
+    }
     return elements.length;
   };
 
@@ -159,7 +168,7 @@ function materialize(change: Change, matched: Record<string, number>): Live {
   try {
     if (change.css) live.undo.push(applyCss(change, matched));
     for (const op of change.dom ?? []) {
-      const dom = liveOp(op);
+      const dom = liveOp(op, `${change.summary} ${change.reason}`);
       matched[`${op.op} ${op.selector}`] = dom.run([document]);
       live.undo.push(dom.undo);
       live.reapply.push((roots) => void dom.run(roots));
@@ -202,7 +211,28 @@ function compareKeys(op: Extract<DomOp, { op: "reorder" }>) {
   };
 }
 
-function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], originalOrder: Map<Element, Element[]>, undoSteps: Undo[]) {
+function storyCluster(item: Element, selected: Set<Element>): Element[] {
+  const cluster = [item];
+  if (item.tagName !== "TR") return cluster;
+  let next = item.nextElementSibling;
+  while (next && cluster.length < 4 && !selected.has(next)) {
+    cluster.push(next);
+    const spacer = next.classList.contains("spacer");
+    next = next.nextElementSibling;
+    if (spacer) break;
+  }
+  return cluster;
+}
+
+function metricValue(text: string, hint: string): number | null {
+  const comments = /\bcomments?\b/i.test(hint) && !/\bpoints?\b/i.test(hint);
+  const match = text.match(comments ? /(\d[\d,]*)\s+comments?\b/i : /(\d[\d,]*)\s+points?\b/i);
+  if (!match) return null;
+  const value = Number(match[1].replace(/,/g, ""));
+  return Number.isFinite(value) ? value : null;
+}
+
+function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], originalOrder: Map<Element, Element[]>, undoSteps: Undo[], hint: string): string | null {
   const byParent = new Map<Element, Element[]>();
   for (const item of items) {
     if (!item.parentElement) continue;
@@ -210,12 +240,31 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
     group.push(item);
     byParent.set(item.parentElement, group);
   }
+  const selected = new Set(items);
+  const clusters = new Map(items.map((item) => [item, storyCluster(item, selected)]));
+  const numericHint = /\b(points?|scores?|votes?|comments?|highest|lowest)\b/i.test(hint);
+  const descending = /\b(highest|most|descending)\b/i.test(hint) || (!/\b(lowest|fewest|ascending)\b/i.test(hint) && op.direction !== "asc");
   for (const [parent, group] of byParent) {
     if (group.length < 2) continue;
     const current = [...parent.children].filter((child) => group.includes(child));
-    const sorted = [...current].sort(compareKeys(op));
+    const scoreOf = (item: Element) => metricValue((clusters.get(item) ?? [item]).map((node) => node.textContent ?? "").join(" "), hint);
+    const known = current.map(scoreOf).filter((score): score is number => score != null);
+    const numeric = numericHint && known.length >= Math.ceil(current.length * 0.6);
+    const sorted = numeric
+      ? [...current].sort((a, b) => {
+          const left = scoreOf(a);
+          const right = scoreOf(b);
+          if (left == null || right == null) return left == null ? 1 : -1;
+          return descending ? right - left : left - right;
+        })
+      : [...current].sort(compareKeys(op));
+    if (numeric) {
+      const sequence = sorted.map(scoreOf).filter((score): score is number => score != null);
+      const ordered = sequence.every((score, index) => index === 0 || (descending ? sequence[index - 1]! >= score : sequence[index - 1]! <= score));
+      if (!ordered) return `The values are not in order (${sequence.slice(0, 8).join(", ")}). Read the number on each item and move a title row together with the rows under it. Nothing was kept.`;
+    }
     // Only move nodes when out of order, so our own moves do not retrigger the observer forever.
-    if (sorted.every((item, i) => item === current[i])) continue;
+    if (sorted.every((item, index) => item === current[index])) continue;
     if (!originalOrder.has(parent)) {
       originalOrder.set(parent, [...parent.children]);
       undoSteps.push(() => {
@@ -227,11 +276,14 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
     const anchor = current[0].previousElementSibling;
     let cursor: Element | null = anchor;
     for (const item of sorted) {
-      if (cursor) cursor.after(item);
-      else parent.prepend(item);
-      cursor = item;
+      for (const node of clusters.get(item) ?? [item]) {
+        if (cursor) cursor.after(node);
+        else parent.prepend(node);
+        cursor = node;
+      }
     }
   }
+  return null;
 }
 
 function revertNow(id: string): boolean {

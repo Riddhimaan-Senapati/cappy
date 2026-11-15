@@ -11,6 +11,8 @@ export class AgentSession {
   readonly appliedIds = new Set<string>();
   blockedReason: string | null = null;
   escalation: string | null = null;
+  // Set when one tool already finished the request, so the loop does not spend the step budget.
+  finishNote: string | null = null;
   tier: Tier = "fast";
   failures = 0;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();

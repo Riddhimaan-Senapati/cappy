@@ -134,6 +134,7 @@ export const tools: AgentTool[] = [
       const counts = Object.values(outcome.matched);
       if (!outcome.ok || (counts.length > 0 && counts.every((count) => count === 0))) session.failures++;
       if (outcome.ok) session.appliedIds.add(annotated.id);
+      if (outcome.ok && annotated.block?.name === "contrast") session.finishNote = outcome.note ?? "Raised the contrast of the low-contrast text in one pass.";
       return { text: JSON.stringify(outcome) };
     },
   }),

@@ -1,6 +1,6 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
 import { applyContentFilter } from "./content-filter.js";
-import { OWN_ATTR, textElements } from "./dom.js";
+import { contrastInfo, OWN_ATTR, textElements } from "./dom.js";
 import { applyDarkMode } from "./dark-mode.js";
 import { applyFormFixer } from "./form-fixer.js";
 
@@ -159,6 +159,45 @@ function contentFilter(block: Extract<BlockCall, { name: "contentFilter" }>): Li
   return { undo: handle.undo, matched: handle.matched };
 }
 
+function hexLuminance(hex: string): number {
+  const value = Number.parseInt(hex.replace("#", ""), 16);
+  const channel = (piece: number) => {
+    const s = piece / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel((value >> 16) & 255) + 0.7152 * channel((value >> 8) & 255) + 0.0722 * channel(value & 255);
+}
+
+function contrastFix(minRatio: number): LiveBlock {
+  const restores: Array<() => void> = [];
+  for (const el of textElements(3000)) {
+    if (!el.textContent?.trim()) continue;
+    let info: ReturnType<typeof contrastInfo>;
+    try {
+      info = contrastInfo(el);
+    } catch {
+      continue;
+    }
+    if (!Number.isFinite(info.ratio) || info.ratio >= minRatio) continue;
+    const next = hexLuminance(info.background) < 0.5 ? "#f4f4f5" : "#141414";
+    const previous = el.style.getPropertyValue("color");
+    const priority = el.style.getPropertyPriority("color");
+    el.style.setProperty("color", next, "important");
+    restores.push(() => {
+      if (previous) el.style.setProperty("color", previous, priority);
+      else el.style.removeProperty("color");
+    });
+  }
+  const count = restores.length;
+  return {
+    undo: () => {
+      for (const restore of restores.reverse()) restore();
+    },
+    matched: () => count,
+    note: Promise.resolve(count ? `Raised contrast on ${count} pieces of text.` : "No low-contrast text found."),
+  };
+}
+
 export function applyBlock(block: BlockCall): LiveBlock {
   switch (block.name) {
     case "colorblind":
@@ -175,5 +214,7 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return contentFilter(block);
     case "formFixer":
       return applyFormFixer(block);
+    case "contrast":
+      return contrastFix(block.minRatio);
   }
 }

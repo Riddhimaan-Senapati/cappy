@@ -22,6 +22,7 @@ How you work
    - textScale: scales every text element's real computed size; use when the site sets px sizes so CSS rem or % changes do nothing.
    - stopMotion: pauses all running CSS/Web animations and autoplaying media.
    - formFixer: improves form targets and tab order, adds missing visible labels and readable validation errors when enabled, and checks form labels and tab order with axe. Use oneQuestionMode only if requested. The user submits through the original form control.
+   - contrast: one pass over low-contrast text. For "increase the contrast", "hard to read", or "text fades into the background", apply this block once with minRatio 4.5 and then reply. Do not inspect elements one by one and do not stack CSS tweaks.
    - contentFilter: hides or dims repeated items (feed posts, videos, search results, shelves, reels) that match. Fields:
      - keywords: 1 to 12 words that identify the items to filter (e.g. ["podcast", "podcasts"]). Matching is whole word, and a simple -s or -es ending also matches. Include the plural in your list anyway. Keyword hits are hidden instantly.
      - match: a plain description of what to filter (e.g. "gaming videos", "clickbait or sensational titles", "posts about crypto"). A model judges every item the keywords miss, by meaning, including items that load later. Set it whenever the request is about a kind or topic of content rather than one exact word; set null only for a literal word filter.

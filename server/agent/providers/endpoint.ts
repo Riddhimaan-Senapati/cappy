@@ -49,7 +49,7 @@ async function runModel(model: LanguageModel, session: AgentSession, reportUsage
     system: SYSTEM_PROMPT,
     prompt: buildUserTurn(session.request),
     tools: modelTools(session),
-    stopWhen: [isStepCount(MAX_STEPS), () => session.escalation != null],
+    stopWhen: [isStepCount(MAX_STEPS), () => session.escalation != null, () => session.finishNote != null],
     abortSignal: session.signal,
     onStepFinish: (step) => {
       reportUsage({ calls: 1, inputTokens: step.usage.inputTokens ?? 0, outputTokens: step.usage.outputTokens ?? 0 });
@@ -58,6 +58,7 @@ async function runModel(model: LanguageModel, session: AgentSession, reportUsage
     },
   });
   if (session.escalation) return "";
+  if (session.finishNote) return session.finishNote;
   const text = result.text.trim();
   if (!text && result.finishReason === "tool-calls") return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
   return text;
