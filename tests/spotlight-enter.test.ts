@@ -141,6 +141,7 @@ async function openBar(stored: Partial<StoredState> = {}, changes: ActiveChange[
     bar,
     input,
     shadow,
+    stored: data,
     asked,
     accepted,
     reverted,
@@ -399,6 +400,38 @@ describe("bar Enter", () => {
       box.press("Enter");
       assert.deepEqual(box.asked, []);
       assert.deepEqual(sent, [{ kind: "profileAction", action: "create", name: "Personal" }]);
+    } finally {
+      box.close();
+    }
+  });
+});
+
+describe("bar Focus mode", () => {
+  const RULE = { ...PAGE_CHANGE, id: "hide-shorts", summary: "Hide Shorts", schedule: { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "17:00" } } as ActiveChange;
+
+  it("lists Focus mode with how many rules it turns on, and switches it", async () => {
+    const box = await openBar({ siteChanges: { "https://www.youtube.com": [RULE] }, globalChanges: [{ ...RULE, id: "dim-feed", scope: "everywhere" }] });
+    try {
+      box.type("focus");
+      const row = [...box.shadow.querySelectorAll(".item")].find((item) => item.textContent?.includes("Turn on Focus mode"));
+      assert.ok(row, "focus mode row exists");
+      assert.ok(row.textContent?.includes("all 2 focus rules on now"));
+      (row as HTMLElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(box.stored.focusMode, true);
+      assert.deepEqual(box.asked, []);
+    } finally {
+      box.close();
+    }
+  });
+
+  it("offers to turn it off while it is on", async () => {
+    const box = await openBar({ focusMode: true });
+    try {
+      box.type("focus");
+      const row = [...box.shadow.querySelectorAll(".item")].find((item) => item.textContent?.includes("Turn off Focus mode"));
+      assert.ok(row, "turn off row exists");
+      assert.ok(row.textContent?.includes("rules go back to their times"));
     } finally {
       box.close();
     }
