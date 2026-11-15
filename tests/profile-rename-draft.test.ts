@@ -23,6 +23,15 @@ function stateNamed(name: string) {
   return { ...DEFAULTS, activeProfileId: "default", profiles: { default: { name } } };
 }
 
+// The rename field sits behind Manage; open it, then paint again as the settings view would.
+function managed(view: (state: ReturnType<typeof stateNamed>) => HTMLElement, state: ReturnType<typeof stateNamed>) {
+  const closed = view(state);
+  const manage = [...closed.querySelectorAll("button")].find((button) => button.textContent === "Manage");
+  assert.ok(manage);
+  manage.click();
+  return view(state);
+}
+
 function renameInput(root: ParentNode) {
   const input = root.querySelector<HTMLInputElement>('[aria-label="Current profile name"]');
   assert.ok(input);
@@ -32,7 +41,7 @@ function renameInput(root: ParentNode) {
 describe("profile rename draft", () => {
   it("keeps a typed name across a repaint", () => {
     const view = createProfilesView(() => undefined);
-    const first = view(stateNamed("Default"));
+    const first = managed(view, stateNamed("Default"));
     const input = renameInput(first);
     input.value = "Focus";
     input.dispatchEvent(new window.Event("input"));
@@ -42,7 +51,7 @@ describe("profile rename draft", () => {
 
   it("shows the stored name when the field has not been edited", () => {
     const view = createProfilesView(() => undefined);
-    assert.equal(renameInput(view(stateNamed("My setup"))).value, "My setup");
+    assert.equal(renameInput(managed(view, stateNamed("My setup"))).value, "My setup");
   });
 
   it("clears the draft after the rename is saved", async () => {
@@ -53,7 +62,8 @@ describe("profile rename draft", () => {
       node.replaceWith(next);
       node = next;
     });
-    node = view(latest);
+    node = managed(view, latest);
+    document.body.append(node);
     const input = renameInput(node);
     input.value = "Focus";
     input.dispatchEvent(new window.Event("input"));
