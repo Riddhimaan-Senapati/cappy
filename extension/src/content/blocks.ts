@@ -1,6 +1,6 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
 import { applyContentFilter } from "./content-filter.js";
-import { OWN_ATTR, textElements } from "./dom.js";
+import { contrastInfo, OWN_ATTR, textElements } from "./dom.js";
 import { applyDarkMode } from "./dark-mode.js";
 import { applyFormFixer } from "./form-fixer.js";
 
@@ -275,6 +275,67 @@ function contentFilter(block: Extract<BlockCall, { name: "contentFilter" }>): Li
   return { undo: handle.undo, matched: handle.matched };
 }
 
+function channelLuminance(r: number, g: number, b: number): number {
+  const channel = (piece: number) => {
+    const s = piece / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+}
+
+function backgroundLuminance(color: string): number | null {
+  const rgb = color.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+  if (rgb) return channelLuminance(Number(rgb[1]), Number(rgb[2]), Number(rgb[3]));
+  const hex = color.trim().match(/^#([0-9a-f]{6})$/i);
+  if (!hex) return null;
+  const value = Number.parseInt(hex[1], 16);
+  if (!Number.isFinite(value)) return null;
+  return channelLuminance((value >> 16) & 255, (value >> 8) & 255, value & 255);
+}
+
+function contrastFix(minRatio: number): LiveBlock {
+  const marked = new Set<HTMLElement>();
+  const style = document.createElement("style");
+  style.setAttribute(OWN_ATTR, "contrast");
+  // Resting text only. Hover, focus and visited keep the site's own colors.
+  style.textContent = `[data-ba-contrast="ink"]:not(:hover):not(:focus):not(:visited) { color: #141414 !important; } [data-ba-contrast="paper"]:not(:hover):not(:focus):not(:visited) { color: #f4f4f5 !important; }`;
+  document.documentElement.append(style);
+  const paint = (elements: HTMLElement[]) => {
+    for (const el of elements) {
+      if (!el.isConnected || !el.textContent?.trim()) {
+        if (marked.delete(el)) el.removeAttribute("data-ba-contrast");
+        continue;
+      }
+      let info: ReturnType<typeof contrastInfo>;
+      try {
+        info = contrastInfo(el);
+      } catch {
+        continue;
+      }
+      if (!Number.isFinite(info.ratio) || info.ratio >= minRatio) {
+        if (marked.delete(el)) el.removeAttribute("data-ba-contrast");
+        continue;
+      }
+      const luminance = backgroundLuminance(info.background);
+      if (luminance == null) continue;
+      const tone = luminance < 0.5 ? "paper" : "ink";
+      if (el.getAttribute("data-ba-contrast") !== tone) el.setAttribute("data-ba-contrast", tone);
+      marked.add(el);
+    }
+  };
+  paint(textElements(3000));
+  return {
+    reapply: (roots) => paint(textElements(1500, roots)),
+    undo: () => {
+      style.remove();
+      for (const el of marked) el.removeAttribute("data-ba-contrast");
+      marked.clear();
+    },
+    matched: () => marked.size,
+    note: Promise.resolve(marked.size ? `Raised contrast on ${marked.size} pieces of text.` : "No low-contrast text found."),
+  };
+}
+
 export function applyBlock(block: BlockCall): LiveBlock {
   switch (block.name) {
     case "colorblind":
@@ -283,13 +344,13 @@ export function applyBlock(block: BlockCall): LiveBlock {
       return textScale(block.scale);
     case "stopMotion":
       return stopMotion();
-    case "darkMode": {
-      const dark = applyDarkMode();
-      return { undo: dark.undo, note: dark.note, noop: dark.noop };
-    }
+    case "darkMode":
+      return applyDarkMode();
     case "contentFilter":
       return contentFilter(block);
     case "formFixer":
       return applyFormFixer(block);
+    case "contrast":
+      return contrastFix(block.minRatio);
   }
 }

@@ -240,3 +240,16 @@ export type ServerMessage =
   | { type: "notice"; level: "info" | "error"; text: string }
   | { type: "suggestion"; requestId: string; suggestion: Suggestion | null }
   | { type: "classified"; requestId: string; verdicts: boolean[] | null };
+
+// The /live socket for a GPT-Live conversation. Binary frames are mono PCM16 at LIVE_RATE in both directions.
+export const LIVE_RATE = 24_000;
+
+export type LiveToClient =
+  | { type: "ready" }
+  | { type: "task"; id: string; text: string }
+  | { type: "heard"; text: string }
+  | { type: "said"; delta: string }
+  | { type: "error"; message: string }
+  | { type: "closed" };
+
+export type LiveFromClient = { type: "result"; id: string; text: string };

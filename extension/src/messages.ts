@@ -13,7 +13,7 @@ export interface AppliedSummary {
 }
 
 export type UiEvent =
-  | { type: "start"; runId: string; trigger: Trigger; message: string; thread?: string }
+  | { type: "start"; runId: string; trigger: Trigger; message: string; thread?: string; claimKey?: string }
   | { type: "queued"; runId: string; message: string; thread?: string }
   | { type: "cancelled"; runId: string; reason?: string }
   | { type: "step"; runId: string; text: string; tone: "info" | "good" | "warn" | "bad" }
@@ -101,7 +101,8 @@ export type BackgroundRequest =
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }
   | { kind: "voicePermissionGranted" }
-  | { kind: "recognitionEvent"; event: unknown };
+  | { kind: "recognitionEvent"; event: unknown }
+  | { kind: "liveTask"; id: string; text: string };
 
 export type DebugPortMessage =
   | { type: "inspection"; snapshot?: PageInspection; error?: string }

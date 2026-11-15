@@ -15,7 +15,7 @@ export function applyRunEvent(
   if (event.type === "cancelled" && (run.status === "queued" || run.status === "pending")) return "drop";
   if (event.type === "blocked") {
     if (run.result?.kind !== "done") {
-      run.result = { kind: "blocked", text: `Blocked. This page tried to give the agent instructions: "${event.reason.slice(0, 90)}"`, applied: [] };
+      run.result = { kind: "blocked", text: `Blocked. This page tried to give Cappy instructions: "${event.reason.slice(0, 90)}"`, applied: [] };
     }
   } else if (event.type === "done") {
     if (run.result?.kind !== "blocked") run.result = { kind: "done", text: event.reply || "Done.", applied: event.applied };

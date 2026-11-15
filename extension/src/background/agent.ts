@@ -34,7 +34,7 @@ export interface AgentHooks {
   status(status: StatusInfo): void;
 }
 
-const SERVER_OFFLINE = new Error("The local agent server is offline. Start it to send a new AI request.");
+const SERVER_OFFLINE = new Error("The local Cappy server is offline. Start it to send a new AI request.");
 class ReplacedDial extends Error {
   constructor() {
     super("The server address changed.");
@@ -62,9 +62,12 @@ interface StartOptions {
   fresh?: boolean;
   interrupt?: boolean;
   queuedId?: string;
+  // A caller that waits for this run's result (a GPT-Live task) picks the id; it stays the same if the run is queued.
+  runId?: string;
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  claimKey?: string;
 }
 
 export class AgentClient {
@@ -88,7 +91,9 @@ export class AgentClient {
   private suggestionTabs = new Map<string, number>();
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
   private classifications = new Map<string, (verdicts: boolean[] | null) => void>();
-  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
+  private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement; origin: string }>>();
+  // command id + origin, claimed before the run is stored, so two tabs cannot both start it.
+  private commandClaims = new Set<string>();
 
   constructor(private hooks: AgentHooks) {}
 
@@ -314,7 +319,7 @@ export class AgentClient {
       socket.onmessage = (event) => void this.onMessage(JSON.parse(event.data) as ServerMessage);
       socket.onclose = () => {
         for (const run of [...this.runs.values()]) {
-          if (run.socket === socket) this.fail(run, "Lost connection to the agent server.");
+          if (run.socket === socket) this.fail(run, "Lost connection to the Cappy server.");
         }
         // Only the live socket owns the connection. Runs sent on a replaced socket were failed above.
         if (this.socket !== socket) return;
@@ -338,6 +343,7 @@ export class AgentClient {
   }
 
   private fail(run: Run, message: string) {
+    if (run.commandId) this.commandClaims.delete(this.commandKey(run.commandId, run.origin));
     this.finish(run);
     this.emit(run, { type: "error", runId: run.runId, message });
   }
@@ -356,13 +362,17 @@ export class AgentClient {
 
   stopForProfileSwitch() {
     for (const [tabId, queue] of this.queues) {
-      for (const item of queue) this.hooks.event(tabId, { type: "cancelled", runId: item.runId, reason: "Profile switched." });
+      for (const item of queue) {
+        if (item.commandId) this.commandClaims.delete(this.commandKey(item.commandId, item.origin));
+        this.hooks.event(tabId, { type: "cancelled", runId: item.runId, reason: "Profile switched." });
+      }
     }
     this.queues.clear();
     for (const run of [...this.runs.values()]) this.cancelRun(run, "Profile switched.");
   }
 
   private cancelRun(run: Run, reason: string) {
+    if (run.commandId) this.commandClaims.delete(this.commandKey(run.commandId, run.origin));
     this.send({ type: "cancel", runId: run.runId });
     this.finish(run);
     this.emit(run, { type: "cancelled", runId: run.runId, reason });
@@ -370,7 +380,9 @@ export class AgentClient {
 
   dequeue(tabId: number, runId: string) {
     const queue = this.queues.get(tabId) ?? [];
+    const dropped = queue.find((item) => item.runId === runId);
     this.queues.set(tabId, queue.filter((item) => item.runId !== runId));
+    if (dropped?.commandId) this.commandClaims.delete(this.commandKey(dropped.commandId, dropped.origin));
     this.hooks.event(tabId, { type: "cancelled", runId });
   }
 
@@ -384,48 +396,52 @@ export class AgentClient {
   }
 
   // A busy tab queues new requests; interrupt cancels the active run instead. The queue drains only after a successful reply.
-  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, options: StartOptions = {}) {
-    if (!tab.id || !tab.url?.startsWith("http")) return;
-    const { fresh = false, interrupt = false, queuedId, commandId, thread, target } = options;
+  async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, options: StartOptions = {}): Promise<"started" | "queued" | false> {
+    if (!tab.id || !tab.url?.startsWith("http")) return false;
+    const { fresh = false, interrupt = false, queuedId, commandId, thread, target, claimKey } = options;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const host = new URL(tab.url).host;
-    const runId = queuedId ?? crypto.randomUUID();
+    const runId = queuedId ?? options.runId ?? crypto.randomUUID();
     const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map(), commandId, thread, target };
 
     const active = [...this.runs.values()].filter((existing) => existing.tabId === tabId);
-    if (active.length && trigger === "page_load") return;
+    if (active.length && trigger === "page_load") return false;
     if (active.length && interrupt) for (const existing of active) this.cancelRun(existing, "Interrupted by a new request.");
     else if (active.length && !queuedId) {
-      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId, thread, target }]);
-      return this.emit(run, { type: "queued", runId, message, thread });
+      this.queues.set(tabId, [...(this.queues.get(tabId) ?? []), { runId, message, fresh, commandId, thread, target, origin }]);
+      this.emit(run, { type: "queued", runId, message, thread });
+      return "queued";
     }
-    this.emit(run, { type: "start", runId, trigger, message, thread });
+    this.emit(run, { type: "start", runId, trigger, message, thread, ...(claimKey ? { claimKey } : {}) });
     this.runs.set(runId, run);
     this.setStatus({});
 
     const state = await load();
-    if (!this.runs.has(runId)) return;
-    if (state.paused) return this.fail(run, "Adaptations are paused. Turn them on in settings.");
+    if (!this.runs.has(runId)) return false;
+    if (state.paused) {
+      this.fail(run, "Adaptations are paused. Turn them on in settings.");
+      return false;
+    }
 
     if (trigger === "chat" && !thread && !fresh && !target) {
       const recipe = await this.tryRecipe(run, state.recipes[recipeKey(origin, message)]?.changes);
       if (recipe === "applied") {
         await this.markCommandApplied(run);
-        return;
+        return "started";
       }
-      if (recipe === "blocked" || recipe === "stopped") return;
+      if (recipe === "blocked" || recipe === "stopped") return false;
     }
-    if (!this.runs.has(runId)) return;
+    if (!this.runs.has(runId)) return false;
 
     try {
       await this.ensureConnected();
     } catch (error) {
       if (this.runs.has(runId)) this.fail(run, error instanceof Error ? error.message : String(error));
-      return;
+      return false;
     }
 
-    if (!this.runs.has(runId)) return;
+    if (!this.runs.has(runId)) return false;
     this.setStatus({ connected: true, error: undefined });
     if (trigger === "page_load") await sendToTab(tabId, { kind: "busy", on: true }).catch(() => undefined);
 
@@ -457,12 +473,13 @@ export class AgentClient {
       };
       const historyText = target ? `${message} (selected: ${target.label})` : message;
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: historyText }].slice(-20) });
-      if (!this.runs.has(runId)) return;
+      if (!this.runs.has(runId)) return false;
       run.socket = this.socket ?? undefined;
       this.send(request);
-      return true;
+      return "started";
     } catch (error) {
       if (this.runs.has(runId)) this.fail(run, error instanceof Error ? error.message : String(error));
+      return false;
     }
   }
 
@@ -509,12 +526,25 @@ export class AgentClient {
     await save({ commands: commands.map((command) => (command.id === run.commandId && !command.appliedOrigins.includes(run.origin) ? { ...command, appliedOrigins: [...command.appliedOrigins, run.origin] } : command)) });
   }
 
+  private commandKey(commandId: string, origin: string) {
+    return `${commandId}\n${origin}`;
+  }
+
   // Commands set to run on every site run once per new site; undoing one on a site keeps it from coming back there.
   async runEverywhereCommands(tab: chrome.tabs.Tab, origin: string) {
     const { commands, paused } = await load();
-    if (paused) return;
-    for (const command of commands.filter((candidate) => candidate.everywhere && !candidate.appliedOrigins.includes(origin))) {
-      await this.startRun(tab, "chat", command.prompt, { commandId: command.id });
+    if (paused || !tab.id) return;
+    const due = [];
+    for (const command of commands) {
+      if (!command.everywhere || command.appliedOrigins.includes(origin)) continue;
+      const key = this.commandKey(command.id, origin);
+      if (this.commandClaims.has(key)) continue;
+      this.commandClaims.add(key);
+      due.push(command);
+    }
+    for (const command of due) {
+      const result = await this.startRun(tab, "chat", command.prompt, { commandId: command.id });
+      if (result !== "started" && result !== "queued") this.commandClaims.delete(this.commandKey(command.id, origin));
     }
   }
 

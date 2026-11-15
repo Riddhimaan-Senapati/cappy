@@ -159,6 +159,46 @@ describe("recipe replay when the run stops", () => {
     assert.equal(events.some((event) => event.type === "done"), false);
   });
 
+  it("runs an everywhere command again after it was stopped", async () => {
+    rememberRecipe();
+    const read = hold<ContentResponse>();
+    let reads = 0;
+    bridge.sendMessage = async (_tabId, request) => {
+      if (request.kind === "tool" && request.name === "read_page") {
+        reads += 1;
+        return read.gate;
+      }
+      if (request.kind === "tool" && request.name === "apply_change") {
+        return { ok: true, result: { ok: true, matched: {}, before: outline.stats, after: outline.stats } };
+      }
+      return { ok: true, result: [] };
+    };
+    const events: UiEvent[] = [];
+    const agent = new AgentClient({ event: (_tabId, event) => events.push(event), tool: () => undefined, status: () => undefined });
+    const first = agent.runEverywhereCommands(tab, ORIGIN);
+    for (let attempt = 0; attempt < 40 && reads < 1; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(reads, 1);
+    agent.stopRun(tab.id!);
+    read.release({ ok: true, result: outline });
+    await first;
+    const secondGate = hold<ContentResponse>();
+    bridge.sendMessage = async (_tabId, request) => {
+      if (request.kind === "tool" && request.name === "read_page") {
+        reads += 1;
+        return secondGate.gate;
+      }
+      if (request.kind === "tool" && request.name === "apply_change") {
+        return { ok: true, result: { ok: true, matched: {}, before: outline.stats, after: outline.stats } };
+      }
+      return { ok: true, result: [] };
+    };
+    const second = agent.runEverywhereCommands(tab, ORIGIN);
+    for (let attempt = 0; attempt < 40 && reads < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 0));
+    secondGate.release({ ok: true, result: outline });
+    await second;
+    assert.equal(events.filter((event) => event.type === "start").length, 2);
+  });
+
   it("does not mark an everywhere command stopped while a saved change is applying", async () => {
     rememberRecipe();
     const apply = hold<ContentResponse>();
@@ -222,7 +262,7 @@ describe("socket lifetime", () => {
     socketB.succeed();
     await reconnect;
     socketA.close();
-    assert.ok(events.some((event) => event.type === "error" && event.message === "Lost connection to the agent server."));
+    assert.ok(events.some((event) => event.type === "error" && event.message === "Lost connection to the Cappy server."));
     assert.equal(agent.status.busy, false);
     assert.equal(agent.status.connected, true);
     await agent.startRun(tab, "chat", "again please", { fresh: true });

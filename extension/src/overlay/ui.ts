@@ -3,7 +3,7 @@ import type { MemoryScope, Suggestion } from "../../../shared/protocol.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { countdownRing, paintCountdown } from "../voice/button.js";
-import { adoptStyles, h, icon } from "../ui/dom.js";
+import { adoptStyles, cappyLogo, h, icon } from "../ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "../ui/theme.js";
 import { VOICE_CSS } from "../voice/styles.js";
 import { Spotlight, type SpotlightDeps } from "./spotlight.js";
@@ -45,6 +45,7 @@ export class OverlayUi {
     }, (status) => this.showPointStatus(status));
     this.fab.type = "button";
     this.fab.setAttribute("aria-label", "Open Cappy");
+    this.fabOrb.append(cappyLogo());
     this.fab.append(this.fabOrb);
     this.fab.addEventListener("click", () => {
       if (this.deps.ensureAlive()) this.spotlight.toggle();
@@ -231,7 +232,7 @@ export class OverlayUi {
     } else if (event.type === "error") {
       this.showToast(event.message, [], true);
     } else {
-      this.showToast("Blocked. This page tried to give the agent instructions.", [], true);
+      this.showToast("Blocked. This page tried to give Cappy instructions.", [], true);
     }
   }
 

@@ -5,7 +5,8 @@ import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequ
 import { lastingRequest } from "../../../shared/validate.js";
 import { settle } from "../coalesce.js";
 import { AgentClient, sendToTab } from "./agent.js";
-import { handleVoiceRequest } from "./voice.js";
+import { ProactiveClaims } from "./proactive-claims.js";
+import { handleVoiceRequest, setLiveTaskRunner } from "./voice.js";
 import { registerFriction } from "./friction.js";
 import { registerTts } from "./tts.js";
 import { applyProfileAction, type ProfileAction } from "../profiles.js";
@@ -20,19 +21,40 @@ function broadcast(message: DebugPortMessage) {
   for (const port of debugPorts) port.postMessage(message);
 }
 
+// Each GPT-Live task waits for its own run, by id, so another request finishing on the tab never answers it.
+const LIVE_TASK_MS = 90_000;
+const liveWaiters = new Map<string, (text: string) => void>();
+
+function settleLiveTask(event: UiEvent) {
+  if (!("runId" in event)) return;
+  const resolve = liveWaiters.get(event.runId);
+  if (!resolve) return;
+  const said = event.type === "done"
+    ? event.reply || (event.applied.length ? `Done: ${event.applied.map((change) => change.summary).join(", ")}.` : "Done. Nothing needed changing.")
+    : event.type === "error" ? `It did not work: ${event.message}`
+    : event.type === "cancelled" ? "Stopped." : null;
+  if (said === null) return;
+  liveWaiters.delete(event.runId);
+  resolve(said);
+}
+
 const agent = new AgentClient({
   event(tabId: number, event: UiEvent) {
+    settleLiveTask(event);
     if (event.type === "start" && event.trigger === "chat") sessionRequests.set(event.runId, { message: event.message, thread: event.thread });
     if (event.type === "cancelled") sessionRequests.delete(event.runId);
     if (event.type === "options") {
       const request = sessionRequests.get(event.runId);
       if (request) request.options = { question: event.question, options: event.options };
     }
+    if (event.type === "start" && event.trigger === "page_load") proactive.noteStart(tabId, event.runId, event.claimKey);
     if (event.type === "done" && event.trigger === "page_load") {
-      const checked = proactivePending.get(tabId);
-      if (checked) void markChecked(checked);
+      const checked = proactive.finish(tabId, event.runId);
+      if (checked) void markChecked(checked).finally(() => proactive.drop(checked));
+    } else if (event.type === "error" || event.type === "cancelled") {
+      const checked = proactive.finish(tabId, event.runId);
+      if (checked) proactive.drop(checked);
     }
-    if ((event.type === "done" && event.trigger === "page_load") || event.type === "error" || event.type === "cancelled") proactivePending.delete(tabId);
     if (event.type === "done" || event.type === "error") {
       const message = sessionRequests.get(event.runId);
       sessionRequests.delete(event.runId);
@@ -77,13 +99,35 @@ async function changeProfile(action: ProfileAction) {
   }
 }
 
-async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement) {
-  if (switchingProfile) return;
-  if (!message.trim()) return;
+setLiveTaskRunner(async (tabId, text) => {
+  const tab = await chrome.tabs.get(tabId).catch(() => undefined);
+  if (!tab?.url?.startsWith("http")) return "Open a web page first, then ask again.";
+  const runId = crypto.randomUUID();
+  const reply = new Promise<string>((resolve) => {
+    liveWaiters.set(runId, resolve);
+    setTimeout(() => {
+      if (!liveWaiters.delete(runId)) return;
+      resolve("Still working on it. Check the bar for the result.");
+    }, LIVE_TASK_MS);
+  });
+  // submitChat can return without starting a run (empty text, a profile switch), so say so instead of waiting out the timer.
+  if (!(await submitChat(tab, text, false, false, undefined, undefined, runId))) {
+    liveWaiters.delete(runId);
+    return "I could not start that request. Try again in a moment.";
+  }
+  return reply;
+});
+
+async function submitChat(tab: chrome.tabs.Tab | undefined, message: string, fresh: boolean, interrupt = false, thread?: string, target?: TargetElement, runId?: string): Promise<boolean> {
+  if (switchingProfile) return false;
+  if (!message.trim()) return false;
   const lasting = lastingRequest(message);
   await recordSubmittedRequest(lasting ?? message).catch(() => console.warn("Could not save the submitted request to local history."));
   if (lasting) await save({ lastingSuggestion: lasting }).catch(() => undefined);
-  if (tab) await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target });
+  if (!tab) return false;
+  // Every path after this emits start, queued or error for the run, so a waiter on runId always hears back.
+  await agent.startRun(tab, "chat", message, { fresh, interrupt, thread, target, runId });
+  return true;
 }
 
 async function injectContent(tabId: number) {
@@ -209,8 +253,8 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 });
 
 const CHECKED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
-// Tab id to the site and profile its page-load run is checking; saved as checked once that run finishes.
-const proactivePending = new Map<number, string>();
+// Origin+profile keys whose page-load check has started but not finished. Two tabs must not both call the model.
+const proactive = new ProactiveClaims();
 
 const checkedKey = (state: { activeProfileId: string; profile: string[] }, origin: string) => JSON.stringify([state.activeProfileId, origin, state.profile]);
 
@@ -248,23 +292,30 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
     return;
   }
   const checked = checkedKey(state, origin);
+  if (!proactive.begin(tabId, checked)) {
+    await note("Automatic page adaptation skipped: another tab is already checking this site.");
+    return;
+  }
   if (!profileChanged && (await checkedRecently(checked))) {
+    proactive.release(tabId, checked);
     await note("Automatic page adaptation skipped: this profile already checked this site in the last week.");
     return;
   }
   // Asking first costs nothing until the user accepts; the offer counts as this week's check so it does not repeat on every visit.
   if (state.askBeforeAdapting && !profileChanged) {
     await markChecked(checked);
+    proactive.release(tabId, checked);
     await sendToTab(tabId, { kind: "offerAdapt" }).catch(() => undefined);
     await note("Offered to adapt this page instead of adapting it automatically.");
     return;
   }
-  proactivePending.set(tabId, checked);
-  if (await agent.startRun(tab, "page_load", "")) {
+  if ((await agent.startRun(tab, "page_load", "", { claimKey: checked })) === "started") {
     await note("Automatic page adaptation started: enabled, profile present, no saved site adaptation, first check for this site and profile in this tab.");
     const { proactiveSeen: seen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
     await chrome.storage.session.set({ proactiveSeen: [...seen.filter((entry) => entry !== key).slice(-100), key] });
-  } else proactivePending.delete(tabId);
+  } else {
+    proactive.release(tabId, checked);
+  }
 }
 
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {

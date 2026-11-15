@@ -18,7 +18,7 @@ export const REMOVABLE_ATTRIBUTES = ["autoplay", "loop", "tabindex", "aria-hidde
 
 
 const DOM_OPS = new Set(["addLabel", "setAttribute", "removeAttribute", "pauseMedia", "reorder"]);
-const BLOCKS = new Set(["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter", "formFixer"]);
+const BLOCKS = new Set(["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter", "formFixer", "contrast"]);
 
 const FORBIDDEN_CSS: Array<[RegExp, string]> = [
   [/url\s*\(/i, "url() can load outside resources"],
@@ -143,7 +143,12 @@ export function validateChange(change: Change): string | null {
       if (!Array.isArray(op.ranking) || op.ranking.length > 300) return "reorder ranking must be a list of at most 300 items";
       if (op.ranking.some((entry) => typeof entry.key !== "string" || entry.key.length > 300 || !Number.isFinite(entry.rank))) return "each ranking entry needs a key and a numeric rank";
     }
+    if (op.op === "reorder" && op.keywords != null) {
+      if (!Array.isArray(op.keywords) || op.keywords.length > 12) return "reorder keywords must be a list of at most 12";
+      if (op.keywords.some((keyword) => typeof keyword !== "string" || keyword.trim().length < 2 || keyword.length > 40)) return "reorder keyword must be 2 to 40 characters";
+    }
     if (op.op === "reorder" && op.keySelector !== null && typeof op.keySelector !== "string") return "bad reorder keySelector";
+    if (op.op === "reorder" && op.groupSelector != null && (typeof op.groupSelector !== "string" || op.groupSelector.length > 400 || /[{};@\\<]/.test(op.groupSelector))) return "bad reorder groupSelector";
     if (op.op === "setAttribute" && op.value.length > LIMITS.attrChars) return "attribute value too long";
   }
   if (change.block && !BLOCKS.has(change.block.name)) return `unknown block "${change.block.name}"`;
@@ -163,6 +168,10 @@ export function validateChange(change: Change): string | null {
   if (change.schedule) {
     const problem = scheduleProblem(change.schedule);
     if (problem) return problem;
+  }
+  if (change.block?.name === "contrast") {
+    const { minRatio } = change.block;
+    if (!Number.isFinite(minRatio) || minRatio < 3 || minRatio > 7) return "contrast ratio must be from 3 to 7";
   }
   if (change.block?.name === "textScale") {
     change.block.scale = Math.min(2, Math.max(1, Number(change.block.scale) || 1));
@@ -234,6 +243,13 @@ export function scheduleStatus(schedule: Change["schedule"], now = new Date()): 
 // A short span such as "for the next 30 seconds" ends once. Repeating days and clocks are not one-time.
 export function isOneShot(schedule: Change["schedule"]): boolean {
   return Boolean(schedule?.untilAt) && !schedule?.days?.length && schedule?.start == null && schedule?.end == null && schedule?.from == null && schedule?.until == null;
+}
+
+// In-page navigation drops saved rules that do not belong on the new path. A one-shot is not saved, so it stays until its time ends.
+export function dropsOnRouteChange(change: { id: string; schedule?: Change["schedule"] }, wantedIds: ReadonlySet<string>, learnedId: string): boolean {
+  if (change.id.startsWith("site-control-") || change.id === learnedId) return false;
+  if (isOneShot(change.schedule)) return false;
+  return !wantedIds.has(change.id);
 }
 
 const SPOKEN_COUNT = String.raw`(?:\d+(?:\.\d+)?|a couple of|a few|forty[- ]five|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|ninety)`;

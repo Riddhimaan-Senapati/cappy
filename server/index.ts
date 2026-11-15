@@ -17,6 +17,7 @@ import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, replyAfterTools, RunCancelledError } from "./agent/session.js";
 import { normalizeBaseURL, setKey } from "./keys.js";
 import { audio } from "./audio.js";
+import { bridgeLive } from "./live.js";
 import { detectInjection } from "../shared/safety.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -33,7 +34,20 @@ app.get("/api/health", async (_req, res) => {
 });
 
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: "/agent" });
+const wss = new WebSocketServer({ noServer: true });
+const liveWss = new WebSocketServer({ noServer: true });
+// Two socket endpoints share one HTTP server, so upgrades are routed by path and only the extension may connect to either.
+server.on("upgrade", (request, socket, head) => {
+  const { pathname } = new URL(request.url ?? "/", "http://localhost");
+  const target = pathname === "/agent" ? wss : pathname === "/live" ? liveWss : null;
+  if (!target || !(request.headers.origin ?? "").startsWith("chrome-extension://")) {
+    socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+    return;
+  }
+  target.handleUpgrade(request, socket, head, (ws) => target.emit("connection", ws, request));
+});
+liveWss.on("connection", (socket) => bridgeLive(socket));
 
 const sendTo = (socket: WebSocket, message: ServerMessage) => {
   if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
@@ -102,12 +116,7 @@ function safeProviderError(error: unknown): string {
   return message;
 }
 
-wss.on("connection", (socket, request) => {
-  if (!(request.headers.origin ?? "").startsWith("chrome-extension://")) {
-    socket.close(1008, "Only the extension may connect");
-    return;
-  }
-
+wss.on("connection", (socket) => {
   sockets.add(socket);
   const sessions = new Map<string, AgentSession>();
   void describeProviders().then((providers) => sendTo(socket, { type: "providers", providers, defaultProvider: defaultProviderId() }));

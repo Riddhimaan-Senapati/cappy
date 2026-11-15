@@ -6,7 +6,7 @@ import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } fr
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { deleteRequest, findRequestSessions, load, save, suggestRequests, type SavedCommand, type StoredState } from "../storage.js";
-import { h, icon, type IconName } from "../ui/dom.js";
+import { cappyLogo, h, icon, type IconName } from "../ui/dom.js";
 import { renderSettings, type SettingsContext } from "../ui/settings.js";
 import { updateProfile } from "../profiles.js";
 import { paintCountdown, paintMic, liveRegion, micButton } from "../voice/button.js";
@@ -162,7 +162,7 @@ export class Spotlight {
     this.bar.setAttribute("aria-label", "Cappy");
     this.bar.setAttribute("aria-modal", "true");
     this.input.setAttribute("role", "combobox");
-    this.input.setAttribute("aria-label", "Ask the agent, or type / for commands");
+    this.input.setAttribute("aria-label", "Ask Cappy, or type / for commands");
     this.input.setAttribute("aria-autocomplete", "list");
     this.input.setAttribute("aria-expanded", "false");
     this.input.setAttribute("aria-controls", LISTBOX_ID);
@@ -186,6 +186,7 @@ export class Spotlight {
     this.pickButton.setAttribute("aria-label", "Choose an element on the page");
     this.pickButton.append(icon("target", 15));
     this.pickButton.addEventListener("click", () => this.startPicking());
+    this.orb.append(cappyLogo());
     this.gear.type = "button";
     this.gear.title = "Settings";
     this.gear.setAttribute("aria-label", "Settings");

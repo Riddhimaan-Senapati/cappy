@@ -38,7 +38,7 @@ export function recordRun(event: UiEvent) {
   if (event.type === "tier") recordActivity(`Selected ${event.tier} model: ${event.model}.`);
   if (event.type === "done") {
     if (event.fromCache) for (const change of event.applied) sources.set(change.id, "Saved recipe replayed locally (no LLM call)");
-    recordActivity(event.fromCache ? "Request finished using a saved recipe; no LLM call." : "Agent request finished.");
+    recordActivity(event.fromCache ? "Request finished using a saved recipe; no LLM call." : "Cappy request finished.");
   }
   if (event.type === "error") recordActivity(`Request failed: ${event.message}`);
   if (event.type === "cancelled") recordActivity("Request cancelled.");

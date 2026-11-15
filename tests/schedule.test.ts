@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { describe, it } from "node:test";
 import { addHours, addSeconds } from "date-fns";
-import { describeSchedule, isOneShot, isScheduleActive, lastingRequest } from "../shared/validate.js";
+import { describeSchedule, dropsOnRouteChange, isOneShot, isScheduleActive, lastingRequest } from "../shared/validate.js";
 import type { Change } from "../shared/adaptation.js";
 import { parseSpokenSchedule, withSpokenSchedule } from "../server/agent/schedule.js";
 
@@ -67,6 +68,20 @@ describe("isScheduleActive", () => {
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 21, 3, 0)), true, "Saturday 03:00 is Friday night");
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 22, 3, 0)), false, "Sunday 03:00 is Saturday night");
     assert.equal(isScheduleActive(fridayNight, at(2026, 11, 19, 23, 0)), false, "Thursday 23:00");
+  });
+
+  it("keeps Saturday night across the US daylight-saving transitions", () => {
+    const env: Record<string, string | undefined> = { ...process.env, TZ: "America/New_York" };
+    delete env.NODE_CHANNEL_FD;
+    delete env.NODE_TEST_CONTEXT;
+    const child = spawnSync(process.execPath, ["--import", "tsx", "--test", "tests/schedule-dst.test.ts"], {
+      cwd: process.cwd(),
+      env,
+      encoding: "utf8",
+    });
+    const output = `${child.stdout}\n${child.stderr}`;
+    assert.equal(child.status, 0, output);
+    assert.match(output, /\bpass 1\b/);
   });
 });
 
@@ -231,5 +246,13 @@ describe("lastingRequest", () => {
     assert.equal(isOneShot({ days: ["sat", "sun"], untilAt: "2026-11-14T21:33:30.000Z" }), false);
     assert.equal(isOneShot({ days: ["sat", "sun"] }), false);
     assert.equal(isOneShot(null), false);
+  });
+
+  it("keeps a timed one-off when the route changes and drops a page rule that was saved", () => {
+    const wanted = new Set(["keep"]);
+    assert.equal(dropsOnRouteChange({ id: "hide", schedule: { untilAt: "2026-11-14T21:33:30.000Z" } }, wanted, "learned"), false);
+    assert.equal(dropsOnRouteChange({ id: "page-rule", schedule: null }, wanted, "learned"), true);
+    assert.equal(dropsOnRouteChange({ id: "keep" }, wanted, "learned"), false);
+    assert.equal(dropsOnRouteChange({ id: "site-control-theme" }, new Set(), "learned"), false);
   });
 });
