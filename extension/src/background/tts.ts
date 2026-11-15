@@ -1,7 +1,7 @@
-import { ensureOffscreen } from "./voice.js";
+import { ensureOffscreen, liveActive } from "./voice.js";
 import { chunkForSpeech, cleanForSpeech } from "../../../shared/speech.js";
 import type { TtsRequest, TtsStateMessage } from "../messages.js";
-import { load } from "../storage.js";
+import { load, type StoredState } from "../storage.js";
 
 export interface SpeakOptions {
   voiceName?: string;
@@ -105,10 +105,14 @@ export function getVoices(): Promise<Array<{ voiceName: string; lang?: string }>
   });
 }
 
+// GPT-Live has no separate speech endpoint; reading a page aloud uses OpenAI speech with the same key.
+const speechProvider = (provider: StoredState["voiceProvider"]) => (provider === "live" ? "openai" : provider);
+
 export async function speakIfEnabled(text: string, tabId?: number) {
   const state = await load();
-  if (!state.speakReplies || state.paused) return;
-  speak(text, { voiceName: state.ttsVoice, rate: state.ttsRate, provider: state.voiceProvider, tabId });
+  // A live conversation says the reply itself.
+  if (!state.speakReplies || state.paused || liveActive()) return;
+  speak(text, { voiceName: state.ttsVoice, rate: state.ttsRate, provider: speechProvider(state.voiceProvider), tabId });
 }
 
 export function registerTts() {
@@ -118,9 +122,9 @@ export function registerTts() {
         void (async () => {
           const state = await load();
           if (request.source === "reply" || request.source === "announce") {
-            if (!state.speakReplies || state.paused) return;
+            if (!state.speakReplies || state.paused || liveActive()) return;
           }
-          speak(request.text, { voiceName: state.ttsVoice, rate: state.ttsRate, provider: state.voiceProvider, tabId: sender.tab?.id });
+          speak(request.text, { voiceName: state.ttsVoice, rate: state.ttsRate, provider: speechProvider(state.voiceProvider), tabId: sender.tab?.id });
         })();
         return false;
       case "tts-stop":

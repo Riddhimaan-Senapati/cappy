@@ -1,6 +1,7 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { VoiceEvent } from "../voice/core.js";
 import { ENDPOINT, startEndpoint, stepEndpoint, stripDoneKeyword } from "../voice/endpoint.js";
+import { floatToPcm16, LIVE_RATE, liveUrl, loudness, pcm16ToFloat } from "../voice/pcm.js";
 
 interface RecognitionResult {
   isFinal: boolean;
@@ -251,6 +252,139 @@ async function record(provider: "openai" | "gemini", serverUrl: string, hold: bo
   }
 }
 
+// A GPT-Live conversation: the microphone streams to the server, the reply audio plays back, and page requests go to the agent.
+const LIVE_IDLE_MS = 3 * 60_000;
+const LIVE_MAX_MS = 20 * 60_000;
+// Speaking over the reply cuts it off; GPT-Live stops on its own, but audio it already sent is still queued here.
+const BARGE_IN_LEVEL = 0.05;
+const BARGE_IN_MS = 250;
+let stopLive: (() => void) | null = null;
+
+function micError(error: unknown): string {
+  const code = error instanceof DOMException ? {
+    NotAllowedError: "not-allowed",
+    SecurityError: "not-allowed",
+    NotFoundError: "audio-capture",
+    NotReadableError: "microphone-unavailable",
+    AbortError: "microphone-unavailable",
+  }[error.name] : undefined;
+  return code ?? "start-failed";
+}
+
+async function startLive(serverUrl: string) {
+  stopLive?.();
+  let stream: MediaStream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia(MIC);
+  } catch (error) {
+    emit({ type: "error", error: micError(error) });
+    emit({ type: "ended" });
+    return;
+  }
+  const context = new AudioContext({ sampleRate: LIVE_RATE });
+  const source = context.createMediaStreamSource(stream);
+  const processor = context.createScriptProcessor(2048, 1, 1);
+  const socket = new WebSocket(liveUrl(serverUrl));
+  socket.binaryType = "arraybuffer";
+  const playing = new Set<AudioBufferSourceNode>();
+  let playAt = 0;
+  let ready = false;
+  let loudSince = 0;
+  let heardAt = Date.now();
+  let stopped = false;
+
+  const flushPlayback = () => {
+    for (const node of playing) {
+      try {
+        node.stop();
+      } catch {
+        // already finished
+      }
+    }
+    playing.clear();
+    playAt = 0;
+  };
+  const stop = (error?: string) => {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(idle);
+    flushPlayback();
+    processor.onaudioprocess = null;
+    processor.disconnect();
+    source.disconnect();
+    stream.getTracks().forEach((track) => track.stop());
+    void context.close().catch(() => undefined);
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) socket.close();
+    if (stopLive === stop) stopLive = null;
+    if (error) emit({ type: "error", error });
+    emit({ type: "ended" });
+  };
+  stopLive = () => stop();
+  const startedAt = Date.now();
+  const idle = setInterval(() => {
+    if (Date.now() - heardAt > LIVE_IDLE_MS || Date.now() - startedAt > LIVE_MAX_MS) stop();
+  }, 5_000);
+
+  processor.onaudioprocess = (event) => {
+    const input = event.inputBuffer.getChannelData(0);
+    event.outputBuffer.getChannelData(0).fill(0);
+    if (!ready || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(floatToPcm16(input));
+    if (playing.size && loudness(input) > BARGE_IN_LEVEL) {
+      loudSince ||= Date.now();
+      if (Date.now() - loudSince >= BARGE_IN_MS) flushPlayback();
+    } else loudSince = 0;
+  };
+  source.connect(processor);
+  processor.connect(context.destination);
+
+  const play = (bytes: ArrayBuffer) => {
+    const samples = pcm16ToFloat(bytes);
+    if (!samples.length) return;
+    const buffer = context.createBuffer(1, samples.length, LIVE_RATE);
+    buffer.copyToChannel(samples, 0);
+    const node = context.createBufferSource();
+    node.buffer = buffer;
+    node.connect(context.destination);
+    playAt = Math.max(playAt, context.currentTime + 0.05);
+    node.start(playAt);
+    playAt += buffer.duration;
+    playing.add(node);
+    node.onended = () => playing.delete(node);
+  };
+
+  socket.onmessage = (message) => {
+    if (message.data instanceof ArrayBuffer) return play(message.data);
+    let event: { type?: string; text?: string; id?: string; message?: string };
+    try {
+      event = JSON.parse(String(message.data));
+    } catch {
+      return;
+    }
+    if (event.type === "ready") {
+      ready = true;
+      emit({ type: "listening" });
+    } else if (event.type === "heard" && typeof event.text === "string") {
+      heardAt = Date.now();
+      emit({ type: "interim", text: event.text });
+    } else if (event.type === "task" && typeof event.id === "string" && typeof event.text === "string") {
+      const id = event.id;
+      heardAt = Date.now();
+      void chrome.runtime.sendMessage({ target: "background", kind: "liveTask", id, text: event.text })
+        .then((reply: { text?: string } | undefined) => reply?.text ?? "Done.", () => "That did not work. Nothing was changed.")
+        .then((text) => {
+          if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "result", id, text }));
+        });
+    } else if (event.type === "error") {
+      stop("live-unavailable");
+    } else if (event.type === "closed") {
+      stop();
+    }
+  };
+  socket.onerror = () => stop("live-unavailable");
+  socket.onclose = () => stop();
+}
+
 function stopPlayback() {
   playback?.abort();
   player?.pause();
@@ -284,7 +418,7 @@ async function playSpeech(text: string, rate: number, provider: "openai" | "gemi
   }
 }
 
-chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string; hold?: boolean; text?: string; rate?: number; provider?: "openai" | "gemini"; voiceProvider?: "chrome" | "openai" | "gemini"; serverUrl?: string }, _sender, respond) => {
+chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string; lang?: string; hold?: boolean; text?: string; rate?: number; provider?: "openai" | "gemini"; voiceProvider?: "chrome" | "openai" | "gemini" | "live"; serverUrl?: string }, _sender, respond) => {
   if (message?.target !== "offscreen") return;
   if (message.kind === "voiceStart") {
     respond(true);
@@ -296,6 +430,7 @@ chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string;
         return;
       }
       const hold = message.hold === true;
+      if (voiceProvider === "live") return startLive(message.serverUrl ?? "");
       await (voiceProvider === "chrome" ? start(message.lang ?? "", hold) : record(voiceProvider, message.serverUrl ?? "", hold, message.lang ?? ""));
     }).catch(() => {
       emit({ type: "error", error: "start-failed" });
@@ -303,6 +438,7 @@ chrome.runtime.onMessage.addListener((message: { target?: string; kind?: string;
     });
   }
   if (message.kind === "voiceStop") {
+    stopLive?.();
     stopMeter?.();
     stopSpotter?.();
     stopListening();

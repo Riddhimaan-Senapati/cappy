@@ -23,6 +23,7 @@ Most sites decide what you see and in what order. Here you can change that on th
 - Plain-language requests like "dim this page", "hide podcasts" or "make the form easier". The agent writes CSS, uses an allowlisted DOM operation, or runs one of the built-in blocks: dark mode, colorblind filter, text scaling, stop motion, content filter and form fixer.
 - Point and speak. Hover the mouse or point with a camera hand pointer and say "make this red". With the camera you can pinch and hold to select, then let go to send.
 - Voice input stops after a short pause, when you say "done", or at 15 seconds. A ring shows when it's about to send.
+- Talk with Cappy using GPT-Live: pick "GPT-Live conversation" in Settings, Voice. It listens and talks back, keeps talking while the page changes, and you can interrupt it. Needs an OpenAI API key.
 - Friction detection. Repeated zooming or missed clicks on small targets produce one suggested fix, and the suggestions adjust to what you accept, dismiss or undo.
 - Memory with consent. Each preference asks whether it applies to this site, all sites, or neither.
 - Hands-free control with an air pointer, pinch or dwell click, hand and head scrolling, and swipes for back and forward.
