@@ -1,5 +1,5 @@
 import type { ContentRequest, DebugPortMessage, DebugPortRequest, StatusInfo, TtsRequest, TtsStateMessage, UiEvent } from "./messages.js";
-import { adoptStyles, h, icon } from "./ui/dom.js";
+import { cappyLogo, adoptStyles, h, icon } from "./ui/dom.js";
 import { usageCard, USAGE_CSS } from "./ui/usage.js";
 import { renderInspection, INSPECTION_CSS } from "./ui/inspection.js";
 import { TOKENS } from "./ui/theme.js";
@@ -33,6 +33,8 @@ body { box-sizing: border-box; display: flex; flex-direction: column; gap: 10px;
 body > * { flex-shrink: 0; }
 h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.head-title { display: flex; align-items: center; gap: 8px; }
+.head-title .cappy-logo { width: 22px; height: 22px; border-radius: 6px; }
 .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
 .dot.on { background: var(--good); } .dot.off { background: var(--bad); }
@@ -173,7 +175,7 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
 const playbackControls = h("div", "tts", "", [readButton, stopButton]);
 
 document.body.append(
-  h("div", "head", "", [h("h1", "", "Debug"), h("div", "head-actions", "", [backButton, inspectButton])]),
+  h("div", "head", "", [h("div", "head-title", "", [cappyLogo(), h("h1", "", "Debug")]), h("div", "head-actions", "", [backButton, inspectButton])]),
   h("div", "status", "", [statusDot, statusText]),
   usage,
   inspector,
@@ -235,7 +237,7 @@ async function openRequestHistory(message: string) {
   home.addEventListener("click", () => {
     historyThread = undefined;
     historyCard?.remove();
-    input.placeholder = "Ask the agent";
+    input.placeholder = "Ask Cappy";
     input.focus();
   });
   const retry = h("button", "", "Use request again");
@@ -261,7 +263,7 @@ const runs = new Map<string, { card: HTMLElement; steps: HTMLElement; tag: HTMLE
 
 function setStatus(status: StatusInfo) {
   statusDot.className = `dot ${status.connected ? "on" : "off"}`;
-  statusText.textContent = status.connected ? `${status.provider ?? "agent"}${status.models ? ` · ${status.models.fast} / ${status.models.frontier}` : ""}` : (status.error ?? "Server offline");
+  statusText.textContent = status.connected ? `${status.provider ?? "Cappy"}${status.models ? ` · ${status.models.fast} / ${status.models.frontier}` : ""}` : (status.error ?? "Server offline");
 }
 
 function ensureRun(event: Extract<UiEvent, { runId: string }>, message = "") {

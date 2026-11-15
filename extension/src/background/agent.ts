@@ -34,7 +34,7 @@ export interface AgentHooks {
   status(status: StatusInfo): void;
 }
 
-const SERVER_OFFLINE = new Error("The local agent server is offline. Start it to send a new AI request.");
+const SERVER_OFFLINE = new Error("The local Cappy server is offline. Start it to send a new AI request.");
 
 const STAT_LABELS: Record<keyof PageStats, string> = {
   inputsWithoutLabel: "unlabeled inputs",
@@ -260,7 +260,7 @@ export class AgentClient {
       socket.onmessage = (event) => void this.onMessage(JSON.parse(event.data) as ServerMessage);
       socket.onclose = () => {
         for (const run of [...this.runs.values()]) {
-          if (run.socket === socket) this.fail(run, "Lost connection to the agent server.");
+          if (run.socket === socket) this.fail(run, "Lost connection to the Cappy server.");
         }
         // Only the live socket owns the connection. Runs sent on a replaced socket were failed above.
         if (this.socket !== socket) return;

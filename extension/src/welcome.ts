@@ -1,7 +1,7 @@
 import { lineSite } from "./memory.js";
 import type { BackgroundRequest, StatusInfo } from "./messages.js";
 import { load, save, type StoredState } from "./storage.js";
-import { adoptStyles, h, icon, type IconName } from "./ui/dom.js";
+import { cappyLogo, adoptStyles, h, icon, type IconName } from "./ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "./ui/theme.js";
 
 interface Need {
@@ -36,7 +36,8 @@ html, body { margin: 0; min-height: 100%; }
 body { background: radial-gradient(ellipse at 15% 0%, rgba(110,168,255,0.12), transparent 50%), radial-gradient(ellipse at 90% 100%, rgba(244,114,182,0.08), transparent 45%), #0e0e13; color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .w { box-sizing: border-box; max-width: 620px; margin: 0 auto; padding: 48px 16px 64px; }
 .w-top { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
-.w-logo { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--grad); color: #0d0d12; }
+.w-logo { width: 40px; height: 40px; border-radius: 11px; overflow: hidden; flex: none; }
+.w-logo img { display: block; width: 100%; height: 100%; }
 .w-top b { font-size: 15px; font-weight: 650; }
 .w-top small { display: block; color: var(--muted); font-size: 12px; }
 .w-steps { display: grid; gap: 6px; margin-bottom: 26px; }
@@ -261,7 +262,7 @@ function needsStep(state: StoredState): Node[] {
   label.htmlFor = "w-extra";
   return [
     h("h1", "", "What would help you?"),
-    h("p", "w-lead", "Pick any that apply. The agent uses these on every site, and you can change them later in settings."),
+    h("p", "w-lead", "Pick any that apply. Cappy uses these on every site, and you can change them later in settings."),
     h("div", "w-grid", "", cards),
     ...colorPicker,
     h("div", "w-extra", "", [label, textarea]),
@@ -293,7 +294,7 @@ function autoAdaptQuestion(state: StoredState): Node {
     mode === "ask"
       ? "The first time you open a site, a small suggestion offers to adapt it. Nothing changes until you click it."
       : mode === "auto"
-        ? "The first time you open a site, the page blurs for a moment while the agent applies what clearly fits your needs. Later visits reuse the result with no AI request."
+        ? "The first time you open a site, the page blurs for a moment while Cappy applies what clearly fits your needs. Later visits reuse the result with no AI request."
         : "Nothing changes until you open the bar and ask. Changes you save still come back on their own.";
   return h("div", "w-sub", "", [h("label", "", "When you open a new website"), seg, h("small", "w-note", note)]);
 }
@@ -327,7 +328,7 @@ function shortcutStep(): Node[] {
   const tried = pressed === "toggle-spotlight" ? "That's it. On a website, this opens the bar." : pressed === "start-voice" ? "That's the voice shortcut. On a website, it opens the bar and listens." : "";
   return [
     h("h1", "", "Your shortcut"),
-    h("p", "w-lead", "This is how you call the agent on any page. Try it now: press it while this page is open."),
+    h("p", "w-lead", "This is how you call Cappy on any page. Try it now: press it while this page is open."),
     h("div", "w-shortcut", "", [
       h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Open the bar"), h("small", "", "Type a request or pick a suggestion")]), keys(shortcuts.bar)]),
       h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Talk instead"), h("small", "", "Opens the bar and listens")]), keys(shortcuts.voice)]),
@@ -376,7 +377,7 @@ function handsFreeStep(state: StoredState): Node[] {
     h("div", "s-sec", "", [
       h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Only listens after you press the mic button or the voice shortcut")]), micAction]),
       ...micNote,
-      toggleRow("Read replies aloud", "Speaks what the agent changed", state.speakReplies, (value) => void save({ speakReplies: value })),
+      toggleRow("Read replies aloud", "Speaks what Cappy changed", state.speakReplies, (value) => void save({ speakReplies: value })),
       toggleRow("Camera control", "Point to hover, pinch to click, hold a pinch to select, palm to scroll", state.camera.enabled, (value) => void save({ camera: { ...state.camera, enabled: value } })),
       toggleRow("Floating button", "A small button on pages that opens the bar", state.floatingButton, (value) => void save({ floatingButton: value })),
     ]),
@@ -448,7 +449,7 @@ async function render() {
   const card = h("section", `w-card${view !== shownView ? " enter" : ""}`, "", [...body, ...nav]);
   shownView = view;
   root.replaceChildren(
-    h("header", "w-top", "", [h("div", "w-logo", "", [icon("sparkle", 18)]), h("div", "", "", [h("b", "", "Cappy"), h("small", "", finished ? "Setup complete" : `Setup · ${STEPS[step]}`)])]),
+    h("header", "w-top", "", [h("div", "w-logo", "", [cappyLogo(128)]), h("div", "", "", [h("b", "", "Cappy"), h("small", "", finished ? "Setup complete" : `Setup · ${STEPS[step]}`)])]),
     progress,
     card,
   );

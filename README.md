@@ -1,3 +1,5 @@
+![Cappy, a capybara captain using a browser](assets/cappy-logo.png)
+
 # Cappy (your loyal captain of web browsing)
 
 Take control of the web with AI agents.

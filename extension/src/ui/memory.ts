@@ -76,7 +76,7 @@ export function createMemoryView(rerender: () => void): MemoryView {
     const { events, sites } = activityOverview(state.activity ?? { buckets: {}, totals: {} }, Date.now());
     const summary = events ? `${events} event${events === 1 ? "" : "s"} across ${sites} site${sites === 1 ? "" : "s"} in the last 6 hours` : "Nothing noticed in the last 6 hours";
     return h("div", "s-row", "", [
-      h("div", "grow", "", [h("div", "", "Activity"), h("small", "", `${summary}. Counts only, used to suggest help and give the agent context. Clear also forgets dismissed suggestions, so the same one can appear again.`)]),
+      h("div", "grow", "", [h("div", "", "Activity"), h("small", "", `${summary}. Counts only, used to suggest help and give Cappy context. Clear also forgets dismissed suggestions, so the same one can appear again.`)]),
       button("Clear", "s-link", () => void clearActivity()),
     ]);
   };
@@ -85,7 +85,7 @@ export function createMemoryView(rerender: () => void): MemoryView {
     const hosts = Object.entries(state.siteSkills).sort(([, a], [, b]) => b.updatedAt - a.updatedAt);
     if (!hosts.length) return [];
     return [
-      h("div", "s-note", "Site skills: notes the agent saved about how these websites are built, so later requests there go faster. They hold nothing about you."),
+      h("div", "s-note", "Site skills: notes Cappy saved about how these websites are built, so later requests there go faster. They hold nothing about you."),
       ...hosts.map(([host, skill]) =>
         h("div", "s-row", "", [
           h("div", "grow", "", [h("div", "", host), h("small", "", `${skill.notes.length} note${skill.notes.length === 1 ? "" : "s"}: ${skill.notes.slice(-2).join(" · ")}`)]),
@@ -134,7 +134,7 @@ export function createMemoryView(rerender: () => void): MemoryView {
 
       const saved = state.profile.length
         ? state.profile.map((line, index) => savedRow(line, index))
-        : [h("div", "s-empty", "Nothing yet. Tell the agent about your needs, or add a line.")];
+        : [h("div", "s-empty", "Nothing yet. Tell Cappy about your needs, or add a line.")];
 
       const nodes: Node[] = [h("h3", "", "Memory")];
       if (state.pendingMemory.length) {
