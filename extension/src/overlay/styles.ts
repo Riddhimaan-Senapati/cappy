@@ -51,8 +51,8 @@ export const OVERLAY_CSS = `
 .item .ico { color: rgba(255, 255, 255, 0.32); }
 .item .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .hint { color: rgba(255, 255, 255, 0.26); font-size: 11.5px; flex: none; }
-.item.sel { background: rgba(255, 255, 255, 0.06); color: #fff; }
-.item.sel .ico { color: var(--accent); }
+.item:hover, .item.sel { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.item:hover .ico, .item.sel .ico { color: var(--accent); }
 .enter .item { animation: fade 0.22s var(--ease) both; animation-delay: calc(var(--i, 0) * 12ms); }
 
 .run { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }

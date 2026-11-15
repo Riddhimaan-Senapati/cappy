@@ -100,6 +100,26 @@ const MAX_THREAD = 6;
 const AUTO_CLOSE_MS = 9000;
 const ROUTING_ORDER: Routing[] = ["auto", "fast", "frontier"];
 const BACK_VIEWS: View[] = ["settings", "history", "commands", "session"];
+const LISTBOX_ID = "ba-listbox";
+
+// Open product decision. "field" sends an exact command name to the model.
+// "command" runs a command whose title or id is that text, and "undo" runs Undo all.
+const EXACT_COMMAND_ON_ENTER: { mode: "field" | "command" } = { mode: "field" };
+
+function optionDomId(itemId: string, index: number): string {
+  let hash = 0;
+  for (let i = 0; i < itemId.length; i++) hash = (Math.imul(hash, 33) + itemId.charCodeAt(i)) >>> 0;
+  return `ba-opt-${index}-${hash.toString(36)}`;
+}
+
+function exactCommand(items: Item[], text: string): Item | undefined {
+  const query = text.toLowerCase();
+  return items.find((item) => {
+    if (item.kind !== "command") return false;
+    if (item.title.toLowerCase() === query || item.id === query) return true;
+    return query === "undo" && item.id === "undo-all";
+  });
+}
 
 export class Spotlight {
   private layer = h("div", "sp");
@@ -118,8 +138,8 @@ export class Spotlight {
   private view: View = "list";
   private items: Item[] = [];
   private selected = 0;
-  // ArrowUp/ArrowDown only. The highlighted row is not a choice until then.
-  private pickedIndex: number | null = null;
+  // Id of the row chosen with ArrowUp/ArrowDown. Empty until then, so the highlight matches Enter.
+  private pickedId: string | null = null;
   private runs: RunState[] = [];
   private sessionRequest = "";
   private opened = false;
@@ -153,8 +173,11 @@ export class Spotlight {
     this.input.setAttribute("role", "combobox");
     this.input.setAttribute("aria-label", "Ask the agent, or type / for commands");
     this.input.setAttribute("aria-autocomplete", "list");
+    this.input.setAttribute("aria-expanded", "false");
+    this.input.setAttribute("aria-controls", LISTBOX_ID);
     this.input.spellcheck = false;
     this.input.autocomplete = "off";
+    this.body.id = LISTBOX_ID;
     this.body.setAttribute("role", "listbox");
     this.pill.type = "button";
     this.home.type = "button";
@@ -198,6 +221,7 @@ export class Spotlight {
 
   private onStorage = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
     if (area !== "local") return;
+    this.pickedId = null;
     if (changes.activeProfileId) {
       this.runs = [];
       this.smartSuggestion = null;
@@ -271,7 +295,7 @@ export class Spotlight {
     });
     this.input.value = "";
     this.selected = 0;
-    this.pickedIndex = null;
+    this.pickedId = null;
     this.setView(view ?? (this.working ? "run" : "list"));
     this.layer.classList.add("open");
     this.onToggle(true);
@@ -327,6 +351,7 @@ export class Spotlight {
   }
 
   private setView(view: View) {
+    this.pickedId = null;
     if (this.view === "settings" && view !== "settings") {
       this.disposeSettings?.();
       this.disposeSettings = null;
@@ -374,6 +399,7 @@ export class Spotlight {
     else if (this.view === "session") this.renderSession();
     else if (this.view === "run") this.renderRun();
     else this.renderList();
+    this.syncCombobox();
     this.renderHints();
     this.animateBody = false;
   }
@@ -434,7 +460,7 @@ export class Spotlight {
   // A nudge from noticed friction stays until answered; a plain suggestion refreshes on every open.
   private pinnedNudge = false;
 
-  // A friction nudge replaces whatever suggest() returned; the bar shows it pre-selected.
+  // A friction nudge replaces whatever suggest() returned. It is listed, and Enter ignores it until it is picked.
   setNudge(suggestion: Suggestion | null) {
     this.smartSuggestion = suggestion;
     this.pinnedNudge = suggestion !== null;
@@ -490,7 +516,7 @@ export class Spotlight {
 
   private onInput() {
     this.deletingProfileId = null;
-    this.pickedIndex = null;
+    this.pickedId = null;
     window.clearTimeout(this.closeTimer);
     if (this.view === "run" && !this.working) this.setView("list");
     if (this.view !== "list") return this.renderHints();
@@ -618,6 +644,7 @@ export class Spotlight {
 
   private showProfileCommands(value = "/profile") {
     this.deletingProfileId = null;
+    this.pickedId = null;
     this.input.value = value;
     this.selected = 0;
     this.setView("list");
@@ -742,18 +769,18 @@ export class Spotlight {
 
   private renderList() {
     this.items = this.buildItems();
-    if (!this.items.length) this.pickedIndex = null;
-    else if (this.pickedIndex != null) this.selected = Math.min(this.pickedIndex, this.items.length - 1);
-    this.selected = Math.min(this.selected, Math.max(0, this.items.length - 1));
-    if (this.pickedIndex != null) this.pickedIndex = this.selected;
+    if (this.pickedId && !this.items.some((item) => item.id === this.pickedId)) this.pickedId = null;
+    const pickedAt = this.pickedId ? this.items.findIndex((item) => item.id === this.pickedId) : -1;
+    this.selected = pickedAt >= 0 ? pickedAt : 0;
     const nodes: Node[] = [];
     this.items.forEach((item, index) => {
-      const row = h("div", `item${index === this.selected ? " sel" : ""}`, "", [icon(item.icon, 15), h("span", "title", item.title), item.hint ? h("span", "hint", item.hint) : null]);
+      const chosen = item.id === this.pickedId;
+      const row = h("div", `item${chosen ? " sel" : ""}`, "", [icon(item.icon, 15), h("span", "title", item.title), item.hint ? h("span", "hint", item.hint) : null]);
+      row.id = optionDomId(item.id, index);
       row.setAttribute("role", "option");
-      row.setAttribute("aria-selected", String(index === this.selected));
+      row.setAttribute("aria-selected", String(chosen));
       row.dataset.index = String(index);
       row.style.setProperty("--i", String(index));
-      row.addEventListener("pointermove", () => this.select(index, false));
       row.addEventListener("click", () => void this.runItem(item));
       if (item.profileId) {
         const id = item.profileId;
@@ -805,6 +832,15 @@ export class Spotlight {
     });
     this.body.classList.toggle("enter", this.animateBody);
     this.body.replaceChildren(...nodes);
+    this.syncCombobox();
+  }
+
+  private syncCombobox() {
+    const open = this.opened && this.view === "list" && this.items.length > 0;
+    this.input.setAttribute("aria-expanded", String(open));
+    const index = this.pickedId ? this.items.findIndex((item) => item.id === this.pickedId) : -1;
+    if (!open || index < 0 || !this.pickedId) this.input.removeAttribute("aria-activedescendant");
+    else this.input.setAttribute("aria-activedescendant", optionDomId(this.pickedId, index));
   }
 
   private async deleteSuggestion(message: string) {
@@ -819,19 +855,10 @@ export class Spotlight {
     }
   }
 
-  private select(index: number, scroll = true) {
-    if (index === this.selected) return;
-    this.selected = index;
-    for (const row of this.body.querySelectorAll<HTMLElement>(".item")) {
-      const active = Number(row.dataset.index) === index;
-      row.classList.toggle("sel", active);
-      row.setAttribute("aria-selected", String(active));
-      if (active && scroll) row.scrollIntoView({ block: "nearest" });
-    }
-  }
-
   private async runItem(item: Item) {
+    this.pickedId = null;
     await item.run();
+    this.pickedId = null;
     if (this.opened && this.view === "list") this.renderList();
   }
 
@@ -871,6 +898,7 @@ export class Spotlight {
 
   ask(message: string, fresh: boolean, interrupt = false, thread = this.sessionRequest) {
     if (!message) return;
+    this.pickedId = null;
     window.clearTimeout(this.closeTimer);
     for (const run of this.runs) if (run.status === "done" && !this.awaitingPick(run)) run.open = false;
     const target = this.target ?? undefined;
@@ -1549,7 +1577,8 @@ export class Spotlight {
   }
 
   handleKey(event: KeyboardEvent): boolean {
-    if (!this.opened || event.isComposing) return false;
+    // keyCode 229 is an IME keydown that can arrive with isComposing still false.
+    if (!this.opened || event.isComposing || event.keyCode === 229) return false;
     const { key } = event;
     const focused = this.shadow.activeElement;
     // Buttons and fields inside the bar handle their own keys (Enter on Undo, typing a command name); only Escape still closes.
@@ -1640,13 +1669,14 @@ export class Spotlight {
     if (this.view === "list" && this.items.length) {
       if (key === "ArrowDown" || key === "ArrowUp") {
         const count = this.items.length;
-        const from = this.pickedIndex ?? 0;
-        // Down lands on the top row first, so a highlighted suggestion can be chosen without skipping it.
-        const index = this.pickedIndex == null
+        const current = this.pickedId ? this.items.findIndex((item) => item.id === this.pickedId) : -1;
+        // Down lands on the top row first, so the nudge can be chosen without skipping it.
+        const index = current < 0
           ? (key === "ArrowDown" ? 0 : count - 1)
-          : key === "ArrowDown" ? (from + 1) % count : (from - 1 + count) % count;
-        this.pickedIndex = index;
-        this.select(index);
+          : key === "ArrowDown" ? (current + 1) % count : (current - 1 + count) % count;
+        this.pickedId = this.items[index]?.id ?? null;
+        this.renderList();
+        this.body.querySelector(".item.sel")?.scrollIntoView({ block: "nearest" });
         return true;
       }
       const item = this.items[this.selected];
@@ -1663,10 +1693,12 @@ export class Spotlight {
       }
     }
     if (this.view === "list" && key === "Enter") {
-      // The list can still show a suggestion or a prefix after fast typing. Enter sends the field unless a row was chosen with the arrow keys.
+      // Enter runs a row only after the arrow keys picked it. Otherwise it sends the field, and an empty field does not run the nudge.
       const text = this.input.value.trim();
-      const picked = this.pickedIndex == null ? undefined : this.items[this.pickedIndex];
+      const picked = this.pickedId ? this.items.find((item) => item.id === this.pickedId) : undefined;
+      if (this.pickedId && !picked) this.pickedId = null;
       if (picked) {
+        this.pickedId = null;
         if (picked.kind === "ask") this.ask(text, event.shiftKey);
         else void this.runItem(picked);
         return true;
@@ -1676,6 +1708,14 @@ export class Spotlight {
         const command = this.items[0];
         if (command) void this.runItem(command);
         return true;
+      }
+      if (EXACT_COMMAND_ON_ENTER.mode === "command") {
+        this.renderList();
+        const command = exactCommand(this.items, text);
+        if (command) {
+          void this.runItem(command);
+          return true;
+        }
       }
       if (text) this.ask(text, event.shiftKey);
       return this.items.length > 0;
