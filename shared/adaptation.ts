@@ -28,6 +28,11 @@ export const DomOp = z.discriminatedUnion("op", [
       .array(z.object({ key: z.string().describe("The item's key text exactly as list_items returned it."), rank: z.number().describe("Position in the final order: 1 is shown first.") }))
       .nullable()
       .describe("Your own ranking for any criterion (views, date, price, relevance), worked out from list_items. null = alphabetical by key text, which also keeps sorting items that load later."),
+    keywords: z
+      .array(z.string())
+      .nullable()
+      .optional()
+      .describe("Words that mark the kind of item you put first, such as [\"cooking\", \"pasta\"] for \"put cooking videos first\". Items that load later and contain one of these words join that front group. Null for a pure alphabetical sort."),
   }),
 ]);
 

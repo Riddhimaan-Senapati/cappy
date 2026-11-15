@@ -11,7 +11,7 @@ import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
 import { detectInjectionFields } from "../../../shared/safety.js";
-import { isOneShot } from "../../../shared/validate.js";
+import { dropsOnRouteChange, isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
 import { beginClassifyCache, setFilterClassifier, setFilterPauseNotice, setLeftoverListener } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
@@ -309,6 +309,33 @@ async function restore() {
   return restored;
 }
 
+// Same-document navigations do not restart the content script. Page rules follow the path; site rules stay.
+async function resyncSaved() {
+  if (detectInjectionFields(readInjectionSurface())) return;
+  const state = await load();
+  if (state.paused) return;
+  const wanted = await savedChangesFor(origin, location.pathname);
+  const wantedIds = new Set(wanted.map((change) => change.id));
+  for (const change of activeChanges()) {
+    if (dropsOnRouteChange(change, wantedIds, learnedTextScale.id)) await revertChange(change.id, false);
+  }
+  for (const change of wanted) {
+    if (activeChanges().some((active) => active.id === change.id)) continue;
+    if ((await applyChange(change, false, { verify: false, pageChecked: true })).ok) {
+      recordChange(change.id, "Saved change restored locally (no LLM call)");
+    }
+  }
+  await syncLearnedText();
+}
+
+let routePath = location.pathname;
+
+function followRoute() {
+  if (location.pathname === routePath) return;
+  routePath = location.pathname;
+  void mutate(() => resyncSaved()).catch(reportExtensionError);
+}
+
 function ensureOverlay(): OverlayUi {
   if (!overlay) {
     overlay = new OverlayUi({
@@ -517,6 +544,14 @@ function start() {
     if (document.readyState !== "loading") callback();
     else addEventListener("DOMContentLoaded", callback, { once: true });
   }
+
+  const navigation = (globalThis as { navigation?: { addEventListener: (type: string, listener: () => void) => void } }).navigation;
+  navigation?.addEventListener("navigatesuccess", followRoute);
+  addEventListener("pageshow", (event) => {
+    if (!event.persisted) return;
+    routePath = location.pathname;
+    void mutate(() => resyncSaved()).catch(reportExtensionError);
+  });
 
   (async () => {
     const state = await load();
