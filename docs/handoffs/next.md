@@ -1,6 +1,6 @@
 # Handoff: spoken schedules, ghost suggestions, event log
 
-Follow this file. `docs/handoffs/schedule-status.md` is the handoff from before `5207ee7` and is out of date on short spans, the suggestion UI, and the inspector log.
+Superseded by `docs/handoffs/current.md`. PR #7 merged; this file describes its branch before the merge.
 
 Branch `feat/schedule-status`, PR #7 against `main`. Spoken spans landed in `5207ee7`. Not merged. `CLAUDE.md` matches that commit.
 
