@@ -42,6 +42,7 @@ await runE2E("verification", async ({ browser }) => {
   }, tabId);
   assert.equal(active.find((change) => change.id === base.id)?.css, base.css);
 
+
   const zoomTwice = () => worker.evaluate(async (id) => {
     await chrome.tabs.setZoom(id, 1);
     await chrome.tabs.setZoom(id, 1.1);
@@ -76,4 +77,14 @@ await runE2E("verification", async ({ browser }) => {
   await waitFor("the original font size after a quick undo", async () => (await fontSizeOf(demo)) === 18);
   await waitFor("the quick undo recorded as feedback", async () => (await feedback()).includes("undone"));
   assert.equal(await worker.evaluate((id) => chrome.tabs.getZoom(id), tabId), 1.25);
+  const requested = await worker.evaluate(async ({ tabId, change }) => {
+    const response: ContentResponse = await chrome.tabs.sendMessage(tabId, {
+      kind: "tool", name: "apply_change", input: { change }, requested: true,
+    } satisfies ContentRequest);
+    if (!response.ok) throw new Error(response.error);
+    return response.result as ApplyOutcome;
+  }, { tabId, change: { ...base, css: "article p { font-size: 8px !important; }" } });
+  assert.equal(requested.ok, true, "a change the user asked for is kept even when problem counts rise");
+  assert.ok((requested.worsened ?? 0) > 0, "the rise is reported to the model");
+  assert.equal(await fontSizeOf(demo), 8);
 });
