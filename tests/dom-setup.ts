@@ -7,6 +7,7 @@ export function installDom(): Window {
     const globals: Record<string, unknown> = {
       window: win,
       document: win.document,
+      location: win.location,
       Node: win.Node,
       Element: win.Element,
       HTMLElement: win.HTMLElement,
