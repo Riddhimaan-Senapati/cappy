@@ -3,7 +3,7 @@ import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
 import { forgetStoredChange, load, save, type StoredState } from "../storage.js";
 import { isScheduleActive, scheduleStatus } from "../../../shared/validate.js";
-import { h } from "./dom.js";
+import { h, icon, type IconName } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 import { createProfilesView } from "./profiles.js";
 import { createConfigView } from "./config.js";
@@ -205,6 +205,8 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let urlDraft = "";
   let disposed = false;
   let refocusTab = false;
+  let confirmingReset = false;
+  let resetError = "";
 
   const providerSection = (status: StatusInfo, state: StoredState): Node[] => {
     if (!status.connected) {
@@ -486,6 +488,63 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       return cell;
     };
     const usageRow = h("div", "s-stats", "", [stat("calls", state.usage.calls), stat("tokens in", state.usage.inputTokens), stat("tokens out", state.usage.outputTokens)]);
+    const link = (glyph: IconName, label: string, run: () => void) => {
+      const button = h("button", "s-chipbtn", "", [icon(glyph, 13), document.createTextNode(label)]);
+      button.type = "button";
+      button.addEventListener("click", run);
+      return button;
+    };
+    const themePicker = (): Node => {
+      const choices: Array<[StoredState["uiTheme"], string]> = [["dark", "Dark"], ["light", "Light"], ["system", "Auto"]];
+      return h(
+        "div",
+        "s-seg",
+        "",
+        choices.map(([value, label]) => {
+          const button = h("button", "", label);
+          button.type = "button";
+          button.setAttribute("aria-pressed", String(state.uiTheme === value));
+          button.addEventListener("click", () => void save({ uiTheme: value }));
+          return button;
+        }),
+      );
+    };
+    const resetRow = (): Node => {
+      const button = (label: string, className: string, run: () => void) => {
+        const element = h("button", className, label);
+        element.type = "button";
+        element.addEventListener("click", run);
+        return element;
+      };
+      if (!confirmingReset) {
+        return h("div", "s-row", "", [
+          h("div", "grow", "", [h("div", "", "Reset everything"), h("small", "", "Start over as a new user on this browser")]),
+          button("Reset", "s-btn s-small s-danger-btn", () => {
+            confirmingReset = true;
+            queue();
+          }),
+        ]);
+      }
+      return h("div", "s-warn", "", [
+        h("b", "", "Reset everything?"),
+        h("p", "", "This deletes your profiles, memory, saved changes, commands, request history and settings on this browser, and undoes changes on open tabs. It cannot be undone. Your API keys and ChatGPT sign-in are kept."),
+        ...(resetError ? [h("div", "s-note s-error", resetError)] : []),
+        h("div", "s-acts", "", [
+          button("Cancel", "s-btn s-small", () => {
+            confirmingReset = false;
+            resetError = "";
+            queue();
+          }),
+          button("Yes, reset everything", "s-btn s-small s-danger-btn", async () => {
+            const result = await chrome.runtime.sendMessage({ kind: "resetAll" } satisfies BackgroundRequest).catch((error: unknown) => ({ ok: false, error: String(error) }));
+            confirmingReset = false;
+            resetError = result?.ok ? "" : `Reset failed: ${result?.error ?? "no response"}`;
+            queue();
+          }),
+        ]),
+      ]);
+    };
+
     const panels: Record<Tab, () => Node[]> = {
       general: () => [
         profiles(state),
@@ -494,12 +553,14 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           toggle("Act on page load", "Fix new pages before you ask", state.proactive, set("proactive")),
           toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
         ),
+        section("Appearance", themePicker()),
         section("Focus rules", ...focusRows),
         section(`On this page${changes.length ? ` · ${changes.length}` : ""}`, ...changeRows),
       ],
       memory: () => [
         memory.render(state, toggle),
         section("Data", toggle("Track events", "Log what happens on each page for the debug panel (latest 100)", state.trackEvents, set("trackEvents")), config()),
+        section("Reset", resetRow()),
       ],
       ai: () => [
         ...providerSection(status, state),
@@ -529,18 +590,11 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     panel.id = "s-panel";
     panel.setAttribute("role", "tabpanel");
     panel.setAttribute("aria-labelledby", `s-tab-${currentTab}`);
-    const link = (label: string, run: () => void) => {
-      const button = h("button", "s-link s-quiet", label);
-      button.type = "button";
-      button.addEventListener("click", run);
-      return button;
-    };
-
     root.replaceChildren(
       statusLine(status, state),
       tabBar(pick),
       panel,
-      h("div", "s-links", "", [link("Shortcuts", () => ctx.openShortcuts()), link("Setup guide", () => void chrome.runtime.sendMessage({ kind: "openWelcome" })), link("Debug panel", () => ctx.openDebug())]),
+      h("div", "s-links", "", [link("keyboard", "Shortcuts", () => ctx.openShortcuts()), link("sparkle", "Setup guide", () => void chrome.runtime.sendMessage({ kind: "openWelcome" })), link("bug", "Debug panel", () => ctx.openDebug())]),
     );
     if (refocusTab) {
       refocusTab = false;

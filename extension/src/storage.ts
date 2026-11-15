@@ -97,6 +97,7 @@ export interface StoredState {
   openAIVoiceVerified: boolean;
   geminiVoiceVerified: boolean;
   onboarded: boolean;
+  uiTheme: "dark" | "light" | "system";
   barOffset: { x: number; y: number } | null;
 }
 
@@ -141,6 +142,7 @@ export const DEFAULTS: StoredState = {
   openAIVoiceVerified: false,
   geminiVoiceVerified: false,
   onboarded: false,
+  uiTheme: "dark",
   barOffset: null,
 };
 

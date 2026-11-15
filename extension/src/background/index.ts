@@ -91,6 +91,16 @@ function onWelcomePage(tab: chrome.tabs.Tab | undefined, command: string) {
   return true;
 }
 
+// Keys and the ChatGPT sign-in live on the server, so a reset here never signs the user out.
+async function resetEverything() {
+  await chrome.storage.local.clear();
+  await chrome.storage.session.clear().catch(() => undefined);
+  for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {
+    if (tab.id) await sendToTab(tab.id, { kind: "resetPage" }).catch(() => undefined);
+  }
+  await chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
+}
+
 // Tabs opened before the extension was (re)loaded have no content script yet; a fresh one needs a moment to start listening.
 async function reachTab(tabId: number, request: ContentRequest): Promise<boolean> {
   try {
@@ -228,6 +238,9 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "openWelcome":
       void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
       break;
+    case "resetAll":
+      void resetEverything().then(() => sendResponse({ ok: true }), (error) => sendResponse({ ok: false, error: String(error) }));
+      return true;
     case "status":
       void agent.ensureConnected().catch(() => undefined).then(() => agent.getStatus()).then(sendResponse);
       return true;

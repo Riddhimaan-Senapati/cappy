@@ -51,10 +51,24 @@ export class OverlayUi {
     });
     this.shadow.append(this.fab);
     document.documentElement.append(this.host);
+    this.themeQuery.addEventListener("change", this.paintTheme);
+    this.paintTheme();
     this.bringToFront();
   }
 
   private pointPill: HTMLElement | null = null;
+  private themeQuery = matchMedia("(prefers-color-scheme: light)");
+  private theme: "dark" | "light" | "system" = "dark";
+
+  setTheme(theme: "dark" | "light" | "system") {
+    this.theme = theme;
+    this.paintTheme();
+  }
+
+  private paintTheme = () => {
+    const light = this.theme === "light" || (this.theme === "system" && this.themeQuery.matches);
+    this.host.setAttribute("data-theme", light ? "light" : "dark");
+  };
 
   // The page cannot see into this closed shadow root, so the air pointer asks here before falling through to the page.
   pointAt(x: number, y: number): { covered: boolean; control: HTMLElement | null } {
@@ -62,7 +76,13 @@ export class OverlayUi {
       const rect = element.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     };
-    const covered = [...this.shadow.children].some((child) => child instanceof HTMLElement && contains(child) && getComputedStyle(child).visibility !== "hidden" && getComputedStyle(child).display !== "none");
+    // The bar's layer spans the whole viewport with pointer-events off, so only parts that really take input count.
+    const takesPointer = (element: Element) => {
+      const style = getComputedStyle(element);
+      return style.pointerEvents !== "none" && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.05;
+    };
+    const layers = [...this.shadow.children].flatMap((child) => (child === this.spotlight.layerElement ? [...child.children] : [child]));
+    const covered = layers.some((layer) => contains(layer) && takesPointer(layer));
     if (!covered) return { covered: false, control: null };
     let control: HTMLElement | null = null;
     let area = Infinity;
