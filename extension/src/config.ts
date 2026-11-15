@@ -53,7 +53,7 @@ const settings = profile.extend({
 "Invalid profiles");
 
 // Files exported before the rename to Cappy say "browser-agent-config" and still import.
-const classifyCache = z.record(z.string(), z.object({
+const classifyCache = z.record(z.string().regex(/^classifyCache:\S+$/), z.object({
   version: z.number(),
   matches: z.record(z.string(), z.record(z.string(), z.object({ verdict: z.boolean(), at: z.number() }))),
 })).optional();

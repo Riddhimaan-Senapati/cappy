@@ -1,5 +1,5 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
-import { CLASSIFY_CACHE_LOAD_MS, CLASSIFY_CACHE_MATCHES, CLASSIFY_CACHE_TEXTS, CLASSIFY_CACHE_TTL_MS, type ClassifyHostCache } from "../../../shared/classify-cache.js";
+import { CLASSIFY_CACHE_LOAD_MS, CLASSIFY_CACHE_MATCHES, CLASSIFY_CACHE_TEXTS, CLASSIFY_CACHE_TTL_MS, classifyTextHash, type ClassifyHostCache } from "../../../shared/classify-cache.js";
 import { activeProfileId, loadClassifyHost, saveClassifyVerdicts } from "../storage.js";
 import { isOwn } from "./dom.js";
 import { findItemGroups } from "./item-groups.js";
@@ -105,7 +105,7 @@ function pauseIfNeeded(match: string) {
 const verdictKey = (match: string, text: string) => `${match}\u0000${text}`;
 
 export function classifyTextKey(text: string): string {
-  return text.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 240);
+  return classifyTextHash(text);
 }
 
 let cacheHost = "";
