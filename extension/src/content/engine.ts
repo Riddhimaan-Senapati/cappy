@@ -218,21 +218,34 @@ function storyCluster(item: Element, selected: Set<Element>): Element[] {
   const cluster = [item];
   if (item.tagName !== "TR") return cluster;
   let next = item.nextElementSibling;
-  while (next && cluster.length < 4 && !selected.has(next)) {
+  while (next && cluster.length < 4 && !selected.has(next) && isStoryTail(next)) {
     cluster.push(next);
-    const spacer = next.classList.contains("spacer");
+    if (next.classList.contains("spacer")) break;
     next = next.nextElementSibling;
-    if (spacer) break;
   }
   return cluster;
 }
 
-function metricValue(text: string, hint: string): number | null {
-  const comments = /\bcomments?\b/i.test(hint) && !/\bpoints?\b/i.test(hint);
-  const match = text.match(comments ? /(\d[\d,]*)\s+comments?\b/i : /(\d[\d,]*)\s+points?\b/i);
+function isStoryTail(row: Element): boolean {
+  if (row.classList.contains("spacer") || row.querySelector(".subtext, .score")) return true;
+  return /\d[\d,]*\s+(?:points?|comments?)\b/i.test(row.textContent ?? "");
+}
+
+function metricKind(hint: string): "points" | "comments" | null {
+  if (/\bcomments?\b/i.test(hint) && !/\bpoints?\b/i.test(hint)) return "comments";
+  if (/\bpoints?\b/i.test(hint)) return "points";
+  return null;
+}
+
+function metricValue(text: string, kind: "points" | "comments"): number | null {
+  const match = text.match(kind === "comments" ? /(\d[\d,]*)\s+comments?\b/i : /(\d[\d,]*)\s+points?\b/i);
   if (!match) return null;
   const value = Number(match[1].replace(/,/g, ""));
   return Number.isFinite(value) ? value : null;
+}
+
+function clusterText(item: Element, clusters: Map<Element, Element[]>): string {
+  return (clusters.get(item) ?? [item]).map((node) => node.textContent ?? "").join(" ");
 }
 
 function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], originalOrder: Map<Element, Element[]>, undoSteps: Undo[], hint: string): string | null {
@@ -245,14 +258,17 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
   }
   const selected = new Set(items);
   const clusters = new Map(items.map((item) => [item, storyCluster(item, selected)]));
-  const numericHint = /\b(points?|scores?|votes?|comments?|highest|lowest)\b/i.test(hint);
-  const descending = /\b(highest|most|descending)\b/i.test(hint) || (!/\b(lowest|fewest|ascending)\b/i.test(hint) && op.direction !== "asc");
+  const kind = metricKind(hint);
+  const descending = /\b(highest|most)\b/i.test(hint) || (!/\b(lowest|fewest)\b/i.test(hint) && op.direction !== "asc");
   for (const [parent, group] of byParent) {
     if (group.length < 2) continue;
     const current = [...parent.children].filter((child) => group.includes(child));
-    const scoreOf = (item: Element) => metricValue((clusters.get(item) ?? [item]).map((node) => node.textContent ?? "").join(" "), hint);
+    const scoreOf = (item: Element) => (kind ? metricValue(clusterText(item, clusters), kind) : null);
     const known = current.map(scoreOf).filter((score): score is number => score != null);
-    const numeric = numericHint && known.length >= Math.ceil(current.length * 0.6);
+    const ranked = Boolean(op.ranking?.length);
+    const enough = known.length >= Math.ceil(current.length * 0.6);
+    if (kind && !ranked && !enough) return `Could not read a ${kind} count on enough rows to sort them. Nothing was kept.`;
+    const numeric = Boolean(kind) && !ranked && enough;
     const sorted = numeric
       ? [...current].sort((a, b) => {
           const left = scoreOf(a);
@@ -261,13 +277,9 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
           return descending ? right - left : left - right;
         })
       : [...current].sort(compareKeys(op));
-    if (numeric) {
-      const sequence = sorted.map(scoreOf).filter((score): score is number => score != null);
-      const ordered = sequence.every((score, index) => index === 0 || (descending ? sequence[index - 1]! >= score : sequence[index - 1]! <= score));
-      if (!ordered) return `The values are not in order (${sequence.slice(0, 8).join(", ")}). Read the number on each item and move a title row together with the rows under it. Nothing was kept.`;
-    }
     // Only move nodes when out of order, so our own moves do not retrigger the observer forever.
-    if (sorted.every((item, index) => item === current[index])) continue;
+    const already = sorted.every((item, index) => item === current[index]);
+    if (!already) {
     if (!originalOrder.has(parent)) {
       originalOrder.set(parent, [...parent.children]);
       undoSteps.push(() => {
@@ -285,8 +297,36 @@ function sortItems(op: Extract<DomOp, { op: "reorder" }>, items: Element[], orig
         cursor = node;
       }
     }
+    }
+    const domOrder = already ? current : [...parent.children].filter((child) => current.includes(child));
+    if (kind) {
+      const sequence = domOrder.map((item) => metricValue([item, ...followingTail(item)].map((node) => node.textContent ?? "").join(" "), kind));
+      const ordered = sequence.every((score, index) => score != null && (index === 0 || (descending ? sequence[index - 1]! >= score : sequence[index - 1]! <= score)));
+      if (!ordered) return `The ${kind} are not in order (${sequence.map((score) => score ?? "?").slice(0, 8).join(", ")}). Rank by that number and move each title row with the rows under it. Nothing was kept.`;
+    }
+    if (op.ranking?.length) {
+      const rankOf = (item: Element) => op.ranking?.find((entry) => entry.key.replace(/\s+/g, " ").trim().toLowerCase() === keyText(item, op.keySelector).toLowerCase())?.rank;
+      let previous: number | null = null;
+      for (const item of domOrder) {
+        const rank = rankOf(item);
+        if (rank == null) continue;
+        if (previous != null && rank < previous) return `The ranking did not land in order. Nothing was kept.`;
+        previous = rank;
+      }
+    }
   }
   return null;
+}
+
+function followingTail(item: Element): Element[] {
+  const tail: Element[] = [];
+  let next = item.nextElementSibling;
+  while (next && tail.length < 3 && isStoryTail(next)) {
+    tail.push(next);
+    if (next.classList.contains("spacer")) break;
+    next = next.nextElementSibling;
+  }
+  return tail;
 }
 
 function revertNow(id: string): boolean {
