@@ -13,6 +13,7 @@ import { paintCountdown, paintMic, liveRegion, micButton } from "../voice/button
 import { VoiceController } from "../voice/controller.js";
 import { joinVoiceText, voiceStatusText, type VoiceEvent, type VoiceState } from "../voice/core.js";
 import { chooseTarget, mentionsTarget, type PointedCandidate } from "../voice/point.js";
+import { applyRunEvent, collapsedLabel } from "./run-status.js";
 
 export interface SpotlightDeps {
   ask(message: string, fresh: boolean, interrupt?: boolean, thread?: string, target?: TargetElement): void;
@@ -959,16 +960,8 @@ export class Spotlight {
     }
 
     if (run.status === "done" && !run.open && run.result) {
-      const { kind, applied } = run.result;
-      const summary = this.awaitingPick(run)
-        ? "pick an option"
-        : kind === "done"
-          ? applied.length
-            ? `${applied.length} change${applied.length === 1 ? "" : "s"}`
-            : "no changes"
-          : kind === "blocked"
-            ? "blocked"
-            : "stopped or failed";
+      const { kind } = run.result;
+      const summary = collapsedLabel(run.result, this.awaitingPick(run));
       const row = h("button", `card mini-card ${kind}${enter}`, "", [icon(kind === "done" ? "check" : kind === "blocked" ? "shield" : "x", 13), h("span", "q", run.message), h("span", "meta", summary)]);
       row.type = "button";
       row.setAttribute("aria-label", `${run.message}: ${summary}. Show details`);
@@ -1400,22 +1393,15 @@ export class Spotlight {
         case "memory":
           run.memory.push(...event.lines.map((line) => ({ line, status: (event.status === "saved" ? "remembered" : "proposed") as MemoryStatus, host: event.host, scope: event.scope })));
           break;
-        case "blocked":
-          run.result = { kind: "blocked", text: `Blocked. This page tried to give the agent instructions: "${event.reason.slice(0, 90)}"`, applied: [] };
-          break;
         case "options":
           run.options = { question: event.question, choices: event.options };
           break;
+        case "blocked":
         case "done":
-          if (!run.result) run.result = { kind: "done", text: event.reply || "Done.", applied: event.applied };
-          this.keepLasting(run.message);
-          break;
         case "error":
-          run.result = { kind: "error", text: event.message, applied: [] };
-          break;
         case "cancelled":
-          if (run.status === "queued" || run.status === "pending") this.runs = this.runs.filter((other) => other !== run);
-          else run.result = { kind: "error", text: event.reason ?? "Stopped.", applied: [] };
+          if (applyRunEvent(run, event) === "drop") this.runs = this.runs.filter((other) => other !== run);
+          if (event.type === "done") this.keepLasting(run.message);
           break;
       }
       if (run.result && run.status !== "done") {
