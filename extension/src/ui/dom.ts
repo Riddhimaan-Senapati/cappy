@@ -64,3 +64,12 @@ export function adoptStyles(root: ShadowRoot | Document, css: string) {
     (root instanceof Document ? root.head : root).append(style);
   }
 }
+
+// Extension pages and content scripts both resolve the packaged icon through the runtime URL.
+export function cappyLogo(size = 64): HTMLImageElement {
+  const img = h("img", "cappy-logo");
+  img.src = chrome.runtime.getURL(`icons/cappy-${size}.png`);
+  img.alt = "";
+  img.draggable = false;
+  return img;
+}

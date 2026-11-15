@@ -17,9 +17,9 @@ export const OVERLAY_CSS = `
 .sp.open .bar { opacity: 1; transform: translate(-50%, 0) scale(1); pointer-events: auto; }
 
 .row { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 8px 0 14px; }
-.orb { position: relative; width: 14px; height: 14px; flex: none; border-radius: 50%; background: var(--grad); box-shadow: 0 0 14px rgba(139, 155, 255, 0.5); }
-.orb.work { background: conic-gradient(from 0deg, #6ea8ff, #a78bfa, #f472b6, #6ea8ff); animation: spin 0.9s linear infinite; }
-.orb.work::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--panel-solid); }
+.orb { position: relative; width: 22px; height: 22px; flex: none; border-radius: 6px; }
+.orb img { display: block; width: 100%; height: 100%; border-radius: inherit; }
+.orb.work::after { content: ""; position: absolute; inset: -4px; border-radius: 9px; border: 2px solid transparent; border-top-color: #a78bfa; border-right-color: #6ea8ff; animation: spin 0.9s linear infinite; }
 .pick { all: unset; flex: none; cursor: pointer; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: rgba(var(--ink), 0.45); }
 .pick[hidden] { display: none; }
 .pick:hover { color: var(--text); background: rgba(var(--ink), 0.08); }
@@ -207,15 +207,15 @@ export const OVERLAY_CSS = `
 .fab { position: fixed; right: 20px; bottom: 20px; z-index: 2147483645; width: 40px; height: 40px; border-radius: 50%; padding: 0; cursor: pointer; display: grid; place-items: center;
   border: 1px solid rgba(var(--ink), 0.1); background: var(--panel); backdrop-filter: blur(16px); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   transform: scale(0.4); opacity: 0; pointer-events: none; transition: transform 0.4s var(--spring), opacity 0.25s; }
-.fab .orb { width: 14px; height: 14px; }
-.fab .orb.work::after { inset: 3px; }
+.fab .orb { width: 28px; height: 28px; border-radius: 8px; }
+.fab .orb.work::after { inset: -5px; border-radius: 12px; }
 .fab.show { transform: scale(1); opacity: 0.85; pointer-events: auto; }
 .fab.show:hover { transform: scale(1.08); opacity: 1; }
 .fab.focus { border: 2px solid #e11d48; box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.35), 0 8px 24px rgba(0, 0, 0, 0.35); }
 .fab.focus.show { opacity: 1; }
 .fab.hide { transform: scale(0.6); opacity: 0; pointer-events: none; }
 .fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.fab .orb.notice:not(.work) { animation: nudge-glow 2.4s ease-in-out infinite; }
+.fab .orb.notice:not(.work) { animation: nudge-glow 2.4s ease-in-out infinite; border-radius: 8px; }
 
 .toast { position: fixed; right: 20px; bottom: 72px; z-index: 2147483645; max-width: min(360px, calc(100vw - 40px)); pointer-events: auto; display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px 13px;
   border-radius: 13px; background: var(--panel); backdrop-filter: blur(20px); border: 1px solid rgba(var(--ink), 0.08); color: var(--text); font-size: 13px; line-height: 1.4; overflow: hidden;
