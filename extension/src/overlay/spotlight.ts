@@ -1,7 +1,7 @@
 import { reportExtensionError } from "../extension-context.js";
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { ChoiceOption, MemoryScope, Routing, Suggestion, TargetElement, TokenUsage } from "../../../shared/protocol.js";
-import { isOneShot, lastingRequest, scheduleStatus } from "../../../shared/validate.js";
+import { isOneShot, lastingRequest, savedChangeOnThisPage, scheduleStatus, scopeLabel } from "../../../shared/validate.js";
 import { ROUTING_LABELS, type AppliedSummary, type StatusInfo, type UiEvent } from "../messages.js";
 import { forgetLine } from "../memory.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
@@ -677,12 +677,12 @@ export class Spotlight {
     const raw = this.input.value.trim();
     const profileCommand = raw.match(/^\/\s*profiles?(?:\s+(.*))?$/i);
     if (profileCommand) return this.profileItems(profileCommand[1] ?? "");
-    const changes = this.deps.listChanges();
+    const changes = this.deps.listChanges().filter((change) => savedChangeOnThisPage(change, location.pathname));
     const undo: Item[] = changes.map((change) => ({
       id: `undo:${change.id}`,
       icon: "undo",
       title: `Undo ${change.summary.charAt(0).toLowerCase()}${change.summary.slice(1)}`,
-      hint: change.scope === "everywhere" ? "all sites" : undefined,
+      hint: change.scope === "page" ? undefined : scopeLabel(change.scope),
       kind: "undo",
       section: "On this page",
       keywords: "revert remove",
@@ -697,7 +697,7 @@ export class Spotlight {
       if (suggestion) items.push(suggestion);
       const lasting = this.lastingItem();
       if (lasting) items.push(lasting);
-      if (last) items.push({ id: "undo-last", icon: "undo", title: `Undo ${last.summary.charAt(0).toLowerCase()}${last.summary.slice(1)}`, hint: "→ history", kind: "undo", section: "", run: () => this.deps.revert(last.id) });
+      if (last) items.push({ id: "undo-last", icon: "undo", title: `Undo ${last.summary.charAt(0).toLowerCase()}${last.summary.slice(1)}`, hint: last.scope === "page" ? "→ history" : `${scopeLabel(last.scope)} · → history`, kind: "undo", section: "", run: () => this.deps.revert(last.id) });
       return items;
     }
 
@@ -1019,7 +1019,7 @@ export class Spotlight {
           "",
           applied.map((change) => {
             const row = h("div", "chg", "", [h("b", "", change.summary), h("span", "why", change.schedule ?? change.reason)]);
-            row.title = `Because: ${change.reason}${change.scope === "everywhere" ? " (all sites)" : ""}`;
+            row.title = `Because: ${change.reason}${change.scope === "page" ? "" : ` (${scopeLabel(change.scope)})`}`;
             return row;
           }),
         ),
@@ -1300,8 +1300,12 @@ export class Spotlight {
     return "earlier";
   }
 
+  private historyEntries() {
+    return this.deps.history().filter(({ change }) => savedChangeOnThisPage(change, location.pathname));
+  }
+
   private renderHistory() {
-    const entries = this.deps.history();
+    const entries = this.historyEntries();
     this.body.classList.toggle("enter", this.animateBody);
     if (!entries.length) {
       this.body.replaceChildren(h("div", "empty", "No changes on this page yet."));
@@ -1312,7 +1316,7 @@ export class Spotlight {
       const row = h("div", `hrow item${index === this.historySelected ? " sel" : ""}${active ? "" : " off"}`, "", [
         h("span", `mini${active ? " on" : ""}`),
         h("div", "hmain", "", [h("span", "ht", change.summary), h("span", "hr", change.reason)]),
-        h("span", "hint", scheduleStatus(change.schedule) ?? `${this.ago(change.appliedAt)}${change.scope === "everywhere" ? " · all sites" : ""}`),
+        h("span", "hint", scheduleStatus(change.schedule) ?? `${this.ago(change.appliedAt)}${change.scope === "page" ? "" : ` · ${scopeLabel(change.scope)}`}`),
       ]);
       row.setAttribute("role", "switch");
       row.setAttribute("aria-checked", String(active));
@@ -1330,7 +1334,7 @@ export class Spotlight {
   }
 
   private async toggleHistory(index: number) {
-    const entry = this.deps.history()[index];
+    const entry = this.historyEntries()[index];
     if (!entry) return;
     this.historySelected = index;
     if (entry.active) await this.deps.revert(entry.change.id);
@@ -1339,7 +1343,7 @@ export class Spotlight {
   }
 
   private moveHistory(step: number) {
-    const count = this.deps.history().length;
+    const count = this.historyEntries().length;
     if (!count) return;
     this.historySelected = (this.historySelected + step + count) % count;
     this.body.querySelectorAll<HTMLElement>(".hrow").forEach((row, i) => {
@@ -1613,7 +1617,7 @@ export class Spotlight {
       }
     }
     if (this.view === "list" && !this.input.value) {
-      if (key === "ArrowRight" && this.deps.history().length) return this.setView("history"), true;
+      if (key === "ArrowRight" && this.historyEntries().length) return this.setView("history"), true;
       if ((event.ctrlKey || event.metaKey) && key.toLowerCase() === "z") {
         const last = this.items.find((item) => item.id === "undo-last");
         if (last) void this.runItem(last);

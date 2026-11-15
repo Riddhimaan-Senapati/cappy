@@ -40,7 +40,7 @@ Chrome extension                                        Local Node server (holds
 - Camera control (main's gestures): air pointer, pinch click, pinch-and-hold to select a target element, dwell click, hand and head scrolling, swipe back and forward, thumbs-down to cancel. The mouse picker and the right-click "Adapt this" menu select targets too; a targeted request changes only that element.
 - LLM usage and the page inspector: providers report token counts per run, shown in Settings (popup and bar); the side panel can list what the extension changed on the current page. Settings has Track events, on by default, which keeps the inspector's event log (the latest 100). Turning it off stops recording and clears that log. It does not affect friction counts or suggestions.
 - Reopening a saved request continues its session: follow-ups carry up to four earlier successful prompt-and-reply pairs from it.
-- Saved changes replay on page load with no model call. Repeating the same request on a site is served from storage; Shift+Enter asks the model again.
+- Saved changes replay on page load with no model call. A one-off is scope `page` and replays only on that pathname; scope `site` replays across the origin and the UI says so; scope `everywhere` replays on every site. Repeating the same request on that page is served from storage; undo drops the saved change and the recipe. Shift+Enter asks the model again.
 - DOM ops and text scaling re-apply to content added later (a MutationObserver in `extension/src/content/engine.ts`). CSS keeps applying on its own.
 - The overlay lives in a closed shadow root rendered in the top layer (`popover`), so page-wide filters and site modals do not affect it.
 
@@ -49,7 +49,7 @@ Chrome extension                                        Local Node server (holds
 Defined in [shared/adaptation.ts](shared/adaptation.ts), validated in [shared/validate.ts](shared/validate.ts) on the server and again in the content script.
 
 ```ts
-Change = { id, summary, reason, css, dom, block, scope: "site" | "everywhere", schedule }
+Change = { id, summary, reason, css, dom, block, scope: "page" | "site" | "everywhere", pagePath?, schedule }
 ```
 
 The model decides how to implement a need, in this order of preference:

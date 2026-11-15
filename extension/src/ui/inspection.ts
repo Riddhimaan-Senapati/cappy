@@ -1,4 +1,5 @@
 import type { PageInspection } from "../messages.js";
+import { scopeLabel } from "../../../shared/validate.js";
 import { h } from "./dom.js";
 
 export function renderInspection(root: HTMLElement, snapshot: PageInspection) {
@@ -9,7 +10,7 @@ export function renderInspection(root: HTMLElement, snapshot: PageInspection) {
     h("h4", "", change.summary),
     h("p", "inspect-source", source),
     h("p", "", change.reason),
-    h("p", "inspect-muted", `${change.id} · ${change.scope === "everywhere" ? "All sites" : "This site"}`),
+    h("p", "inspect-muted", `${change.id} · ${scopeLabel(change.scope).replace(/^./, (letter) => letter.toUpperCase())}`),
     ...(change.css ? [detail("Exact CSS", change.css)] : []),
     ...(change.dom?.length ? [detail("Exact DOM operations and selectors", JSON.stringify(change.dom, null, 2))] : []),
     ...(change.block ? [detail("Built-in capability", JSON.stringify(change.block, null, 2))] : []),

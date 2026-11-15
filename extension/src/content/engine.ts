@@ -1,6 +1,6 @@
 import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js";
 import { detectInjection } from "../../../shared/safety.js";
-import { isOneShot, isScheduleActive, validateChange } from "../../../shared/validate.js";
+import { isOneShot, isScheduleActive, savedChangeOnThisPage, validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
@@ -351,7 +351,7 @@ function competingSorts(change: Change): string[] {
 }
 
 async function transition(update: () => void, animate: boolean) {
-  const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduceMotion = globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (!animate || reduceMotion || !document.startViewTransition || !document.body) return update();
   await document.startViewTransition(update).updateCallbackDone;
 }
@@ -443,6 +443,10 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
   if (problem) {
     const before = computeStats();
     return { ok: false, error: problem, matched: {}, before, after: before };
+  }
+  if (!savedChangeOnThisPage(change, globalThis.location.pathname)) {
+    const before = computeStats();
+    return { ok: false, error: "Saved for a different page.", matched: {}, before, after: before };
   }
 
   const replaced = competingSorts(change);
