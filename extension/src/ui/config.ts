@@ -46,7 +46,7 @@ export function createConfigView(rerender: () => void) {
       const url = URL.createObjectURL(new Blob([await exportConfig()], { type: "application/json" }));
       const link = h("a");
       link.href = url;
-      link.download = `browser-agent-config-${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = `cappy-config-${new Date().toISOString().slice(0, 10)}.json`;
       document.body.append(link);
       link.click();
       link.remove();

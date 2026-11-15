@@ -60,6 +60,14 @@ test("invalid files, broken profiles, and unsafe saved changes are rejected", as
   ]) assert.throws(() => parseConfig(value), /Invalid config file/);
 });
 
+test("exports as Cappy and still imports files saved before the rename", async () => {
+  storage(DEFAULTS as unknown as Record<string, unknown>);
+  const exported = JSON.parse(await exportConfig());
+  assert.equal(exported.format, "cappy-config");
+  assert.doesNotThrow(() => parseConfig(JSON.stringify({ ...exported, format: "browser-agent-config" })));
+  assert.throws(() => parseConfig(JSON.stringify({ ...exported, format: "something-else" })), /Invalid config file/);
+});
+
 test("import reports storage failures", async () => {
   storage(DEFAULTS as unknown as Record<string, unknown>);
   const parsed = parseConfig(await exportConfig());

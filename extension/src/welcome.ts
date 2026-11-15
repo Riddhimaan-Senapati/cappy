@@ -443,7 +443,7 @@ async function render() {
   const card = h("section", `w-card${view !== shownView ? " enter" : ""}`, "", [...body, ...nav]);
   shownView = view;
   root.replaceChildren(
-    h("header", "w-top", "", [h("div", "w-logo", "", [icon("sparkle", 18)]), h("div", "", "", [h("b", "", "Adaptive Agent"), h("small", "", finished ? "Setup complete" : `Setup · ${STEPS[step]}`)])]),
+    h("header", "w-top", "", [h("div", "w-logo", "", [icon("sparkle", 18)]), h("div", "", "", [h("b", "", "Cappy"), h("small", "", finished ? "Setup complete" : `Setup · ${STEPS[step]}`)])]),
     progress,
     card,
   );

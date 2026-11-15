@@ -14,7 +14,7 @@ const SCOPES = "openid profile email offline_access resource.invoke chatgpt.toke
 const REQUIRED_SCOPE = "chatgpt.tokens.use.direct";
 const CALLBACK_PORT = Number(process.env.CHATGPT_CALLBACK_PORT ?? 1455);
 const REDIRECT_URI = `http://127.0.0.1:${CALLBACK_PORT}/auth/callback`;
-const AGENT_NAME = "Adaptive Browser Agent";
+const AGENT_NAME = "Cappy";
 const REFRESH_MARGIN_MS = 5 * 60 * 1000;
 
 const rootDir = path.dirname(path.dirname(path.dirname(fileURLToPath(import.meta.url))));

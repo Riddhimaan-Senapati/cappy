@@ -205,7 +205,7 @@ wss.on("connection", (socket, request) => {
 
 server.listen(PORT, "localhost", () => {
   const active = defaultProviderId();
-  console.log(`browser-agent server on http://localhost:${PORT}`);
+  console.log(`cappy server on http://localhost:${PORT}`);
   console.log(active ? `default provider: ${active}` : "no AI provider set up yet: open the extension settings to sign in with ChatGPT or add an API key");
   console.log(`demo site: http://localhost:${PORT}/demo/campus.html`);
 });

@@ -4,7 +4,7 @@ Engineering guide for this repo. The product brief is `PROJECT.md`, which is sha
 
 ## What it is
 
-A Chrome extension (MV3) with an AI agent that adapts the page you are on to your needs (colorblindness, light sensitivity, text size, focus, motor limits). You open a Spotlight-style bar, say what you need, and the agent changes the live page, verifies it, and lets you undo. It can also act on page load from your saved profile.
+Cappy (repo `Riddhimaan-Senapati/cappy`, formerly `browser-agent`) is a Chrome extension (MV3) with an AI agent that adapts the page you are on to your needs (colorblindness, light sensitivity, text size, focus, motor limits). You open a Spotlight-style bar, say what you need, and the agent changes the live page, verifies it, and lets you undo. It can also act on page load from your saved profile.
 
 Scope: the agent changes how pages look, read and respond. It never clicks, types, fills forms or navigates for the user; that is left to computer-use agents such as Sentient's.
 

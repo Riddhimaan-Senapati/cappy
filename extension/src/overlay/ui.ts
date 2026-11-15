@@ -44,7 +44,7 @@ export class OverlayUi {
       }
     }, (status) => this.showPointStatus(status));
     this.fab.type = "button";
-    this.fab.setAttribute("aria-label", "Open adaptive agent");
+    this.fab.setAttribute("aria-label", "Open Cappy");
     this.fab.append(this.fabOrb);
     this.fab.addEventListener("click", () => {
       if (this.deps.ensureAlive()) this.spotlight.toggle();
@@ -197,7 +197,7 @@ export class OverlayUi {
 
   setFocus(on: boolean) {
     this.fab.classList.toggle("focus", on);
-    this.fab.setAttribute("aria-label", on ? "Focus is on. Open adaptive agent" : "Open adaptive agent");
+    this.fab.setAttribute("aria-label", on ? "Focus is on. Open Cappy" : "Open Cappy");
     this.spotlight.setFocus(on);
   }
 
