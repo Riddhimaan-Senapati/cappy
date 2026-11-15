@@ -95,9 +95,14 @@ export function editMemoryLine(lines: readonly string[], index: number, next: st
   return lines.map((existing, i) => (i === index ? line : existing));
 }
 
+// The decisions spread the whole stored state, so write back only the memory keys or a stale copy of the rest clobbers other writers.
 async function update(change: (state: StoredState) => Partial<Memory>) {
-  const state = await load();
-  await save(change(state));
+  const next = change(await load());
+  const patch: Partial<Memory> = {};
+  if (next.profile) patch.profile = next.profile;
+  if (next.pendingMemory) patch.pendingMemory = next.pendingMemory;
+  if (next.pendingSites) patch.pendingSites = next.pendingSites;
+  await save(patch);
 }
 
 export async function rememberLines(lines: string[], origin: PendingSite) {
