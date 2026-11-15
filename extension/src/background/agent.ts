@@ -61,6 +61,7 @@ export class AgentClient {
   private usageUpdates = Promise.resolve();
   private socket: WebSocket | null = null;
   private opening: Promise<void> | null = null;
+  private nextConnectAt = 0;
   private keepAlive: ReturnType<typeof setInterval> | undefined;
   private runs = new Map<string, Run>();
   private providers: ProviderInfo[] = [];
@@ -74,9 +75,11 @@ export class AgentClient {
   constructor(private hooks: AgentHooks) {}
 
   private setStatus(patch: Partial<StatusInfo>) {
+    const prev = this.status;
     this.status = { ...this.status, ...patch, busy: this.runs.size > 0 };
     void this.getStatus().then((status) => this.hooks.status(status));
-    // Settings views repaint on storage changes, so a stamp tells them the status moved.
+    // Settings repaints on storage changes. Repeating an unchanged stamp reconnects on every paint while the server is down.
+    if (prev.connected === this.status.connected && prev.error === this.status.error && prev.busy === this.status.busy) return;
     void chrome.storage.local.set({ statusStamp: Date.now() });
   }
 
@@ -146,8 +149,9 @@ export class AgentClient {
     this.send({ type: "chatgptLogin" });
   }
 
-  ensureConnected(): Promise<void> {
+  ensureConnected(options?: { probe?: boolean }): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (options?.probe && Date.now() < this.nextConnectAt) return Promise.reject(new Error("The local agent server is offline. Start it to send a new AI request."));
     this.opening ??= this.open().finally(() => {
       this.opening = null;
     });
@@ -160,13 +164,18 @@ export class AgentClient {
       const unreachable = new Error("The local agent server is offline. Start it to send a new AI request.");
       const socket = new WebSocket(serverUrl);
       let opened = false;
+      const fail = () => {
+        this.nextConnectAt = Date.now() + 4000;
+        reject(unreachable);
+      };
       const timer = setTimeout(() => {
         socket.close();
-        reject(unreachable);
+        fail();
       }, 4000);
       socket.onopen = () => {
         opened = true;
         clearTimeout(timer);
+        this.nextConnectAt = 0;
         this.socket = socket;
         this.keepAlive = setInterval(() => this.send({ type: "ping" }), 20_000);
         resolve();
@@ -176,7 +185,7 @@ export class AgentClient {
         if (opened || (this.socket && this.socket !== socket)) return;
         clearTimeout(timer);
         this.setStatus({ connected: false, error: unreachable.message });
-        reject(unreachable);
+        fail();
       };
       socket.onmessage = (event) => void this.onMessage(JSON.parse(event.data) as ServerMessage);
       socket.onclose = () => {
@@ -417,6 +426,7 @@ export class AgentClient {
     if (message.type === "notice") {
       this.notice = { level: message.level, text: message.text };
       this.setStatus({});
+      void chrome.storage.local.set({ statusStamp: Date.now() });
       return;
     }
     if (message.type === "tool") return this.runTool(message);

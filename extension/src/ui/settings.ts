@@ -249,216 +249,231 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     return [h("section", "s-sec", "", [h("h3", "", "AI provider"), ...rows, ...notice, ...hint])];
   };
   let queued = false;
+  let painting = false;
+  let paintAgain = false;
   let speechError = "";
   let voiceCheck = "";
   let checkingVoice = false;
   let pendingVoice: "openai" | "gemini" | undefined;
 
   const paint = async () => {
-    const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false })), loadVoices()]);
-    if (disposed) return;
-    const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
-    const field = (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && root.contains(focused) ? focused : null;
-    const focusLabel = field?.getAttribute("aria-label");
-    const selection = field?.selectionStart;
+    if (painting) {
+      paintAgain = true;
+      return;
+    }
+    painting = true;
+    paintAgain = false;
+    try {
+      const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch(() => ({ connected: false, busy: false })), loadVoices()]);
+      if (disposed || paintAgain) return;
+      const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
+      const field = (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && root.contains(focused) ? focused : null;
+      const focusLabel = field?.getAttribute("aria-label");
+      const selection = field?.selectionStart;
 
-    const segments = (["auto", "fast", "frontier"] as Routing[]).map((value) => {
-      const button = h("button", "", ROUTING_LABELS[value]);
-      button.type = "button";
-      button.setAttribute("aria-pressed", String(state.routing === value));
-      button.addEventListener("click", () => save({ routing: value }));
-      return button;
-    });
-    const routingNote =
-      state.routing === "auto"
-        ? "Picks per request: Fast for simple ones, Pro for harder ones or when Fast misses."
-        : state.routing === "fast"
-          ? "Quickest. Press Tab in the bar to use Pro for a harder request."
-          : "Most capable, slower. Press Tab in the bar to go back to Fast.";
+      const segments = (["auto", "fast", "frontier"] as Routing[]).map((value) => {
+        const button = h("button", "", ROUTING_LABELS[value]);
+        button.type = "button";
+        button.setAttribute("aria-pressed", String(state.routing === value));
+        button.addEventListener("click", () => save({ routing: value }));
+        return button;
+      });
+      const routingNote =
+        state.routing === "auto"
+          ? "Picks per request: Fast for simple ones, Pro for harder ones or when Fast misses."
+          : state.routing === "fast"
+            ? "Quickest. Press Tab in the bar to use Pro for a harder request."
+            : "Most capable, slower. Press Tab in the bar to go back to Fast.";
 
-    const changeRows = changes.length
-      ? changes.map((change) => {
-          const undo = h("button", "s-link", "Undo");
-          undo.type = "button";
-          undo.addEventListener("click", async () => {
-            await ctx.revert(change.id);
-            queue();
-          });
-          return h("div", "s-change", "", [
-            h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", change.scope === "everywhere" ? "all sites" : "this site"), undo]),
-            ...(change.schedule ? [h("div", "why", scheduleStatus(change.schedule) ?? "")] : []),
-            h("div", "why", change.reason),
-          ]);
-        })
-      : [h("div", "s-empty", "No changes on this page yet.")];
+      const changeRows = changes.length
+        ? changes.map((change) => {
+            const undo = h("button", "s-link", "Undo");
+            undo.type = "button";
+            undo.addEventListener("click", async () => {
+              await ctx.revert(change.id);
+              queue();
+            });
+            return h("div", "s-change", "", [
+              h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", change.scope === "everywhere" ? "all sites" : "this site"), undo]),
+              ...(change.schedule ? [h("div", "why", scheduleStatus(change.schedule) ?? "")] : []),
+              h("div", "why", change.reason),
+            ]);
+          })
+        : [h("div", "s-empty", "No changes on this page yet.")];
 
-    const focusRules = [
-      ...state.globalChanges.filter((change) => change.schedule).map((change) => ({ host: null as string | null, change })),
-      ...Object.entries(state.siteChanges).flatMap(([host, list]) => list.filter((change) => change.schedule).map((change) => ({ host, change }))),
-    ];
-    const focusRows = focusRules.length
-      ? focusRules.map(({ host, change }) => {
-          const remove = h("button", "s-link", "Remove");
-          remove.type = "button";
-          remove.addEventListener("click", async () => {
-            if (changes.some((active) => active.id === change.id)) await ctx.revert(change.id);
-            else await forgetStoredChange(host, change.id);
-            queue();
-          });
-          let where = "all sites";
-          if (host) {
-            try {
-              where = new URL(host).host;
-            } catch {
-              where = host;
+      const focusRules = [
+        ...state.globalChanges.filter((change) => change.schedule).map((change) => ({ host: null as string | null, change })),
+        ...Object.entries(state.siteChanges).flatMap(([host, list]) => list.filter((change) => change.schedule).map((change) => ({ host, change }))),
+      ];
+      const focusRows = focusRules.length
+        ? focusRules.map(({ host, change }) => {
+            const remove = h("button", "s-link", "Remove");
+            remove.type = "button";
+            remove.addEventListener("click", async () => {
+              if (changes.some((active) => active.id === change.id)) await ctx.revert(change.id);
+              else await forgetStoredChange(host, change.id);
+              queue();
+            });
+            let where = "all sites";
+            if (host) {
+              try {
+                where = new URL(host).host;
+              } catch {
+                where = host;
+              }
             }
-          }
-          const on = change.schedule != null && isScheduleActive(change.schedule, new Date());
-          return h("div", `s-change${on ? " on" : ""}`, "", [
-            h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", where), remove]),
-            h("div", "why", scheduleStatus(change.schedule) ?? ""),
-          ]);
-        })
-      : [h("div", "s-empty", "No focus rules yet. Ask to hide clutter during work or study, such as Shorts on weekdays 9 to 5.")];
+            const on = change.schedule != null && isScheduleActive(change.schedule, new Date());
+            return h("div", `s-change${on ? " on" : ""}`, "", [
+              h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", where), remove]),
+              h("div", "why", scheduleStatus(change.schedule) ?? ""),
+            ]);
+          })
+        : [h("div", "s-empty", "No focus rules yet. Ask to hide clutter during work or study, such as Shorts on weekdays 9 to 5.")];
 
-    const shortcuts = h("button", "s-btn", "", [icon("keyboard", 15), document.createTextNode("Shortcuts")]);
-    shortcuts.type = "button";
-    shortcuts.addEventListener("click", () => ctx.openShortcuts());
-    const debug = h("button", "s-btn", "", [icon("bug", 15), document.createTextNode("Debug panel")]);
-    debug.type = "button";
-    debug.addEventListener("click", () => ctx.openDebug());
+      const shortcuts = h("button", "s-btn", "", [icon("keyboard", 15), document.createTextNode("Shortcuts")]);
+      shortcuts.type = "button";
+      shortcuts.addEventListener("click", () => ctx.openShortcuts());
+      const debug = h("button", "s-btn", "", [icon("bug", 15), document.createTextNode("Debug panel")]);
+      debug.type = "button";
+      debug.addEventListener("click", () => ctx.openDebug());
 
-    const section = (title: string, ...children: Node[]) => h("section", "s-sec", "", [h("h3", "", title), ...children]);
-    const set = <K extends keyof StoredState>(key: K) => (value: StoredState[K]) => save({ [key]: value } as Partial<StoredState>);
+      const section = (title: string, ...children: Node[]) => h("section", "s-sec", "", [h("h3", "", title), ...children]);
+      const set = <K extends keyof StoredState>(key: K) => (value: StoredState[K]) => save({ [key]: value } as Partial<StoredState>);
 
-    const voiceSelect = h("select", "s-select");
-    voiceSelect.setAttribute("aria-label", "Voice");
-    const defaultVoice = h("option", "", "Default voice");
-    defaultVoice.value = "";
-    voiceSelect.append(defaultVoice);
-    for (const name of new Set([state.ttsVoice, ...voices].filter(Boolean))) {
-      const option = h("option", "", name);
-      option.value = name;
-      voiceSelect.append(option);
-    }
-    voiceSelect.value = state.ttsVoice;
-    voiceSelect.addEventListener("change", () => void save({ ttsVoice: voiceSelect.value }));
-    const voiceRow = h("label", "s-row", "", [
-      h("div", "grow", "", [h("div", "", "Voice"), h("small", "", voices.length ? "Voices installed on this device" : "No voices found yet")]),
-      voiceSelect,
-    ]);
-
-    const rate = h("input");
-    rate.type = "range";
-    rate.min = "0.5";
-    rate.max = "2";
-    rate.step = "0.1";
-    rate.value = String(state.ttsRate);
-    rate.setAttribute("aria-label", "Speaking rate");
-    const rateValue = h("small", "", `${state.ttsRate.toFixed(1)}×`);
-    rate.addEventListener("input", () => (rateValue.textContent = `${Number(rate.value).toFixed(1)}×`));
-    rate.addEventListener("change", () => void save({ ttsRate: Number(rate.value) }));
-    const rateRow = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Speed"), rateValue]), rate]);
-
-    const testVoice = h("button", "s-btn", "Test voice");
-    testVoice.type = "button";
-    testVoice.addEventListener("click", () => void chrome.runtime.sendMessage({ type: "tts-speak", text: "This is how I sound.", source: "test" } satisfies TtsRequest).catch(() => undefined));
-
-    const voiceProvider = h("select", "s-select");
-    voiceProvider.setAttribute("aria-label", "Voice provider");
-    for (const [id, label] of [["chrome", "Chrome"], ["openai", "OpenAI"], ["gemini", "Gemini"]]) {
-      const option = h("option", "", label);
-      option.value = id;
-      voiceProvider.append(option);
-    }
-    const activeVoice = state.voiceProvider;
-    voiceProvider.value = activeVoice;
-    const provider = pendingVoice ?? (activeVoice === "gemini" ? "gemini" : "openai");
-    const label = provider === "gemini" ? "Gemini" : "OpenAI";
-    voiceProvider.disabled = checkingVoice;
-    voiceProvider.addEventListener("change", () => {
-      if (voiceProvider.value === "chrome") {
-        pendingVoice = undefined;
-        voiceCheck = "";
-        void save({ voiceProvider: "chrome" });
-      } else if (voiceProvider.value === "gemini" || voiceProvider.value === "openai") {
-        pendingVoice = voiceProvider.value;
-        voiceCheck = "";
-        queue();
+      const voiceSelect = h("select", "s-select");
+      voiceSelect.setAttribute("aria-label", "Voice");
+      const defaultVoice = h("option", "", "Default voice");
+      defaultVoice.value = "";
+      voiceSelect.append(defaultVoice);
+      for (const name of new Set([state.ttsVoice, ...voices].filter(Boolean))) {
+        const option = h("option", "", name);
+        option.value = name;
+        voiceSelect.append(option);
       }
-    });
-    const voiceKey = h("input");
-    voiceKey.type = "password";
-    voiceKey.autocomplete = "off";
-    voiceKey.placeholder = `${label} API key`;
-    voiceKey.setAttribute("aria-label", `${label} voice API key`);
-    voiceKey.disabled = checkingVoice;
-    const keyHelp = h("small", "", `Add a ${label} API key to enable its audio models. Leave blank to use a saved key.`);
-    const voiceKeyField = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", `Add a ${label} API key`), keyHelp]), voiceKey]);
-    const verify = h("button", "s-btn", `Verify and enable ${label}`);
-    verify.type = "button";
-    verify.disabled = checkingVoice;
-    verify.addEventListener("click", async () => {
-      if (checkingVoice) return;
-      const key = voiceKey.value.trim();
-      voiceKey.value = "";
-      checkingVoice = true;
-      voiceCheck = "Checking speech and transcription with a short sample…";
-      queue();
-      try {
-        const result = await chrome.runtime.sendMessage({ kind: "verifyVoice", key, provider } satisfies BackgroundRequest);
-        if (!result?.ok) throw new Error(result?.error ?? "Could not verify OpenAI audio.");
-        await save(provider === "openai" ? { voiceProvider: provider, openAIVoiceVerified: true } : { voiceProvider: provider, geminiVoiceVerified: true });
-        pendingVoice = undefined;
-        voiceCheck = `${label} audio verified.`;
-      } catch (error) {
-        voiceCheck = error instanceof Error ? error.message : "Could not verify OpenAI audio.";
-      } finally {
-        checkingVoice = false;
-        queue();
-      }
-    });
-    const voiceProviderRow = h("label", "s-row", "", [
-      h("div", "grow", "", [h("div", "", "Voice provider"), h("small", "", "OpenAI and Gemini process recorded audio and spoken text through their APIs. Verification uses a short sample and may incur API usage.")]),
-      voiceProvider,
-    ]);
-    const verificationStatus = h("div", "s-note", voiceCheck);
-    verificationStatus.setAttribute("role", "status");
+      voiceSelect.value = state.ttsVoice;
+      voiceSelect.addEventListener("change", () => void save({ ttsVoice: voiceSelect.value }));
+      const voiceRow = h("label", "s-row", "", [
+        h("div", "grow", "", [h("div", "", "Voice"), h("small", "", voices.length ? "Voices installed on this device" : "No voices found yet")]),
+        voiceSelect,
+      ]);
 
-    root.replaceChildren(
-      profiles(state),
-      usageCard(state.usage),
-      ...providerSection(status, state),
-      section(
-        "General",
-        toggle("Adaptations", "Master switch. Off reverts everything.", !state.paused, (on) => set("paused")(!on)),
-        toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
-        toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
-        toggle("Track events", "Keep a log of what happens on each page. The debug panel inspector shows the latest 100.", state.trackEvents, set("trackEvents")),
-      ),
-      section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, voiceKeyField, verify, verificationStatus),
-      memory.render(state, toggle),
-      section(
-        "Speech",
-        toggle("Read replies aloud", "Speaks chat replies and page-load announcements.", state.speakReplies, set("speakReplies")),
-        voiceRow,
-        rateRow,
-        h("div", "s-foot", "", [testVoice]),
-        h("div", "s-note", speechError),
-      ),
-      voiceSection(state),
-      cameraSection(state),
-      section("Focus", h("div", "s-note", "Time-based rules that hide clutter while you study or work. They turn on and off with the clock."), ...focusRows),
-      config(),
-      section("On this page", ...changeRows),
-      h("div", "s-foot", "", [shortcuts, debug]),
-    );
-    if (field) {
-      const next = focusLabel
-        ? root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${CSS.escape(focusLabel)}"]`)
-        : root.querySelector<HTMLInputElement>(".s-add input");
-      next?.focus();
-      if (selection != null) next?.setSelectionRange(selection, selection);
+      const rate = h("input");
+      rate.type = "range";
+      rate.min = "0.5";
+      rate.max = "2";
+      rate.step = "0.1";
+      rate.value = String(state.ttsRate);
+      rate.setAttribute("aria-label", "Speaking rate");
+      const rateValue = h("small", "", `${state.ttsRate.toFixed(1)}×`);
+      rate.addEventListener("input", () => (rateValue.textContent = `${Number(rate.value).toFixed(1)}×`));
+      rate.addEventListener("change", () => void save({ ttsRate: Number(rate.value) }));
+      const rateRow = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", "Speed"), rateValue]), rate]);
+
+      const testVoice = h("button", "s-btn", "Test voice");
+      testVoice.type = "button";
+      testVoice.addEventListener("click", () => void chrome.runtime.sendMessage({ type: "tts-speak", text: "This is how I sound.", source: "test" } satisfies TtsRequest).catch(() => undefined));
+
+      const voiceProvider = h("select", "s-select");
+      voiceProvider.setAttribute("aria-label", "Voice provider");
+      for (const [id, label] of [["chrome", "Chrome"], ["openai", "OpenAI"], ["gemini", "Gemini"]]) {
+        const option = h("option", "", label);
+        option.value = id;
+        voiceProvider.append(option);
+      }
+      const activeVoice = state.voiceProvider;
+      voiceProvider.value = activeVoice;
+      const provider = pendingVoice ?? (activeVoice === "gemini" ? "gemini" : "openai");
+      const label = provider === "gemini" ? "Gemini" : "OpenAI";
+      voiceProvider.disabled = checkingVoice;
+      voiceProvider.addEventListener("change", () => {
+        if (voiceProvider.value === "chrome") {
+          pendingVoice = undefined;
+          voiceCheck = "";
+          void save({ voiceProvider: "chrome" });
+        } else if (voiceProvider.value === "gemini" || voiceProvider.value === "openai") {
+          pendingVoice = voiceProvider.value;
+          voiceCheck = "";
+          queue();
+        }
+      });
+      const voiceKey = h("input");
+      voiceKey.type = "password";
+      voiceKey.autocomplete = "off";
+      voiceKey.placeholder = `${label} API key`;
+      voiceKey.setAttribute("aria-label", `${label} voice API key`);
+      voiceKey.disabled = checkingVoice;
+      const keyHelp = h("small", "", `Add a ${label} API key to enable its audio models. Leave blank to use a saved key.`);
+      const voiceKeyField = h("label", "s-row", "", [h("div", "grow", "", [h("div", "", `Add a ${label} API key`), keyHelp]), voiceKey]);
+      const verify = h("button", "s-btn", `Verify and enable ${label}`);
+      verify.type = "button";
+      verify.disabled = checkingVoice;
+      verify.addEventListener("click", async () => {
+        if (checkingVoice) return;
+        const key = voiceKey.value.trim();
+        voiceKey.value = "";
+        checkingVoice = true;
+        voiceCheck = "Checking speech and transcription with a short sample…";
+        queue();
+        try {
+          const result = await chrome.runtime.sendMessage({ kind: "verifyVoice", key, provider } satisfies BackgroundRequest);
+          if (!result?.ok) throw new Error(result?.error ?? "Could not verify OpenAI audio.");
+          await save(provider === "openai" ? { voiceProvider: provider, openAIVoiceVerified: true } : { voiceProvider: provider, geminiVoiceVerified: true });
+          pendingVoice = undefined;
+          voiceCheck = `${label} audio verified.`;
+        } catch (error) {
+          voiceCheck = error instanceof Error ? error.message : "Could not verify OpenAI audio.";
+        } finally {
+          checkingVoice = false;
+          queue();
+        }
+      });
+      const voiceProviderRow = h("label", "s-row", "", [
+        h("div", "grow", "", [h("div", "", "Voice provider"), h("small", "", "OpenAI and Gemini process recorded audio and spoken text through their APIs. Verification uses a short sample and may incur API usage.")]),
+        voiceProvider,
+      ]);
+      const verificationStatus = h("div", "s-note", voiceCheck);
+      verificationStatus.setAttribute("role", "status");
+
+      root.replaceChildren(
+        profiles(state),
+        usageCard(state.usage),
+        ...providerSection(status, state),
+        section(
+          "General",
+          toggle("Adaptations", "Master switch. Off reverts everything.", !state.paused, (on) => set("paused")(!on)),
+          toggle("Act on page load", "Fix pages for you before you ask.", state.proactive, set("proactive")),
+          toggle("Floating button", "A small button that opens the bar.", state.floatingButton, set("floatingButton")),
+          toggle("Track events", "Keep a log of what happens on each page. The debug panel inspector shows the latest 100.", state.trackEvents, set("trackEvents")),
+        ),
+        section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...modelPickers(state, status), voiceProviderRow, voiceKeyField, verify, verificationStatus),
+        memory.render(state, toggle),
+        section(
+          "Speech",
+          toggle("Read replies aloud", "Speaks chat replies and page-load announcements.", state.speakReplies, set("speakReplies")),
+          voiceRow,
+          rateRow,
+          h("div", "s-foot", "", [testVoice]),
+          h("div", "s-note", speechError),
+        ),
+        voiceSection(state),
+        cameraSection(state),
+        section("Focus", h("div", "s-note", "Time-based rules that hide clutter while you study or work. They turn on and off with the clock."), ...focusRows),
+        config(),
+        section("On this page", ...changeRows),
+        h("div", "s-foot", "", [shortcuts, debug]),
+      );
+      if (field) {
+        const next = focusLabel
+          ? root.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[aria-label="${CSS.escape(focusLabel)}"]`)
+          : root.querySelector<HTMLInputElement>(".s-add input");
+        // A repaint while the server status is loading must not wipe a new profile name mid-edit.
+        if (next && focusLabel === "Current profile name") next.value = field.value;
+        next?.focus();
+        if (selection != null) next?.setSelectionRange(selection, selection);
+      }
+    } finally {
+      painting = false;
+      if (paintAgain && !disposed) void paint();
     }
   };
 

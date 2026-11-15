@@ -444,7 +444,8 @@ function start() {
         await revertAll(false);
         clearChangeHistory();
         const state = await load();
-        const restored = state.paused ? 0 : await restore(true);
+        // A view transition waits for a frame, so a fast switch would keep the previous profile's rules on screen.
+        const restored = state.paused ? 0 : await restore(false);
         await send({ kind: "pageReady", origin, restored, profileChanged: true });
       }).catch(reportExtensionError);
     } else if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
@@ -452,7 +453,7 @@ function start() {
       recordActivity(changes.paused.newValue ? "Adaptations paused; reverting all active changes locally." : "Adaptations resumed; restoring saved changes locally.");
       void mutate(async () => {
         if (changes.paused.newValue) await revertAll();
-        else await restore(true);
+        else await restore(false);
       }).catch(() => undefined);
     }
     if (changes.trackEvents) setEventTracking(changes.trackEvents.newValue !== false);

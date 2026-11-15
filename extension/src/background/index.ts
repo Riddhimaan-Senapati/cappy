@@ -188,7 +188,7 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
         }));
       return true;
     case "status":
-      void agent.ensureConnected().catch(() => undefined).then(() => agent.getStatus()).then(sendResponse);
+      void agent.ensureConnected({ probe: true }).catch(() => undefined).then(() => agent.getStatus()).then(sendResponse);
       return true;
     case "setKey":
       void agent.setKey(request.provider, request.key).catch(() => undefined);
