@@ -12,8 +12,8 @@ const MAX_STEPS = 16;
 
 export function createGeminiProvider(): AgentProvider {
   const ai = new GoogleGenAI({ httpOptions: { fetch: llmFetch }, apiKey: getKey("GEMINI_API_KEY") });
-  const fast = process.env.GEMINI_MODEL_FAST ?? process.env.GEMINI_MODEL ?? "gemini-3.5-flash";
-  const models: Record<Tier, string> = { fast, frontier: process.env.GEMINI_MODEL_FRONTIER ?? fast };
+  const fast = process.env.GEMINI_MODEL_FAST ?? process.env.GEMINI_MODEL ?? "gemini-3.6-flash";
+  const models: Record<Tier, string> = { fast, frontier: process.env.GEMINI_MODEL_FRONTIER ?? "gemini-4-hydrogen" };
   const functionDeclarations = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
