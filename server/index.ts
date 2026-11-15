@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { logViewer } from "./log-viewer.js";
+import { withLogRun } from "./llm-logs.js";
 import express from "express";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -23,6 +25,7 @@ const sockets = new Set<WebSocket>();
 let signingIn = false;
 
 const app = express();
+app.use(logViewer);
 app.use("/api/audio", audio);
 app.use("/demo", express.static(path.join(rootDir, "demo-sites")));
 app.get("/api/health", async (_req, res) => {
@@ -182,7 +185,7 @@ wss.on("connection", (socket, request) => {
     sessions.set(message.runId, session);
     const started = Date.now();
     try {
-      await execute(session, message, provider);
+      await withLogRun(message.runId, () => execute(session, message, provider));
       console.log(`[run] ${message.trigger} via ${provider.name} done in ${Date.now() - started}ms`);
     } catch (error) {
       if (session.cancelled) return;

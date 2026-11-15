@@ -88,3 +88,7 @@ Load `extension/` unpacked at `chrome://extensions`, sign in with ChatGPT or add
 Tests: `bun run typecheck`, `bun run test` and `bun run e2e`. The e2e suite needs port 8787 free.
 
 Engineering details are in [CLAUDE.md](CLAUDE.md).
+
+Set `log_llm_requests=true` in `.env` to save each LLM request and response as YAML in `llm_logs/` (off by default). Logs wrap near 100 columns and replace large request content (1,000+ characters) with placeholders such as `{{html__size_100_000}}`. The actual LLM input is unchanged. Restart the server after changing `.env`.
+
+Open [the local LLM log viewer](http://localhost:8787/) to browse requests as step-by-step timelines, inspect tool calls and results, read condensed text, and preview screenshots. Full exchanges and system prompts are available in expandable sections. New screenshot attachments are stored once by content in `llm_logs/images/`; older image placeholders cannot be restored. New agent runs are grouped by run ID; existing logs are grouped from their conversation history.

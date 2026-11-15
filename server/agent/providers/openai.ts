@@ -1,3 +1,4 @@
+import { llmFetch } from "../../llm-logs.js";
 import OpenAI from "openai";
 import type { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
@@ -105,7 +106,7 @@ async function completeText(client: OpenAI, model: string, system: string, user:
 }
 
 export function createOpenAIKeyProvider(): AgentProvider {
-  const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+  const client = new OpenAI({ fetch: llmFetch, apiKey: getKey("OPENAI_API_KEY") });
   const models: Record<Tier, string> = {
     fast: process.env.OPENAI_MODEL_FAST ?? "gpt-6-luna",
     frontier: process.env.OPENAI_MODEL_FRONTIER ?? process.env.OPENAI_MODEL ?? "gpt-6.1-sol",
@@ -129,7 +130,7 @@ export function createChatGptProvider(): AgentProvider {
     frontier: process.env.CHATGPT_MODEL_FRONTIER ?? process.env.CHATGPT_MODEL ?? "gpt-6.1-sol",
   };
   let retriedAuth = false;
-  const getClient = async () => new OpenAI({ apiKey: await getAccessToken(), baseURL: "https://api.openai.com/v1", maxRetries: 0 });
+  const getClient = async () => new OpenAI({ fetch: llmFetch, apiKey: await getAccessToken(), baseURL: "https://api.openai.com/v1", maxRetries: 0 });
 
   return {
     name: "chatgpt-signin",
