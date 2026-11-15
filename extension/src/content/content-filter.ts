@@ -302,10 +302,32 @@ function targets(doc: Document, selectors: readonly string[], matches: (el: HTML
     if (holdsMiss.has(el) && !(titled.has(el) && share(el, items) <= 0.5)) continue;
     candidates.add(el);
   }
-  return [...candidates].filter((el) => {
+  const outermost = [...candidates].filter((el) => {
     for (let a = el.parentElement; a; a = a.parentElement) if (candidates.has(a)) return false;
     return true;
   });
+  const cards = new Set(outermost.map((el) => cardOf(el, region)));
+  return [...cards].filter((el) => {
+    for (let a = el.parentElement; a; a = a.parentElement) if (cards.has(a)) return false;
+    return true;
+  });
+}
+
+// A matched link can sit inside a larger card (a Short's title link inside its tile); hiding only the link leaves the
+// card's text and space behind. Climb while the wrapper links nowhere else, so the card goes but its neighbours stay.
+const MAX_CARD_CLIMB = 6;
+function cardOf(el: HTMLElement, region: Element | null): HTMLElement {
+  const href = el.localName === "a" ? el.getAttribute("href") : null;
+  if (!href) return el;
+  let card: HTMLElement = el;
+  let parent = el.parentElement;
+  for (let depth = 0; parent && parent !== el.ownerDocument.body && depth < MAX_CARD_CLIMB; depth++, parent = parent.parentElement) {
+    if (region && parent.contains(region)) break;
+    const elsewhere = Array.from(parent.querySelectorAll("a[href]")).some((link) => link.getAttribute("href") !== href);
+    if (elsewhere) break;
+    card = parent;
+  }
+  return card;
 }
 
 function share(el: HTMLElement, items: ReadonlySet<HTMLElement>): number {

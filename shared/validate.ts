@@ -47,7 +47,7 @@ export function scanCss(css: string): string | null {
   return null;
 }
 
-const SITE_WIDE = /\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:the |this )?(?:site|website))\b/i;
+const SITE_WIDE = /\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:all of )?(?:the |this )?[\w.-]+|everywhere on [\w.-]+|all over [\w.-]+|on all of [\w.-]+)\b/i;
 
 export function requestedSiteWide(message: string): boolean {
   return SITE_WIDE.test(message);
@@ -122,7 +122,7 @@ export function validateChange(change: Change): string | null {
     const { keywords, itemSelector } = change.block;
     if (!Array.isArray(keywords) || keywords.length < 1 || keywords.length > 12) return "filter needs 1 to 12 keywords";
     if (keywords.some((k) => typeof k !== "string" || k.trim().length < 2 || k.length > 40)) return "filter keyword must be 2 to 40 characters";
-    if (itemSelector != null && (itemSelector.length > 160 || /[{};@\\<]/.test(itemSelector))) return "filter selector not allowed";
+    if (itemSelector != null && (itemSelector.length > 400 || /[{};@\\<]/.test(itemSelector))) return "filter selector not allowed";
     const { match } = change.block;
     if (match != null && (typeof match !== "string" || match.length > 200)) return "filter match description must be under 200 characters";
   }

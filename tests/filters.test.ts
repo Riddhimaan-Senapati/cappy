@@ -294,3 +294,16 @@ describe("content filter judging limits", () => {
     setFilterClassifier(null);
   });
 });
+
+describe("content filter hides the whole card around a matched link", () => {
+  it("hides a Short's tile, not just its link, and leaves other tiles", async () => {
+    const tile = (id: string, title: string) =>
+      `<short-tile><a href="/shorts/${id}"><img alt=""></a><div class="meta"><a href="/shorts/${id}">${title}</a><span>1M views</span></div></short-tile>`;
+    document.body.innerHTML = `<main><section>${tile("a1", "Minecraft speedrun")}${tile("b2", "Cooking pasta")}${tile("c3", "Minecraft build")}</section></main>`;
+    const handle = applyContentFilter(filter({ keywords: ["minecraft"], itemSelector: 'a[href*="/shorts/"]' }), document);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const hidden = [...document.querySelectorAll<HTMLElement>("short-tile")].map((el) => el.style.display === "none");
+    assert.deepEqual(hidden, [true, false, true]);
+    handle.undo();
+  });
+});

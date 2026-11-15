@@ -55,7 +55,7 @@ export const BlockCall = z.discriminatedUnion("name", [
   z.object({
     name: z.literal("contentFilter"),
     keywords: z.array(z.string()).describe("Words that appear in the items to hide (text, aria-label or link URL); include singular and plural."),
-    itemSelector: z.string().nullable().describe("Selector of the repeated item card from the page outline's itemGroups, or null to apply to every repeated item group on any site."),
+    itemSelector: z.string().nullable().describe("Selector of the repeated item cards from the page outline's itemGroups, comma-separated when the same content appears in several kinds of cards (videos, Shorts, playlists), or null to apply to every repeated item group on any site."),
     match: z
       .string()
       .nullish()

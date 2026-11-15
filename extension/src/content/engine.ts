@@ -437,6 +437,48 @@ async function installChange(entry: Applied, matched: Record<string, number>, an
 }
 
 // View transitions and pulses can introduce temporary animations during verification.
+// ":has(a[href*=shorts])" on a results list matches the list itself, since one Short sits inside it. Measured before applying.
+const BROAD_SHARE = 0.4;
+function broadHasSelector(css: string, pageText: number): { selector: string; percent: number } | null {
+  if (!css.includes(":has(") || pageText < 1500) return null;
+  const sheet = new CSSStyleSheet();
+  try {
+    sheet.replaceSync(css);
+  } catch {
+    return null;
+  }
+  const rules: CSSStyleRule[] = [];
+  const collect = (list: CSSRuleList) => {
+    for (const rule of Array.from(list)) {
+      if (rule instanceof CSSStyleRule) rules.push(rule);
+      else if ("cssRules" in rule) collect((rule as CSSGroupingRule).cssRules);
+    }
+  };
+  collect(sheet.cssRules);
+  for (const rule of rules) {
+    for (const selector of rule.selectorText.split(/,(?![^(]*\))/)) {
+      if (!selector.includes(":has(")) continue;
+      let elements: Element[] = [];
+      try {
+        elements = Array.from(document.querySelectorAll(selector.trim()));
+      } catch {
+        continue;
+      }
+      for (const element of elements) {
+        if (!(element instanceof HTMLElement) || isOwn(element)) continue;
+        const share = element.innerText.replace(/\s+/g, " ").length / pageText;
+        if (share >= BROAD_SHARE) return { selector: selector.trim(), percent: Math.round(share * 100) };
+      }
+    }
+  }
+  return null;
+}
+
+// innerText skips hidden elements, so a broad :has() selector that hides whole result lists shows up as a collapse here.
+function visibleTextLength(): number {
+  return (document.body?.innerText ?? "").replace(/\s+/g, " ").length;
+}
+
 function observedProblems(
   { runningAnimations: _runningAnimations, lowContrastText, ...stats }: ReturnType<typeof computeStats>,
   change: Change,
@@ -481,6 +523,11 @@ export async function applyChange(change: Change, animate = true, options: Apply
   if (replaced.length) await transition(() => replaced.forEach(revertNow), false);
   const previous = applied.get(change.id);
   const before = verify ? computeStats() : UNMEASURED;
+  const textBefore = verify ? visibleTextLength() : 0;
+  const broad = verify && change.css ? broadHasSelector(change.css, textBefore) : null;
+  if (broad) {
+    return { ok: false, error: `The selector "${broad.selector.slice(0, 160)}" matches a container holding ${broad.percent}% of the page's visible text, so it would hide far more than asked. Put :has() on the card or shelf itself instead. Nothing was changed.`, matched: {}, before, after: before };
+  }
   const visual = Boolean(change.css || (change.block && change.block.name !== "stopMotion"));
   const attempts = verify ? 2 : 1;
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -494,11 +541,14 @@ export async function applyChange(change: Change, animate = true, options: Apply
       const counts = Object.values(matched);
       const missed = !change.block && counts.length > 0 && counts.every((count) => count === 0);
       const increase = verify ? observedProblems(after, change) - observedProblems(before, change) : 0;
+      const textAfter = verify && entry.live ? visibleTextLength() : textBefore;
+      const hidMost = textBefore > 1500 && textAfter < textBefore * 0.35;
       const worsened = increase > 0 && !options.keepIfWorse;
       if (!verify || !entry.live || (!missed && !worsened)) {
         return {
           ok: true, matched, before, after, note,
           ...(increase > 0 ? { worsened: increase } : {}),
+          ...(hidMost ? { hidMostOfPage: { textBefore, textAfter } } : {}),
           ...(!entry.live ? { waitingForSchedule: true } : {}),
           ...(visual && entry.live && verify ? { lowContrast: lowContrastSamples() } : {}),
           ...(replaced.length ? { replaced } : {}),

@@ -70,6 +70,8 @@ export interface ApplyOutcome {
   replaced?: string[];
   // How many more page-wide problems were counted after a change the user asked for; it is kept anyway.
   worsened?: number;
+  // The change left under a third of the page's visible text; set when a selector caught much more than intended.
+  hidMostOfPage?: { textBefore: number; textAfter: number };
   before: PageStats;
   after: PageStats;
   note?: string;
