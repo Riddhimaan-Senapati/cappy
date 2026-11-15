@@ -269,6 +269,22 @@ describe("socket lifetime", () => {
     assert.equal(intervals.size, 1);
   });
 
+  it("follows a server change for a caller that is not a chat run", async () => {
+    const agent = new AgentClient({ event: () => undefined, tool: () => undefined, status: () => undefined });
+    const started = FakeSocket.all.length;
+    const pending = agent.ensureConnected();
+    const socketA = await nextSocket(started);
+    const next = "ws://127.0.0.1:10002/agent";
+    bridge.data.serverUrl = next;
+    agent.useServer(next);
+    const socketB = await nextSocket(started + 1);
+    socketA.succeed();
+    socketB.succeed();
+    await pending;
+    assert.equal(socketB.url, next);
+    assert.equal(socketB.readyState, FakeSocket.OPEN);
+  });
+
   it("follows a server change instead of failing the request that was already waiting", async () => {
     const events: UiEvent[] = [];
     const agent = new AgentClient({ event: (_tabId, event) => events.push(event), tool: () => undefined, status: () => undefined });

@@ -35,7 +35,11 @@ export interface AgentHooks {
 }
 
 const SERVER_OFFLINE = new Error("The local agent server is offline. Start it to send a new AI request.");
-class ReplacedDial extends Error {}
+class ReplacedDial extends Error {
+  constructor() {
+    super("The server address changed.");
+  }
+}
 
 const STAT_LABELS: Record<keyof PageStats, string> = {
   inputsWithoutLabel: "unlabeled inputs",
@@ -210,7 +214,21 @@ export class AgentClient {
     void this.ensureConnected().catch(() => undefined);
   }
 
-  ensureConnected(options?: { probe?: boolean }): Promise<void> {
+  // Every caller follows a server change. A dial that lost the race rejects and the next attempt uses the new address.
+  async ensureConnected(options?: { probe?: boolean }): Promise<void> {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const generation = this.connectGeneration;
+      try {
+        await this.dial(options);
+        return;
+      } catch (error) {
+        if (this.connectGeneration === generation && !(error instanceof ReplacedDial)) throw error;
+      }
+    }
+    throw SERVER_OFFLINE;
+  }
+
+  private dial(options?: { probe?: boolean }): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (options?.probe && Date.now() < this.nextConnectAt) {
       this.scheduleReconnect();
@@ -246,21 +264,6 @@ export class AgentClient {
     if (this.reconnectTimer === undefined) return;
     clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
-  }
-
-  // A request that was already waiting follows the new address instead of failing with the old dial.
-  private async connectForRun(): Promise<void> {
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const generation = this.connectGeneration;
-      try {
-        await this.ensureConnected();
-        return;
-      } catch (error) {
-        if (this.connectGeneration !== generation || error instanceof ReplacedDial) continue;
-        throw error;
-      }
-    }
-    throw SERVER_OFFLINE;
   }
 
   private async open(generation: number) {
@@ -416,7 +419,7 @@ export class AgentClient {
     if (!this.runs.has(runId)) return;
 
     try {
-      await this.connectForRun();
+      await this.ensureConnected();
     } catch (error) {
       if (this.runs.has(runId)) this.fail(run, error instanceof Error ? error.message : String(error));
       return;

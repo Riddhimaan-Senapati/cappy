@@ -56,7 +56,13 @@ const SITE_WIDE = new RegExp(
 );
 const ALL_SITES = /\b(?:all (?:sites|websites)|every (?:site|website)|everywhere)\b/i;
 const THIS_PAGE = /\beverywhere on this page\b|\bon this page\b|\bthis page only\b/i;
+const NEGATED_PAGE = /\bnot (?:just |only )?(?:everywhere on this page|on this page|this page only)\b/i;
 const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
+
+// "not just on this page" is the opposite of a one-off. An explicit site or all-sites phrase then wins.
+function askedForThisPage(message: string): boolean {
+  return THIS_PAGE.test(message) && !NEGATED_PAGE.test(message);
+}
 
 export function requestedSiteWide(message: string): boolean {
   return SITE_WIDE.test(message);
@@ -65,7 +71,7 @@ export function requestedSiteWide(message: string): boolean {
 // "everywhere" and "across all websites" mean every website. "everywhere on youtube" is one site.
 // "everywhere on this page" is a one-off, so it is neither.
 export function requestedEverywhere(message: string): boolean {
-  if (THIS_PAGE.test(message)) return false;
+  if (askedForThisPage(message)) return false;
   return ALL_SITES.test(message) && !SITE_WIDE.test(message);
 }
 
@@ -97,7 +103,7 @@ export function prepareSavedChange<T extends { scope: string; pagePath?: string 
 ): T {
   let scope = change.scope;
   if (trigger === "chat" && (scope === "site" || scope === "everywhere")) {
-    if (THIS_PAGE.test(message)) {
+    if (askedForThisPage(message)) {
       scope = "page";
     } else {
     const namedSite = requestedSiteWide(message);
