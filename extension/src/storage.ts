@@ -2,6 +2,7 @@ import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
 import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier, TokenUsage } from "../../shared/protocol.js";
 import { savedChangeOnThisPage } from "../../shared/validate.js";
+import type { BackgroundRequest } from "./messages.js";
 
 export interface Recipe {
   message: string;
@@ -297,36 +298,59 @@ export function scopeForPrompt(change: ActiveChange, answer: "hold" | "site" | "
 
 let storageChain: Promise<unknown> = Promise.resolve();
 
+// One queue in this realm. Page contexts hand the write to the service worker, which is the only realm that runs it.
 function withStoredChanges<T>(work: () => Promise<T>): Promise<T> {
-  const run = () => {
-    const next = storageChain.then(work, work);
-    storageChain = next.then(() => undefined, () => undefined);
-    return next;
-  };
-  const locks = globalThis.navigator?.locks;
-  if (locks?.request) return locks.request("cappy-stored-changes", run);
-  return run();
+  const next = storageChain.then(work, work);
+  storageChain = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+type ScopeMark = { id: string; appliedAt?: number };
+
+function onAPage(): boolean {
+  return typeof document !== "undefined";
+}
+
+async function askBackground<T>(message: Extract<BackgroundRequest, { kind: "storedChange" }>): Promise<{ handled: true; result: T } | { handled: false }> {
+  if (!onAPage()) return { handled: false };
+  const send = globalThis.chrome?.runtime?.sendMessage;
+  if (!send) return { handled: false };
+  const response = (await send(message)) as { ok?: boolean; result?: T; error?: string } | undefined;
+  if (!response?.ok) throw new Error(response?.error || "Couldn't update saved changes.");
+  return { handled: true, result: response.result as T };
 }
 
 function placeChange(change: ActiveChange, scope: StoredScope, pagePath: string): ActiveChange {
   return { ...change, scope, pagePath: scope === "page" ? pagePath : undefined };
 }
 
+function scopeMarks(ids: ReadonlyArray<string | ScopeMark>): ScopeMark[] {
+  return ids.map((item) => (typeof item === "string" ? { id: item } : item));
+}
+
+// appliedAt ties the prompt to the change this run wrote. An older all-sites change that reused the id stays put.
+function sameChange(change: ActiveChange, mark: ScopeMark): boolean {
+  if (change.id !== mark.id) return false;
+  return mark.appliedAt == null || change.appliedAt === mark.appliedAt;
+}
+
 // The save prompt decides where a change lives. Only this origin and the everywhere list move; another site's copy of the same id stays.
-export async function rescopeStoredChanges(origin: string, ids: readonly string[], answer: "hold" | "site" | "everywhere", pagePath: string) {
-  if (!ids.length) return [];
+export async function rescopeStoredChanges(origin: string, ids: ReadonlyArray<string | ScopeMark>, answer: "hold" | "site" | "everywhere", pagePath: string) {
+  const marks = scopeMarks(ids);
+  if (!marks.length) return [];
+  const delegated = await askBackground<Array<{ id: string; scope: StoredScope; pagePath?: string | null }>>({ kind: "storedChange", op: "rescope", origin, marks, answer, pagePath });
+  if (delegated.handled) return delegated.result;
   return withStoredChanges(async () => {
     const state = await load();
-    const wanted = new Set(ids);
     const taken = new Map<string, ActiveChange>();
     const globalChanges = state.globalChanges.filter((change) => {
-      if (!wanted.has(change.id)) return true;
+      if (!marks.some((mark) => sameChange(change, mark))) return true;
       taken.set(change.id, change);
       return false;
     });
     let siteChanges = { ...state.siteChanges };
     const here = (siteChanges[origin] ?? []).filter((change) => {
-      if (!wanted.has(change.id)) return true;
+      if (!marks.some((mark) => sameChange(change, mark))) return true;
       if (!taken.has(change.id)) taken.set(change.id, change);
       return false;
     });
@@ -352,6 +376,7 @@ export async function rescopeStoredChanges(origin: string, ids: readonly string[
 }
 
 export async function recordApplied(origin: string, change: ActiveChange) {
+  if ((await askBackground({ kind: "storedChange", op: "apply", origin, change })).handled) return;
   await withStoredChanges(async () => {
     const state = await load();
     const site = without(state.siteChanges[origin] ?? [], change.id);
@@ -363,6 +388,8 @@ export async function recordApplied(origin: string, change: ActiveChange) {
 }
 
 export async function forgetStoredChange(host: string | null, id: string) {
+  if ((await askBackground({ kind: "storedChange", op: "forget", host, id })).handled) return;
+  await withStoredChanges(async () => {
   const state = await load();
   const siteChanges = { ...state.siteChanges };
   if (host != null) {
@@ -371,9 +398,11 @@ export async function forgetStoredChange(host: string | null, id: string) {
     else delete siteChanges[host];
   }
   await save({ globalChanges: host == null ? without(state.globalChanges, id) : state.globalChanges, siteChanges });
+  });
 }
 
 export async function recordReverted(origin: string, id: string) {
+  if ((await askBackground({ kind: "storedChange", op: "revert", origin, id })).handled) return;
   await withStoredChanges(async () => {
   const state = await load();
   const recipes = { ...state.recipes };
@@ -395,9 +424,17 @@ export async function recordReverted(origin: string, id: string) {
 export const recipeKey = (origin: string, message: string) => `${origin}::${message.trim().toLowerCase().replace(/\s+/g, " ")}`;
 
 export async function saveRecipe(key: string, recipe: Recipe) {
-  const { recipes } = await load();
-  const next = { ...recipes, [key]: recipe };
-  const keys = Object.keys(next).sort((a, b) => next[a].at - next[b].at);
-  for (const old of keys.slice(0, Math.max(0, keys.length - MAX_RECIPES))) delete next[old];
-  await save({ recipes: next });
+  if ((await askBackground({ kind: "storedChange", op: "recipe", key, recipe })).handled) return;
+  await withStoredChanges(async () => {
+    const state = await load();
+    const stored = [...state.globalChanges, ...Object.values(state.siteChanges).flat()];
+    const changes = recipe.changes.map((change) => {
+      const current = stored.find((item) => item.id === change.id && item.appliedAt === change.appliedAt);
+      return current ? { ...change, scope: current.scope, pagePath: current.pagePath } : change;
+    });
+    const next = { ...state.recipes, [key]: { ...recipe, changes } };
+    const keys = Object.keys(next).sort((a, b) => next[a].at - next[b].at);
+    for (const old of keys.slice(0, Math.max(0, keys.length - MAX_RECIPES))) delete next[old];
+    await save({ recipes: next });
+  });
 }

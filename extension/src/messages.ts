@@ -101,7 +101,12 @@ export type BackgroundRequest =
   | { kind: "voiceStop" }
   | { kind: "voiceOpenMic" }
   | { kind: "voicePermissionGranted" }
-  | { kind: "recognitionEvent"; event: unknown };
+  | { kind: "recognitionEvent"; event: unknown }
+  | { kind: "storedChange"; op: "rescope"; origin: string; marks: Array<{ id: string; appliedAt?: number }>; answer: "hold" | "site" | "everywhere"; pagePath: string }
+  | { kind: "storedChange"; op: "apply"; origin: string; change: ActiveChange }
+  | { kind: "storedChange"; op: "revert"; origin: string; id: string }
+  | { kind: "storedChange"; op: "forget"; host: string | null; id: string }
+  | { kind: "storedChange"; op: "recipe"; key: string; recipe: { message: string; changes: ActiveChange[]; at: number } };
 
 export type DebugPortMessage =
   | { type: "inspection"; snapshot?: PageInspection; error?: string }

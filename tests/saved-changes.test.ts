@@ -205,4 +205,40 @@ describe("the save prompt moves the change with the answer", () => {
     const state = await load();
     assert.equal(state.recipes[recipeKey(origin, "make the text bigger")]?.changes[0]?.scope, "site");
   });
+
+  it("does not demote an all-sites change this run did not write", async () => {
+    storage();
+    await recordApplied(origin, saved("bigger-text", "Larger text", "everywhere", undefined, { name: "textScale", scale: 1.3 }));
+    await rescopeStoredChanges(origin, [{ id: "bigger-text", appliedAt: 9 }], "hold", "/demo/campus.html");
+    const state = await load();
+    assert.equal(state.globalChanges[0]?.scope, "everywhere");
+    assert.equal(state.siteChanges[origin], undefined);
+  });
+
+  it("keeps a one-off on this page when all sites is answered for a different change", async () => {
+    storage();
+    await recordApplied(origin, saved("dark-mode", "Dark mode", "page", "/demo/campus.html", { name: "darkMode", allowSiteControls: true }));
+    await recordApplied(origin, saved("bigger-text", "Larger text", "everywhere", undefined, { name: "textScale", scale: 1.3 }));
+    const held = await rescopeStoredChanges(origin, [{ id: "dark-mode", appliedAt: 1 }, { id: "bigger-text", appliedAt: 1 }], "hold", "/demo/campus.html");
+    assert.deepEqual(held.map((update) => update.id), ["bigger-text"]);
+    await rescopeStoredChanges(origin, held.map((update) => ({ id: update.id, appliedAt: 1 })), "everywhere", "/demo/campus.html");
+    const state = await load();
+    assert.equal(state.siteChanges[origin]?.find((change) => change.id === "dark-mode")?.scope, "page");
+    assert.equal(state.globalChanges.find((change) => change.id === "bigger-text")?.scope, "everywhere");
+  });
+
+  it("keeps a recipe that is saved while the prompt is still holding", async () => {
+    storage();
+    const change = saved("bigger-text", "Larger text", "everywhere", undefined, { name: "textScale", scale: 1.3 });
+    await recordApplied(origin, change);
+    const key = recipeKey(origin, "make the text bigger");
+    await Promise.all([
+      rescopeStoredChanges(origin, [{ id: "bigger-text", appliedAt: 1 }], "hold", "/demo/campus.html"),
+      saveRecipe(key, { message: "make the text bigger", changes: [change], at: 5 }),
+    ]);
+    const state = await load();
+    assert.equal(state.globalChanges.length, 0);
+    assert.equal(state.siteChanges[origin]?.[0]?.scope, "page");
+    assert.equal(state.recipes[key]?.changes[0]?.scope, "page");
+  });
 });

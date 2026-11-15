@@ -1,7 +1,7 @@
 import type { UiEvent } from "../messages.js";
 import type { MemoryScope, Suggestion } from "../../../shared/protocol.js";
 import { forgetLine, rejectProposal } from "../memory.js";
-import { rescopeLiveChanges } from "../content/engine.js";
+import { activeChanges, rescopeLiveChanges } from "../content/engine.js";
 import { rescopeStoredChanges } from "../storage.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { countdownRing, paintCountdown } from "../voice/button.js";
@@ -247,18 +247,35 @@ export class OverlayUi {
         for (const line of lines) await forgetLine(line);
       } });
     }
-    const place = async (answer: "hold" | "site" | "everywhere") => {
-      const updates = await rescopeStoredChanges(location.origin, undoIds, answer, location.pathname);
+    const marks = undoIds.flatMap((id) => {
+      const change = activeChanges().find((item) => item.id === id);
+      return change ? [{ id, appliedAt: change.appliedAt }] : [];
+    });
+    const place = async (answer: "hold" | "site" | "everywhere", chosen: ReadonlyArray<{ id: string; appliedAt?: number }>) => {
+      const updates = await rescopeStoredChanges(location.origin, chosen, answer, location.pathname);
       rescopeLiveChanges(updates);
+      return updates;
     };
     // An all-sites preference waits on this page until the user accepts. A site rule is left where it is.
-    void place("hold");
+    // Later answers only move the changes this hold touched, so a one-off in the same run stays a one-off.
+    let held: Array<{ id: string; appliedAt?: number }> = [];
+    const holding = place("hold", marks).then((updates) => {
+      const moved = new Set(updates.map((update) => update.id));
+      held = marks.filter((mark) => moved.has(mark.id));
+    }, () => {
+      this.showToast("Couldn't keep this on this page. It may still apply on every site.", { isError: true });
+    });
     const actions = scopeChoices(lines, host, scope).map((choice) => ({
       label: choice.label,
       run: async () => {
-        const outcome = await choice.run();
-        if (outcome.saved) await place(outcome.scope);
-        this.showToast(`${outcomeText(outcome, host)}: ${text}`);
+        try {
+          await holding;
+          const outcome = await choice.run();
+          if (outcome.saved && held.length) await place(outcome.scope, held);
+          this.showToast(`${outcomeText(outcome, host)}: ${text}`);
+        } catch {
+          this.showToast("Couldn't save where this applies.", { isError: true });
+        }
       },
     }));
     this.showToast(`Save this preference? ${text}`, {
