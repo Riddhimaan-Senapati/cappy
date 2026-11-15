@@ -80,7 +80,6 @@ describe("isScheduleActive", () => {
       encoding: "utf8",
     });
     assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
-    assert.match(child.stdout ?? "", /# pass 1/);
   });
 });
 

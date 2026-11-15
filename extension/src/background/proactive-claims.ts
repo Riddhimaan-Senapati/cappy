@@ -1,8 +1,9 @@
-// One page-load check per site. A tab that leaves mid-check must drop the site it left,
-// and a chat error in that tab must not drop the check that is still running.
+// One page-load check per site. A running check keeps its claim until that run finishes,
+// even if the tab has moved on. A chat error in the tab must not clear it.
 export class ProactiveClaims {
   private pending = new Map<number, { key: string; runId?: string }>();
   private inFlight = new Set<string>();
+  private runs = new Map<string, string>();
 
   holds(key: string): boolean {
     return this.inFlight.has(key);
@@ -12,7 +13,8 @@ export class ProactiveClaims {
   begin(tabId: number, key: string): boolean {
     const previous = this.pending.get(tabId);
     if (previous && previous.key !== key) {
-      this.inFlight.delete(previous.key);
+      // A check that never started can be dropped. One with a run id stays until that run ends.
+      if (!previous.runId) this.inFlight.delete(previous.key);
       this.pending.delete(tabId);
     }
     if (this.inFlight.has(key)) return false;
@@ -23,19 +25,28 @@ export class ProactiveClaims {
 
   noteStart(tabId: number, runId: string) {
     const pending = this.pending.get(tabId);
-    if (pending && pending.runId === undefined) pending.runId = runId;
+    if (!pending || pending.runId !== undefined) return;
+    pending.runId = runId;
+    this.runs.set(runId, pending.key);
   }
 
   // The key to mark or drop, only when this event is the page-load run that claimed it.
-  finish(tabId: number, runId: string): string | null {
-    const pending = this.pending.get(tabId);
-    if (!pending || pending.runId !== runId) return null;
-    this.pending.delete(tabId);
-    return pending.key;
+  finish(_tabId: number, runId: string): string | null {
+    const key = this.runs.get(runId);
+    if (!key) return null;
+    this.runs.delete(runId);
+    for (const [tabId, pending] of this.pending) {
+      if (pending.runId === runId) this.pending.delete(tabId);
+    }
+    return key;
   }
 
   release(tabId: number, key: string) {
-    if (this.pending.get(tabId)?.key === key) this.pending.delete(tabId);
+    const pending = this.pending.get(tabId);
+    if (pending?.key === key) {
+      if (pending.runId) this.runs.delete(pending.runId);
+      this.pending.delete(tabId);
+    }
     this.inFlight.delete(key);
   }
 
