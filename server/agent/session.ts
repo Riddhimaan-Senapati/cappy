@@ -6,9 +6,16 @@ const TOOL_TIMEOUT_MS = 15_000;
 
 export class RunCancelledError extends Error {}
 
+// When nothing was applied, the reply is the check's own words, not a claim that a change happened.
+export function replyAfterTools(reply: string, applied: number, noops: readonly string[]): string {
+  if (applied > 0 || noops.length === 0) return reply;
+  return noops.join(" ");
+}
+
 export class AgentSession {
   readonly profileUpdates: string[] = [];
   readonly appliedIds = new Set<string>();
+  readonly noops: string[] = [];
   blockedReason: string | null = null;
   escalation: string | null = null;
   tier: Tier = "fast";

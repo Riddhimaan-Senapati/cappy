@@ -11,7 +11,7 @@ import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
 import { detectInjectionFields } from "../../../shared/safety.js";
-import { dropsOnRouteChange, isOneShot } from "../../../shared/validate.js";
+import { changesWithDarkModeLast, dropsOnRouteChange, isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
 import { beginClassifyCache, setFilterClassifier, setFilterPauseNotice, setLeftoverListener } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
@@ -185,6 +185,10 @@ async function apply(change: Change, source = "Reapplied from page history local
   }
   // A replayed recipe was verified when the model made it; only live model edits pay for the page scans.
   const outcome = await applyChange(scoped, true, { verify: !source.startsWith("Saved recipe"), keepIfWorse: requested });
+  if (outcome.noop) {
+    recordActivity(outcome.note ?? "Nothing changed.");
+    return outcome;
+  }
   const stored = activeChanges().find((active) => active.id === scoped.id);
   if (outcome.ok && stored && !isOneShot(stored.schedule)) {
     await recordApplied(origin, stored);
@@ -298,12 +302,13 @@ async function restore() {
     return 0;
   }
   let restored = 0;
-  for (const change of await savedChangesFor(origin, location.pathname)) {
-    if ((await applyChange(change, false, { pageChecked: true })).ok) {
-      // Counts what this page or site already has; a global change alone still lets the page-load run adapt here.
+  for (const change of changesWithDarkModeLast(await savedChangesFor(origin, location.pathname))) {
+    const outcome = await applyChange(change, false, { pageChecked: true });
+    // A no-op (the page was already dark) did not restore anything, so it must not skip the page-load run.
+    if (outcome.ok && !outcome.noop) {
       if (change.scope !== "everywhere") restored++;
       recordChange(change.id, "Saved change restored locally (no LLM call)");
-    } else recordActivity(`Saved change ${change.id} could not be restored.`);
+    } else if (!outcome.ok) recordActivity(`Saved change ${change.id} could not be restored.`);
   }
   await syncLearnedText();
   return restored;

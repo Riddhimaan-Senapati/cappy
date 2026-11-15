@@ -8,7 +8,7 @@ import { emptyActivity, summarizeActivity } from "../friction-log.js";
 import { findRequestSessions, load, recipeKey, save, saveRecipe, saveSiteNotes } from "../storage.js";
 import { speakIfEnabled } from "./tts.js";
 import { detectInjection } from "../../../shared/safety.js";
-import { scheduleStatus } from "../../../shared/validate.js";
+import { changesWithDarkModeLast, scheduleStatus } from "../../../shared/validate.js";
 import { settle } from "../coalesce.js";
 import { paintedStatusKey } from "../status-key.js";
 
@@ -35,6 +35,11 @@ export interface AgentHooks {
 }
 
 const SERVER_OFFLINE = new Error("The local Cappy server is offline. Start it to send a new AI request.");
+class ReplacedDial extends Error {
+  constructor() {
+    super("The server address changed.");
+  }
+}
 
 const STAT_LABELS: Record<keyof PageStats, string> = {
   inputsWithoutLabel: "unlabeled inputs",
@@ -69,7 +74,9 @@ export class AgentClient {
   status: StatusInfo = { connected: false, busy: false };
   private usageUpdates = Promise.resolve();
   private socket: WebSocket | null = null;
+  private connectedUrl: string | null = null;
   private opening: Promise<void> | null = null;
+  private connectGeneration = 0;
   private nextConnectAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private retrying = false;
@@ -195,15 +202,49 @@ export class AgentClient {
     this.send({ type: "chatgptLogin" });
   }
 
-  ensureConnected(options?: { probe?: boolean }): Promise<void> {
+  // Drop a socket that was opened against the previous address and dial the new one.
+  useServer(url: string) {
+    if (this.connectedUrl === url && this.socket?.readyState === WebSocket.OPEN) return;
+    this.nextConnectAt = 0;
+    this.clearReconnect();
+    clearInterval(this.keepAlive);
+    this.keepAlive = undefined;
+    // The in-flight dial is still the old address. Drop it so ensureConnected opens a new one.
+    this.connectGeneration++;
+    this.opening = null;
+    const previous = this.socket;
+    this.socket = null;
+    this.connectedUrl = null;
+    previous?.close();
+    void this.ensureConnected().catch(() => undefined);
+  }
+
+  // Every caller follows a server change. A dial that lost the race rejects and the next attempt uses the new address.
+  async ensureConnected(options?: { probe?: boolean }): Promise<void> {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const generation = this.connectGeneration;
+      try {
+        await this.dial(options);
+        return;
+      } catch (error) {
+        if (this.connectGeneration === generation && !(error instanceof ReplacedDial)) throw error;
+      }
+    }
+    throw SERVER_OFFLINE;
+  }
+
+  private dial(options?: { probe?: boolean }): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (options?.probe && Date.now() < this.nextConnectAt) {
       this.scheduleReconnect();
       return Promise.reject(SERVER_OFFLINE);
     }
-    this.opening ??= this.open().finally(() => {
-      this.opening = null;
-    });
+    if (!this.opening) {
+      const generation = this.connectGeneration;
+      this.opening = this.open(generation).finally(() => {
+        if (this.connectGeneration === generation) this.opening = null;
+      });
+    }
     return this.opening;
   }
 
@@ -230,12 +271,18 @@ export class AgentClient {
     this.reconnectTimer = undefined;
   }
 
-  private async open() {
+  private async open(generation: number) {
     const { serverUrl } = await load();
+    if (generation !== this.connectGeneration) throw SERVER_OFFLINE;
     await new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(serverUrl);
       let opened = false;
+      const stale = () => generation !== this.connectGeneration;
       const rejectOffline = () => {
+        if (stale()) {
+          reject(new ReplacedDial());
+          return;
+        }
         this.nextConnectAt = Date.now() + 4000;
         // One retry per failure; a failed retry waits for the next status probe instead of looping forever.
         if (!this.retrying) this.scheduleReconnect();
@@ -246,12 +293,19 @@ export class AgentClient {
         rejectOffline();
       }, 4000);
       socket.onopen = () => {
-        opened = true;
         clearTimeout(timer);
+        if (stale()) {
+          opened = true;
+          socket.close();
+          reject(new ReplacedDial());
+          return;
+        }
+        opened = true;
         this.nextConnectAt = 0;
         this.clearReconnect();
         clearInterval(this.keepAlive);
         this.socket = socket;
+        this.connectedUrl = serverUrl;
         this.keepAlive = setInterval(() => this.send({ type: "ping" }), 20_000);
         resolve();
       };
@@ -445,12 +499,16 @@ export class AgentClient {
         return "blocked";
       }
       this.step(run, "Using your saved version of this request", "info");
-      for (const change of changes) {
+      let appliedAny = false;
+      for (const change of changesWithDarkModeLast(changes)) {
         if (!this.runs.has(run.runId)) return "stopped";
         const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
         if (!outcome.ok) return false;
+        if (outcome.noop) continue;
         run.applied.set(change.id, change);
+        appliedAny = true;
       }
+      if (!appliedAny) return false;
       if (!this.runs.has(run.runId)) return "stopped";
       this.finish(run, true);
       const reply = "Done, from your saved version. Hold Shift+Enter to ask the AI again.";
@@ -623,6 +681,7 @@ export class AgentClient {
 
   private afterApply(run: Run, change: Change, outcome: ApplyOutcome) {
     if (run.trigger === "page_load") void sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
+    if (outcome.noop) return this.step(run, outcome.note ?? "Nothing changed", "info");
     if (!outcome.ok) return this.step(run, `Couldn't apply "${change.summary}": ${outcome.error}`, "bad");
     run.applied.set(change.id, { ...change, appliedAt: Date.now() });
     const deltas = (Object.keys(STAT_LABELS) as Array<keyof PageStats>)
