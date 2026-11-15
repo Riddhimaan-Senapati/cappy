@@ -4,7 +4,7 @@ import type { BlockCall } from "../shared/adaptation.js";
 import { installDom } from "./dom-setup.js";
 
 installDom();
-const { applyContentFilter, keywordPattern, setFilterClassifier, setFilterPauseNotice } = await import("../extension/src/content/content-filter.js");
+const { applyContentFilter, keywordPattern, leftovers, setFilterClassifier, setLeftoverListener, setFilterPauseNotice, LEFTOVER_SETTLE_MS } = await import("../extension/src/content/content-filter.js");
 const { findItemGroups } = await import("../extension/src/content/item-groups.js");
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
@@ -158,6 +158,90 @@ describe("content filter judged by meaning", () => {
     handle.undo();
     assert.deepEqual(hiddenTitles(), []);
     setFilterClassifier(null);
+  });
+});
+
+describe("YouTube search results", () => {
+  const video = (title: string, i: number) =>
+    `<ytd-video-renderer><a href="/watch?v=v${i}"><h3 id="video-title">${title}</h3></a><div id="channel">Channel ${i} · ${i}M views · 2 weeks ago</div></ytd-video-renderer>`;
+  // Search-page Shorts show only a view count; the link is what says they are Shorts.
+  const short = (i: number) =>
+    `<ytm-shorts-lockup-view-model-v2><a href="/shorts/s${i}"><img alt=""></a><div class="subhead">${i}m views</div></ytm-shorts-lockup-view-model-v2>`;
+  const page = (resultsHeading = "") => {
+    document.body.innerHTML = `<ytd-app><div id="primary"><ytd-item-section-renderer>${resultsHeading}<div id="contents">
+      <ytd-shelf-renderer><h2><span id="title">Podcasts</span></h2><a href="/feed/podcasts">View all</a><div id="items">${["Trump episode 12 explained", "Mark Cuban the brutal truth", "Diary of a CEO interview", "Huberman sleep science"].map(video).join("")}</div></ytd-shelf-renderer>
+      <grid-shelf-view-model><yt-shelf-header-layout><h2><span>Shorts</span></h2></yt-shelf-header-layout><div class="row">${[1, 2, 3, 4, 5].map(short).join("")}</div></grid-shelf-view-model>
+      ${["Cooking pasta at home tonight", "Learn guitar in ten minutes", "Funny cats compilation 2026"].map((title, i) => video(title, i + 10)).join("")}
+    </div></ytd-item-section-renderer></div></ytd-app>`;
+  };
+  const hidden = () => [...document.querySelectorAll<HTMLElement>("*")].filter((el) => el.style.display === "none").map((el) => el.localName);
+  const visibleVideos = () => [...document.querySelectorAll<HTMLElement>("ytd-video-renderer")].filter((el) => !el.closest<HTMLElement>("[style*='none']")).length;
+
+  it("hides the Shorts shelf and nothing else", async () => {
+    page();
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await settle();
+    assert.deepEqual(hidden(), ["grid-shelf-view-model"]);
+    assert.equal(visibleVideos(), 7);
+    handle.undo();
+  });
+
+  it("hides a shelf by its heading, heading included, even when its items never say the word", async () => {
+    page();
+    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document);
+    await settle();
+    assert.deepEqual(hidden(), ["ytd-shelf-renderer"]);
+    assert.equal(visibleVideos(), 3);
+    handle.undo();
+  });
+
+  it("keeps a result list whose heading matches, since it holds most of the page", async () => {
+    page(`<h2>Results for podcasts</h2>`);
+    const handle = applyContentFilter(filter({ keywords: ["podcast"] }), document);
+    await settle();
+    assert.equal(hidden().includes("ytd-item-section-renderer"), false);
+    handle.undo();
+  });
+
+  it("counts nothing left over once the shelf is gone, and leaves menus out of the count", async () => {
+    page();
+    document.body.insertAdjacentHTML("afterbegin", `<nav><a href="/shorts">Shorts</a></nav>`);
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await settle();
+    assert.equal(leftovers(document, keywordPattern(["shorts"])), 0);
+    handle.undo();
+    assert.equal(leftovers(document, keywordPattern(["shorts"])), 5);
+  });
+
+  it("hides a stray Short link by its own address, outside any shelf", async () => {
+    page();
+    document.querySelector("#primary")!.insertAdjacentHTML("beforeend", `<div class="extra"><a href="/shorts/lone"><img alt=""></a></div>`);
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await settle();
+    assert.equal(leftovers(document, keywordPattern(["shorts"])), 0);
+    assert.equal(visibleVideos(), 7);
+    handle.undo();
+  });
+
+  it("tells the listener when matches stay on screen after the filter settles", async () => {
+    page();
+    // A link in running text belongs to no repeated group, so the filter cannot take it out and should say so.
+    document.querySelector("#primary")!.insertAdjacentHTML("beforeend", `<p>Read why <a href="/blog/shorts-limits">Shorts are capped</a> this year.</p>`);
+    const told: number[] = [];
+    setLeftoverListener((_filter, count) => told.push(count));
+    const handle = applyContentFilter(filter({ keywords: ["shorts"] }), document);
+    await new Promise((resolve) => setTimeout(resolve, LEFTOVER_SETTLE_MS + 400));
+    assert.deepEqual(told, [1]);
+    handle.undo();
+    setLeftoverListener(null);
+  });
+
+  it("falls back to the page's own groups when a saved item selector matches nothing here", async () => {
+    page();
+    const handle = applyContentFilter(filter({ keywords: ["shorts"], itemSelector: "ytd-rich-item-renderer" }), document);
+    await settle();
+    assert.deepEqual(hidden(), ["grid-shelf-view-model"]);
+    handle.undo();
   });
 });
 
