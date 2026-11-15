@@ -124,7 +124,7 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
   }
   if (camera) return camera.update(settings);
   camera = new CameraController(settings, {
-    notify: (text) => ensureOverlay().showToast(text, []),
+    notify: (text) => ensureOverlay().showToast(text),
     turnOff: () => void load().then((state) => save({ camera: { ...state.camera, enabled: false } })),
     select: (element) => void selectByGesture(element),
     release: () => overlay?.spotlight.finishVoice(),
@@ -135,7 +135,7 @@ function syncCamera(settings: StoredState["camera"], paused: boolean) {
       picker.stop();
       clearTarget();
       overlay?.spotlight.hide();
-      if (hadSomething) ensureOverlay().showToast("Cancelled.", []);
+      if (hadSomething) ensureOverlay().showToast("Cancelled.");
       return hadSomething;
     },
   });
@@ -209,7 +209,7 @@ function revert(id: string) {
     if (id === learnedTextScale.id) {
       await forgetLine(LARGER_TEXT);
     } else if (id.startsWith("site-control-")) {
-      if (!ok) ensureOverlay().showToast("The site control could not be restored.", [], true);
+      if (!ok) ensureOverlay().showToast("The site control could not be restored.", { isError: true });
     } else {
       await recordReverted(origin, id);
       if (wasTextScale) await syncLearnedText();
@@ -366,7 +366,7 @@ function ensureOverlay(): OverlayUi {
     enableMicrophone: () => void send({ kind: "voiceOpenMic" }),
     openDebug: () => void send({ kind: "openDebug" }),
     readAloud: () => {
-      if (!readPageAloud()) ensureOverlay().showToast("No readable text on this page.", [], true);
+      if (!readPageAloud()) ensureOverlay().showToast("No readable text on this page.", { isError: true });
     },
     stopSpeaking: stopSpeech,
     isSpeaking: speechActive,
@@ -439,7 +439,7 @@ async function handle(request: ContentRequest): Promise<unknown> {
     case "frictionEvent":
       return onFriction(request.event);
     case "toast":
-      return ensureOverlay().showToast(request.text, request.undoIds);
+      return ensureOverlay().showToast(request.text, { undoIds: request.undoIds });
     case "readAloud":
       return readPageAloud();
     case "startVoice":
@@ -484,16 +484,18 @@ function start() {
     if (toldLeftovers.has(key)) return;
     toldLeftovers.add(key);
     recordActivity(`${name}: ${count} still showing on this page.`);
-    ensureOverlay().showToast(`${name}: ${count} still showing here.`, [], false, undefined, {
-      label: "Fix it",
-      run: async () => void send({ kind: "runChat", message: `${name} missed ${count} on this page. Hide the rest of the ${filter.keywords.join(", ")} here too.`, fresh: false }),
+    ensureOverlay().showToast(`${name}: ${count} still showing here.`, {
+      action: {
+        label: "Fix it",
+        run: async () => void send({ kind: "runChat", message: `${name} missed ${count} on this page. Hide the rest of the ${filter.keywords.join(", ")} here too.`, fresh: false }),
+      },
     });
   });
   setFilterPauseNotice((match, reason, judged, resume) => {
     const text = reason === "mostly"
       ? `Most of this page matches "${match}", so I stopped checking new items to save AI usage. Keyword matches still hide.`
       : `Checked ${judged} items for "${match}" on this page and paused to save AI usage. Keyword matches still hide.`;
-    ensureOverlay().showToast(text, [], false, undefined, [{ label: "Keep checking", run: async () => resume() }], true);
+    ensureOverlay().showToast(text, { action: [{ label: "Keep checking", run: async () => resume() }], sticky: true });
   });
   // A reloaded extension leaves the previous instance's UI and styles behind; clear them before restoring.
   document.querySelectorAll('[data-ba="ui"], style[data-ba], svg[data-ba], label[data-ba]').forEach((node) => node.remove());

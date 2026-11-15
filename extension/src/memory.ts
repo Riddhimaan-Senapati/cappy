@@ -48,6 +48,7 @@ export function addMemoryLines(lines: readonly string[], incoming: readonly stri
 }
 
 const removeMemoryLine = (lines: readonly string[], line: string) => lines.filter((existing) => !same(existing, line));
+const MAX_PENDING = 8;
 
 // New lines always wait in pendingMemory until the user picks this site or all sites; the host they came from is kept with them.
 export function receiveMemory(state: Memory, incoming: readonly string[], origin: PendingSite): MemoryDecision {
@@ -56,7 +57,11 @@ export function receiveMemory(state: Memory, incoming: readonly string[], origin
   );
   const pendingSites = { ...state.pendingSites };
   for (const line of fresh) pendingSites[pendingKey(line)] = origin;
-  return { profile: [...state.profile], pendingMemory: addMemoryLines(state.pendingMemory, fresh), pendingSites, proposed: fresh };
+  const pendingMemory = addMemoryLines(state.pendingMemory, fresh).slice(-MAX_PENDING);
+  for (const key of Object.keys(pendingSites)) {
+    if (!pendingMemory.some((line) => pendingKey(line) === key)) delete pendingSites[key];
+  }
+  return { profile: [...state.profile], pendingMemory, pendingSites, proposed: fresh.filter((line) => pendingMemory.some((kept) => same(kept, line))) };
 }
 
 export function pendingSite(state: Pick<StoredState, "pendingSites">, line: string): PendingSite | undefined {
@@ -90,9 +95,14 @@ export function editMemoryLine(lines: readonly string[], index: number, next: st
   return lines.map((existing, i) => (i === index ? line : existing));
 }
 
+// The decisions spread the whole stored state, so write back only the memory keys or a stale copy of the rest clobbers other writers.
 async function update(change: (state: StoredState) => Partial<Memory>) {
-  const state = await load();
-  await save(change(state));
+  const next = change(await load());
+  const patch: Partial<Memory> = {};
+  if (next.profile) patch.profile = next.profile;
+  if (next.pendingMemory) patch.pendingMemory = next.pendingMemory;
+  if (next.pendingSites) patch.pendingSites = next.pendingSites;
+  await save(patch);
 }
 
 export async function rememberLines(lines: string[], origin: PendingSite) {

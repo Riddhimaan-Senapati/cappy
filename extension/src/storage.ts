@@ -3,6 +3,7 @@ import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
 import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier, TokenUsage } from "../../shared/protocol.js";
 import { CLASSIFY_CACHE_HOSTS, CLASSIFY_INDEX_KEY, classifyCacheKey, isClassifyCacheKey, mergeClassifyHost, mergeClassifyIndex, readClassifyHost, readClassifyIndex, type ClassifyHostCache } from "../../shared/classify-cache.js";
 import { savedChangeOnThisPage } from "../../shared/validate.js";
+import type { BackgroundRequest } from "./messages.js";
 
 export interface Recipe {
   message: string;
@@ -372,16 +373,121 @@ function writeSite(siteChanges: Record<string, ActiveChange[]>, origin: string, 
   return next;
 }
 
+type StoredScope = "page" | "site" | "everywhere";
+
+function portableChange(change: ActiveChange): boolean {
+  if (change.css || change.dom?.length) return false;
+  return !(change.block?.name === "contentFilter" && change.block.itemSelector);
+}
+
+// A weekday rule or a host selector was asked for this site. "Don't save" must not shrink it to one page.
+function anchoredChange(change: ActiveChange): boolean {
+  if (change.schedule != null) return true;
+  if (change.block?.name === "contentFilter" && change.block.itemSelector) return true;
+  return change.scope === "site";
+}
+
+// "hold" runs when the prompt appears: an all-sites preference waits on this page until the user accepts.
+export function scopeForPrompt(change: ActiveChange, answer: "hold" | "site" | "everywhere"): StoredScope | null {
+  if (answer === "hold") return !anchoredChange(change) && change.scope === "everywhere" ? "page" : null;
+  if (answer === "everywhere") return portableChange(change) ? "everywhere" : "site";
+  return "site";
+}
+
+let storageChain: Promise<unknown> = Promise.resolve();
+
+// One queue in this realm. Page contexts hand the write to the service worker, which is the only realm that runs it.
+function withStoredChanges<T>(work: () => Promise<T>): Promise<T> {
+  const next = storageChain.then(work, work);
+  storageChain = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+type ScopeMark = { id: string; appliedAt?: number };
+
+function onAPage(): boolean {
+  return typeof document !== "undefined";
+}
+
+async function askBackground<T>(message: Extract<BackgroundRequest, { kind: "storedChange" }>): Promise<{ handled: true; result: T } | { handled: false }> {
+  if (!onAPage()) return { handled: false };
+  const send = globalThis.chrome?.runtime?.sendMessage;
+  if (!send) return { handled: false };
+  const response = (await send(message)) as { ok?: boolean; result?: T; error?: string } | undefined;
+  if (!response?.ok) throw new Error(response?.error || "Couldn't update saved changes.");
+  return { handled: true, result: response.result as T };
+}
+
+function placeChange(change: ActiveChange, scope: StoredScope, pagePath: string): ActiveChange {
+  return { ...change, scope, pagePath: scope === "page" ? pagePath : undefined };
+}
+
+function scopeMarks(ids: ReadonlyArray<string | ScopeMark>): ScopeMark[] {
+  return ids.map((item) => (typeof item === "string" ? { id: item } : item));
+}
+
+// appliedAt ties the prompt to the change this run wrote. An older all-sites change that reused the id stays put.
+function sameChange(change: ActiveChange, mark: ScopeMark): boolean {
+  if (change.id !== mark.id) return false;
+  return mark.appliedAt == null || change.appliedAt === mark.appliedAt;
+}
+
+// The save prompt decides where a change lives. Only this origin and the everywhere list move; another site's copy of the same id stays.
+export async function rescopeStoredChanges(origin: string, ids: ReadonlyArray<string | ScopeMark>, answer: "hold" | "site" | "everywhere", pagePath: string) {
+  const marks = scopeMarks(ids);
+  if (!marks.length) return [];
+  const delegated = await askBackground<Array<{ id: string; scope: StoredScope; pagePath?: string | null }>>({ kind: "storedChange", op: "rescope", origin, marks, answer, pagePath });
+  if (delegated.handled) return delegated.result;
+  return withStoredChanges(async () => {
+    const state = await load();
+    const taken = new Map<string, ActiveChange>();
+    const globalChanges = state.globalChanges.filter((change) => {
+      if (!marks.some((mark) => sameChange(change, mark))) return true;
+      taken.set(change.id, change);
+      return false;
+    });
+    let siteChanges = { ...state.siteChanges };
+    const here = (siteChanges[origin] ?? []).filter((change) => {
+      if (!marks.some((mark) => sameChange(change, mark))) return true;
+      if (!taken.has(change.id)) taken.set(change.id, change);
+      return false;
+    });
+    siteChanges = writeSite(siteChanges, origin, here);
+    const updates: Array<{ id: string; scope: StoredScope; pagePath?: string | null }> = [];
+    const recipes = { ...state.recipes };
+    for (const change of taken.values()) {
+      const scope = scopeForPrompt(change, answer);
+      const next = scope ? placeChange(change, scope, pagePath) : change;
+      if (scope) updates.push({ id: next.id, scope: next.scope, pagePath: next.pagePath });
+      if (next.scope === "everywhere") globalChanges.push(next);
+      else siteChanges = writeSite(siteChanges, origin, [...(siteChanges[origin] ?? []), next]);
+      if (!scope) continue;
+      const prefix = `${origin}::`;
+      for (const [key, recipe] of Object.entries(recipes)) {
+        if (!key.startsWith(prefix) || !recipe.changes.some((item) => item.id === next.id)) continue;
+        recipes[key] = { ...recipe, changes: recipe.changes.map((item) => (item.id === next.id ? placeChange(item, scope, pagePath) : item)) };
+      }
+    }
+    await save({ globalChanges, siteChanges, recipes });
+    return updates;
+  });
+}
+
 export async function recordApplied(origin: string, change: ActiveChange) {
-  const state = await load();
-  const site = without(state.siteChanges[origin] ?? [], change.id);
-  const globalChanges = without(state.globalChanges, change.id);
-  if (change.scope === "everywhere") globalChanges.push(change);
-  else site.push(change);
-  await save({ globalChanges, siteChanges: writeSite(state.siteChanges, origin, site) });
+  if ((await askBackground({ kind: "storedChange", op: "apply", origin, change })).handled) return;
+  await withStoredChanges(async () => {
+    const state = await load();
+    const site = without(state.siteChanges[origin] ?? [], change.id);
+    const globalChanges = without(state.globalChanges, change.id);
+    if (change.scope === "everywhere") globalChanges.push(change);
+    else site.push(change);
+    await save({ globalChanges, siteChanges: writeSite(state.siteChanges, origin, site) });
+  });
 }
 
 export async function forgetStoredChange(host: string | null, id: string) {
+  if ((await askBackground({ kind: "storedChange", op: "forget", host, id })).handled) return;
+  await withStoredChanges(async () => {
   const state = await load();
   const siteChanges = { ...state.siteChanges };
   if (host != null) {
@@ -390,9 +496,12 @@ export async function forgetStoredChange(host: string | null, id: string) {
     else delete siteChanges[host];
   }
   await save({ globalChanges: host == null ? without(state.globalChanges, id) : state.globalChanges, siteChanges });
+  });
 }
 
 export async function recordReverted(origin: string, id: string) {
+  if ((await askBackground({ kind: "storedChange", op: "revert", origin, id })).handled) return;
+  await withStoredChanges(async () => {
   const state = await load();
   const recipes = { ...state.recipes };
   const prefix = `${origin}::`;
@@ -407,14 +516,23 @@ export async function recordReverted(origin: string, id: string) {
     siteChanges: writeSite(state.siteChanges, origin, without(state.siteChanges[origin] ?? [], id)),
     recipes,
   });
+  });
 }
 
 export const recipeKey = (origin: string, message: string) => `${origin}::${message.trim().toLowerCase().replace(/\s+/g, " ")}`;
 
 export async function saveRecipe(key: string, recipe: Recipe) {
-  const { recipes } = await load();
-  const next = { ...recipes, [key]: recipe };
-  const keys = Object.keys(next).sort((a, b) => next[a].at - next[b].at);
-  for (const old of keys.slice(0, Math.max(0, keys.length - MAX_RECIPES))) delete next[old];
-  await save({ recipes: next });
+  if ((await askBackground({ kind: "storedChange", op: "recipe", key, recipe })).handled) return;
+  await withStoredChanges(async () => {
+    const state = await load();
+    const stored = [...state.globalChanges, ...Object.values(state.siteChanges).flat()];
+    const changes = recipe.changes.map((change) => {
+      const current = stored.find((item) => item.id === change.id && item.appliedAt === change.appliedAt);
+      return current ? { ...change, scope: current.scope, pagePath: current.pagePath } : change;
+    });
+    const next = { ...state.recipes, [key]: { ...recipe, changes } };
+    const keys = Object.keys(next).sort((a, b) => next[a].at - next[b].at);
+    for (const old of keys.slice(0, Math.max(0, keys.length - MAX_RECIPES))) delete next[old];
+    await save({ recipes: next });
+  });
 }

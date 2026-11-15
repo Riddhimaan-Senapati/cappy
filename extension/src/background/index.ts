@@ -1,7 +1,7 @@
 import { requestAudio } from "../voice/audio-api.js";
 import type { TargetElement } from "../../../shared/protocol.js";
 import type { BackgroundRequest, ContentRequest, DebugPortMessage, DebugPortRequest, PageInspection, StatusInfo, UiEvent } from "../messages.js";
-import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequest, save, type RequestSession } from "../storage.js";
+import { forgetStoredChange, load, recordApplied, recordRequestSession, recordReverted, recordSubmittedRequest, removeSubmittedRequest, rescopeStoredChanges, save, saveRecipe, type RequestSession } from "../storage.js";
 import { lastingRequest } from "../../../shared/validate.js";
 import { settle } from "../coalesce.js";
 import { AgentClient, sendToTab } from "./agent.js";
@@ -355,6 +355,17 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "openWelcome":
       void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
       break;
+    case "storedChange": {
+      const run = () => {
+        if (request.op === "rescope") return rescopeStoredChanges(request.origin, request.marks, request.answer, request.pagePath);
+        if (request.op === "apply") return recordApplied(request.origin, request.change);
+        if (request.op === "revert") return recordReverted(request.origin, request.id);
+        if (request.op === "forget") return forgetStoredChange(request.host, request.id);
+        return saveRecipe(request.key, request.recipe);
+      };
+      void run().then((result) => sendResponse({ ok: true, result }), (error: Error) => sendResponse({ ok: false, error: error.message }));
+      return true;
+    }
     case "resetAll":
       void resetEverything().then(() => sendResponse({ ok: true }), (error) => sendResponse({ ok: false, error: String(error) }));
       return true;
