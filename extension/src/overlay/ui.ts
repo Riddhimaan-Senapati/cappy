@@ -231,7 +231,7 @@ export class OverlayUi {
     } else if (event.type === "error") {
       this.showToast(event.message, [], true);
     } else {
-      this.showToast("Blocked. This page tried to give the agent instructions.", [], true);
+      this.showToast("Blocked. This page tried to give Cappy instructions.", [], true);
     }
   }
 

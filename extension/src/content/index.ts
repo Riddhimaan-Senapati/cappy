@@ -293,7 +293,7 @@ async function restore() {
     const saved = await savedChangesFor(origin);
     const { paused, profile } = await load();
     if (saved.length || (!paused && hasMemoryLine(profile, LARGER_TEXT))) {
-      recordActivity("Saved changes were not restored: this page tried to instruct the agent.");
+      recordActivity("Saved changes were not restored: this page tried to give Cappy instructions.");
     }
     return 0;
   }
@@ -390,7 +390,7 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return mutate(async () => {
         if ((await load()).paused) return { status: "unavailable", error: "Adaptations are paused." };
         const outcome = await applySiteControl(request.input, request.userMessage);
-        if (outcome.status === "applied") recordChange(outcome.change.id, "Site control selected by the agent and executed locally");
+        if (outcome.status === "applied") recordChange(outcome.change.id, "Site control selected by Cappy and executed locally");
         recordActivity(`Site control result: ${outcome.status}.`);
         return outcome;
       });

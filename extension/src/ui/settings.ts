@@ -605,7 +605,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         voiceSection(state),
         section(
           "Reading aloud",
-          toggle("Read replies aloud", "Speaks what the agent changed", state.speakReplies, set("speakReplies")),
+          toggle("Read replies aloud", "Speaks what Cappy changed", state.speakReplies, set("speakReplies")),
           voiceRow,
           rateRow,
           h("div", "s-foot", "", [testVoice]),

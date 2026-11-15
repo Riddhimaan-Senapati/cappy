@@ -235,7 +235,7 @@ async function openRequestHistory(message: string) {
   home.addEventListener("click", () => {
     historyThread = undefined;
     historyCard?.remove();
-    input.placeholder = "Ask the agent";
+    input.placeholder = "Ask Cappy";
     input.focus();
   });
   const retry = h("button", "", "Use request again");
@@ -261,7 +261,7 @@ const runs = new Map<string, { card: HTMLElement; steps: HTMLElement; tag: HTMLE
 
 function setStatus(status: StatusInfo) {
   statusDot.className = `dot ${status.connected ? "on" : "off"}`;
-  statusText.textContent = status.connected ? `${status.provider ?? "agent"}${status.models ? ` · ${status.models.fast} / ${status.models.frontier}` : ""}` : (status.error ?? "Server offline");
+  statusText.textContent = status.connected ? `${status.provider ?? "Cappy"}${status.models ? ` · ${status.models.fast} / ${status.models.frontier}` : ""}` : (status.error ?? "Server offline");
 }
 
 function ensureRun(event: Extract<UiEvent, { runId: string }>, message = "") {

@@ -162,7 +162,7 @@ export class Spotlight {
     this.bar.setAttribute("aria-label", "Cappy");
     this.bar.setAttribute("aria-modal", "true");
     this.input.setAttribute("role", "combobox");
-    this.input.setAttribute("aria-label", "Ask the agent, or type / for commands");
+    this.input.setAttribute("aria-label", "Ask Cappy, or type / for commands");
     this.input.setAttribute("aria-autocomplete", "list");
     this.input.setAttribute("aria-expanded", "false");
     this.input.setAttribute("aria-controls", LISTBOX_ID);
