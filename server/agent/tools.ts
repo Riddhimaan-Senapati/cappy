@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Change, validateChange } from "../../shared/adaptation.js";
-import { detectInjection, detectInjectionText } from "../safety.js";
+import { detectInjection, detectInjectionText } from "../../shared/safety.js";
 import { rememberFacts } from "./memory.js";
 import { withSpokenSchedule } from "./schedule.js";
 import { loadSkills } from "./skills.js";
