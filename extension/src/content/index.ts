@@ -13,7 +13,7 @@ import { load, recordApplied, recordReverted, save, savedChangesFor, type Stored
 import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
-import { setFilterClassifier } from "./content-filter.js";
+import { setFilterClassifier, setFilterPauseNotice } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
@@ -432,6 +432,12 @@ const LOADED_FLAG = "__adaptiveAgentLoaded";
 
 function start() {
   setFilterClassifier((match, items) => send({ kind: "classify", match, items }) as Promise<boolean[] | null>);
+  setFilterPauseNotice((match, reason, judged, resume) => {
+    const text = reason === "mostly"
+      ? `Most of this page matches "${match}", so I stopped checking new items to save AI usage. Keyword matches still hide.`
+      : `Checked ${judged} items for "${match}" on this page and paused to save AI usage. Keyword matches still hide.`;
+    ensureOverlay().showToast(text, [], false, undefined, [{ label: "Keep checking", run: async () => resume() }], true);
+  });
   // A reloaded extension leaves the previous instance's UI and styles behind; clear them before restoring.
   document.querySelectorAll('[data-ba="ui"], style[data-ba], svg[data-ba], label[data-ba]').forEach((node) => node.remove());
   onSpeechChange((on) => ensureOverlay().setSpeaking(on));

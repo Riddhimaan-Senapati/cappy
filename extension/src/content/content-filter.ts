@@ -51,8 +51,41 @@ const queued = new Map<string, Set<string>>();
 const waiting = new Map<string, Set<() => void>>();
 let classifyTimer: ReturnType<typeof setTimeout> | undefined;
 
+// Hiding items makes feeds load more, so a page that is mostly matches would be judged forever without a stop.
+const JUDGE_BUDGET = 200;
+const SATURATION_MIN = 30;
+const SATURATION_RATIO = 0.8;
+export type FilterPause = "mostly" | "budget";
+type Usage = { judged: number; matched: number; paused: boolean; resumed: boolean };
+const usage = new Map<string, Usage>();
+let onPause: ((match: string, reason: FilterPause, judged: number, resume: () => void) => void) | null = null;
+
 export function setFilterClassifier(next: Classifier | null) {
   classifier = next;
+}
+
+export function setFilterPauseNotice(next: typeof onPause) {
+  onPause = next;
+}
+
+function usageFor(match: string): Usage {
+  if (!usage.has(match)) usage.set(match, { judged: 0, matched: 0, paused: false, resumed: false });
+  return usage.get(match)!;
+}
+
+function resumeJudging(match: string) {
+  usage.set(match, { judged: 0, matched: 0, paused: false, resumed: true });
+  waiting.get(match)?.forEach((wake) => wake());
+}
+
+function pauseIfNeeded(match: string) {
+  const state = usageFor(match);
+  if (state.paused) return;
+  const mostly = !state.resumed && state.judged >= SATURATION_MIN && state.matched / state.judged >= SATURATION_RATIO;
+  const spent = state.judged >= JUDGE_BUDGET;
+  if (!mostly && !spent) return;
+  state.paused = true;
+  onPause?.(match, mostly ? "mostly" : "budget", state.judged, () => resumeJudging(match));
 }
 
 const verdictKey = (match: string, text: string) => `${match}\u0000${text}`;
@@ -73,7 +106,7 @@ function verdictFor(match: string, el: HTMLElement): boolean | undefined {
   if (!text) return false;
   const key = verdictKey(match, text);
   const verdict = verdicts.get(key);
-  if (verdict !== undefined || !classifier || inFlight.has(key)) return verdict;
+  if (verdict !== undefined || !classifier || inFlight.has(key) || usageFor(match).paused) return verdict;
   if (!queued.has(match)) queued.set(match, new Set());
   queued.get(match)!.add(text);
   if (classifyTimer === undefined) classifyTimer = setTimeout(() => void flushClassify(), CLASSIFY_DELAY_MS);
@@ -88,13 +121,19 @@ async function flushClassify() {
     batches.map(async ([match, texts]) => {
       const all = [...texts];
       for (let start = 0; start < all.length; start += CLASSIFY_BATCH) {
-        const chunk = all.slice(start, start + CLASSIFY_BATCH);
+        const state = usageFor(match);
+        if (state.paused) break;
+        const chunk = all.slice(start, start + Math.min(CLASSIFY_BATCH, Math.max(1, JUDGE_BUDGET - state.judged)));
         chunk.forEach((text) => inFlight.add(verdictKey(match, text)));
         const result = await classifier?.(match, chunk).catch(() => null);
+        // A failed call leaves those items shown instead of queueing them again on every scroll.
         chunk.forEach((text, index) => {
           inFlight.delete(verdictKey(match, text));
-          if (result) verdicts.set(verdictKey(match, text), Boolean(result[index]));
+          verdicts.set(verdictKey(match, text), Boolean(result?.[index]));
         });
+        state.judged += chunk.length;
+        state.matched += result ? result.filter(Boolean).length : 0;
+        pauseIfNeeded(match);
         waiting.get(match)?.forEach((wake) => wake());
       }
     }),
