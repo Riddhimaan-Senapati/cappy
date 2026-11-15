@@ -69,6 +69,7 @@ export class AgentClient {
   private opening: Promise<void> | null = null;
   private nextConnectAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private retrying = false;
   private paintedKey = "";
   private statusWrite: Promise<void> = Promise.resolve();
   private keepAlive: ReturnType<typeof setInterval> | undefined;
@@ -206,10 +207,15 @@ export class AgentClient {
     const wait = Math.max(0, this.nextConnectAt - Date.now());
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      void this.ensureConnected().then(
-        () => this.setStatus({ connected: true, error: undefined }),
-        () => undefined,
-      );
+      this.retrying = true;
+      void this.ensureConnected()
+        .then(
+          () => this.setStatus({ connected: true, error: undefined }),
+          () => undefined,
+        )
+        .finally(() => {
+          this.retrying = false;
+        });
     }, wait);
   }
 
@@ -226,7 +232,8 @@ export class AgentClient {
       let opened = false;
       const rejectOffline = () => {
         this.nextConnectAt = Date.now() + 4000;
-        this.scheduleReconnect();
+        // One retry per failure; a failed retry waits for the next status probe instead of looping forever.
+        if (!this.retrying) this.scheduleReconnect();
         reject(SERVER_OFFLINE);
       };
       const timer = setTimeout(() => {
