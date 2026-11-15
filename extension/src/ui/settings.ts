@@ -490,7 +490,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         profiles(state),
         section(
           "Automatic",
-          toggle("Act on page load", "Fix new pages before you ask", state.proactive, set("proactive")),
+          toggle("Act on page load", "Adapts each new site once, before you ask. Later visits reuse the result", state.proactive, set("proactive")),
           toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
         ),
         section(

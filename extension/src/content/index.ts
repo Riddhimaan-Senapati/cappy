@@ -183,7 +183,8 @@ async function apply(change: Change, source = "Reapplied from page history local
   if (scoped.block?.name === "textScale" && scoped.id !== learnedTextScale.id) {
     await revertChange(learnedTextScale.id, false);
   }
-  const outcome = await applyChange(scoped);
+  // A replayed recipe was verified when the model made it; only live model edits pay for the page scans.
+  const outcome = await applyChange(scoped, true, { verify: !source.startsWith("Saved recipe") });
   const stored = activeChanges().find((active) => active.id === scoped.id);
   if (outcome.ok && stored && !isOneShot(stored.schedule)) {
     await recordApplied(origin, stored);
@@ -290,8 +291,9 @@ async function restore() {
   }
   let restored = 0;
   for (const change of await savedChangesFor(origin, location.pathname)) {
-    if ((await applyChange(change, false)).ok) {
-      restored++;
+    if ((await applyChange(change, false, { pageChecked: true })).ok) {
+      // Counts what this page or site already has; a global change alone still lets the page-load run adapt here.
+      if (change.scope !== "everywhere") restored++;
       recordChange(change.id, "Saved change restored locally (no LLM call)");
     } else recordActivity(`Saved change ${change.id} could not be restored.`);
   }

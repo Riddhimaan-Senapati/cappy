@@ -444,9 +444,20 @@ function observedProblems(
   return Object.values(stats).reduce((sum, count) => sum + count, contrastProblems);
 }
 
-export async function applyChange(change: Change, animate = true): Promise<ApplyOutcome> {
+// Stats stand-in when a saved change is reapplied without verification.
+const UNMEASURED: ApplyOutcome["before"] = { inputsWithoutLabel: 0, smallTargets: 0, smallText: 0, lowContrastText: 0, imagesWithoutAlt: 0, runningAnimations: 0, visibleAdsOrPopups: 0 };
+
+export interface ApplyOptions {
+  // Verification scans the whole page twice per change; a saved change was verified when it was made.
+  verify?: boolean;
+  // The caller already ran the injection check on this page (restore checks once, not once per change).
+  pageChecked?: boolean;
+}
+
+export async function applyChange(change: Change, animate = true, options: ApplyOptions = {}): Promise<ApplyOutcome> {
+  const verify = options.verify ?? animate;
   // Recipe replay and page-load restore call this too, so a trap page is refused before any DOM write.
-  const injection = detectInjectionFields(readInjectionSurface());
+  const injection = options.pageChecked ? null : detectInjectionFields(readInjectionSurface());
   if (injection) {
     const before = computeStats();
     return { ok: false, error: `Blocked: this page tried to instruct the agent (${injection}).`, matched: {}, before, after: before };
@@ -465,9 +476,9 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
   const replaced = competingSorts(change);
   if (replaced.length) await transition(() => replaced.forEach(revertNow), false);
   const previous = applied.get(change.id);
-  const before = computeStats();
+  const before = verify ? computeStats() : UNMEASURED;
   const visual = Boolean(change.css || (change.block && change.block.name !== "stopMotion"));
-  const attempts = animate ? 2 : 1;
+  const attempts = verify ? 2 : 1;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const entry: Applied = { change: { ...change, appliedAt: Date.now() }, live: null };
     const matched: Record<string, number> = {};
@@ -475,15 +486,15 @@ export async function applyChange(change: Change, animate = true): Promise<Apply
     let error: string;
     try {
       const note = await installChange(entry, matched, animate);
-      after = entry.live ? computeStats() : before;
+      after = entry.live && verify ? computeStats() : before;
       const counts = Object.values(matched);
       const missed = !change.block && counts.length > 0 && counts.every((count) => count === 0);
-      const worsened = observedProblems(after, change) > observedProblems(before, change);
-      if (!animate || !entry.live || (!missed && !worsened)) {
+      const worsened = verify && observedProblems(after, change) > observedProblems(before, change);
+      if (!verify || !entry.live || (!missed && !worsened)) {
         return {
           ok: true, matched, before, after, note,
           ...(!entry.live ? { waitingForSchedule: true } : {}),
-          ...(visual && entry.live ? { lowContrast: lowContrastSamples() } : {}),
+          ...(visual && entry.live && verify ? { lowContrast: lowContrastSamples() } : {}),
           ...(replaced.length ? { replaced } : {}),
         };
       }
@@ -563,12 +574,14 @@ export function activeChanges(): ActiveChange[] {
 }
 
 let busyTimer: ReturnType<typeof setTimeout> | undefined;
+// The page-load blur hides a flash of unadapted content, not the whole model run; changes that land later still animate in.
+const BUSY_BLUR_MS = 1500;
 
 export function setBusy(on: boolean) {
   ensureBaseStyle();
   document.documentElement.classList.toggle("ba-busy", on);
   clearTimeout(busyTimer);
-  if (on) busyTimer = setTimeout(() => document.documentElement.classList.remove("ba-busy"), 8000);
+  if (on) busyTimer = setTimeout(() => document.documentElement.classList.remove("ba-busy"), BUSY_BLUR_MS);
 }
 
 export function engineStatus() {
