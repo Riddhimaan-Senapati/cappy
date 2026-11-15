@@ -349,6 +349,7 @@ function ensureOverlay(): OverlayUi {
     },
   });
     onFocusLive((on) => overlay?.setFocus(on));
+    void load().then((state) => overlay?.setTheme(state.uiTheme));
   }
   return overlay;
 }
@@ -411,6 +412,9 @@ async function handle(request: ContentRequest): Promise<unknown> {
       return ensureOverlay().spotlight.toggle();
     case "openSettings":
       return ensureOverlay().spotlight.openSettings();
+    case "resetPage":
+      overlay?.spotlight.hide();
+      return revertAll();
     case "ui": {
       recordRun(request.event);
       const handled = (overlay ?? ensureOverlay()).handleEvent(request.event);
@@ -448,6 +452,7 @@ function start() {
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local" || tornDown) return;
+    if (changes.uiTheme) overlay?.setTheme((changes.uiTheme.newValue as StoredState["uiTheme"] | undefined) ?? "dark");
     if (changes.activeProfileId || changes.configImportedAt) {
       accepted = null;
       suggestionCache.clear();

@@ -51,10 +51,24 @@ export class OverlayUi {
     });
     this.shadow.append(this.fab);
     document.documentElement.append(this.host);
+    this.themeQuery.addEventListener("change", this.paintTheme);
+    this.paintTheme();
     this.bringToFront();
   }
 
   private pointPill: HTMLElement | null = null;
+  private themeQuery = matchMedia("(prefers-color-scheme: light)");
+  private theme: "dark" | "light" | "system" = "dark";
+
+  setTheme(theme: "dark" | "light" | "system") {
+    this.theme = theme;
+    this.paintTheme();
+  }
+
+  private paintTheme = () => {
+    const light = this.theme === "light" || (this.theme === "system" && this.themeQuery.matches);
+    this.host.setAttribute("data-theme", light ? "light" : "dark");
+  };
 
   // The page cannot see into this closed shadow root, so the air pointer asks here before falling through to the page.
   pointAt(x: number, y: number): { covered: boolean; control: HTMLElement | null } {
@@ -62,7 +76,13 @@ export class OverlayUi {
       const rect = element.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     };
-    const covered = [...this.shadow.children].some((child) => child instanceof HTMLElement && contains(child) && getComputedStyle(child).visibility !== "hidden" && getComputedStyle(child).display !== "none");
+    // The bar's layer spans the whole viewport with pointer-events off, so only parts that really take input count.
+    const takesPointer = (element: Element) => {
+      const style = getComputedStyle(element);
+      return style.pointerEvents !== "none" && style.visibility !== "hidden" && style.display !== "none" && Number(style.opacity) > 0.05;
+    };
+    const layers = [...this.shadow.children].flatMap((child) => (child === this.spotlight.layerElement ? [...child.children] : [child]));
+    const covered = layers.some((layer) => contains(layer) && takesPointer(layer));
     if (!covered) return { covered: false, control: null };
     let control: HTMLElement | null = null;
     let area = Infinity;
@@ -245,6 +265,7 @@ export class OverlayUi {
     close.type = "button";
     close.setAttribute("aria-label", "Dismiss");
     const nodes: Node[] = [icon(isError ? "x" : "sparkle", 14), h("span", "msg", text)];
+    const buttons: HTMLButtonElement[] = [];
     if (undoIds.length || onUndo) {
       const undo = h("button", "link", "Undo");
       undo.type = "button";
@@ -253,7 +274,7 @@ export class OverlayUi {
         for (const id of [...undoIds].reverse()) await this.deps.revert(id);
         if (this.toast === toast) this.dismissToast();
       });
-      nodes.push(undo);
+      buttons.push(undo);
     }
     for (const each of action ? [action].flat() : []) {
       const button = h("button", "link", each.label);
@@ -262,11 +283,15 @@ export class OverlayUi {
         this.dismissToast();
         void each.run();
       });
-      nodes.push(button);
+      buttons.push(button);
     }
-    nodes.push(close, ...(sticky ? [] : [h("div", "life")]));
+    // Several choices get their own row so the message keeps its width.
+    const stacked = buttons.length > 1;
+    if (stacked) nodes.push(close, h("div", "acts", "", buttons));
+    else nodes.push(...buttons, close);
+    if (!sticky) nodes.push(h("div", "life"));
 
-    const toast = h("div", `toast${isError ? " error" : ""}`, "", nodes);
+    const toast = h("div", `toast${isError ? " error" : ""}${stacked ? " stack" : ""}`, "", nodes);
     toast.setAttribute("role", "status");
     close.addEventListener("click", () => this.dismissToast());
     this.toast = toast;

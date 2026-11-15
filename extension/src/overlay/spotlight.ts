@@ -110,6 +110,7 @@ function optionDomId(itemId: string, index: number): string {
 
 export class Spotlight {
   private layer = h("div", "sp");
+  readonly layerElement: HTMLElement = this.layer;
   private scrim = h("div", "scrim");
   private bar = h("div", "bar");
   private orb = h("div", "orb");
@@ -565,11 +566,20 @@ export class Spotlight {
     this.deletingProfileId = null;
     this.pickedId = null;
     window.clearTimeout(this.closeTimer);
-    if (this.view === "run" && !this.working) this.setView("list");
+    if (this.view === "run" && (!this.working || this.looksLikeCommand(this.input.value))) this.setView("list");
     if (this.view !== "list") return this.renderHints();
     this.selected = 0;
     this.renderList();
     this.renderHints();
+  }
+
+  // While a request runs or waits in the queue, typing normally adds a follow-up; a command name should still reach the command list.
+  private looksLikeCommand(text: string): boolean {
+    const query = text.trim().toLowerCase();
+    if (query.startsWith("/")) return true;
+    if (query.length < 3) return false;
+    const core = (title: string) => title.toLowerCase().replace(/^(turn (on|off)|undo|open|show|hide)\s+/, "");
+    return this.commands(this.deps.listChanges()).some((item) => item.title.toLowerCase().startsWith(query) || core(item.title).startsWith(query));
   }
 
   private commands(changes: ActiveChange[]): Item[] {
@@ -1667,6 +1677,12 @@ export class Spotlight {
     if (!this.opened || event.isComposing || event.keyCode === 229) return false;
     const { key } = event;
     const focused = this.shadow.activeElement;
+    // Clicking a toggle or tab moves focus off the search field; Backspace should still go back unless it is editing text.
+    const editing = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement || focused instanceof HTMLSelectElement || (focused instanceof HTMLElement && focused.isContentEditable);
+    if (key === "Backspace" && focused && focused !== this.input && !editing && BACK_VIEWS.includes(this.view)) {
+      this.goHome();
+      return true;
+    }
     // Buttons and fields inside the bar handle their own keys (Enter on Undo, typing a command name); only Escape still closes.
     if (focused && focused !== this.input && key !== "Escape") return false;
     if (focused instanceof HTMLInputElement && focused.classList.contains("option-input")) return false;

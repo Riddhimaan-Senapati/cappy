@@ -46,6 +46,7 @@ export type ContentRequest =
   | { kind: "toast"; text: string; undoIds: string[] }
   | { kind: "toggleSpotlight" }
   | { kind: "openSettings" }
+  | { kind: "resetPage" }
   | { kind: "startVoice" }
   | { kind: "targetContextElement" }
   | { kind: "pickElement" }
@@ -81,6 +82,7 @@ export type BackgroundRequest =
   | { kind: "runChat"; message: string; fresh: boolean; interrupt?: boolean; thread?: string; target?: TargetElement }
   | { kind: "deleteRequest"; message: string }
   | { kind: "openWelcome" }
+  | { kind: "resetAll" }
   | ({ kind: "profileAction" } & ProfileAction)
   | { kind: "pageReady"; origin: string; restored: number; profileChanged?: boolean }
   | { kind: "openDebug" }
