@@ -155,7 +155,34 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "adapt-element" && tab?.id) void sendToTab(tab.id, { kind: "targetContextElement" }).catch(() => undefined);
 });
 
+// An unpacked build keeps running old code after `build:ext` rewrites dist, while the server already speaks the new protocol.
+// Reload once the files change and nothing is running; onInstalled then re-injects open tabs.
+async function contentFingerprint(): Promise<string | null> {
+  try {
+    const text = await (await fetch(chrome.runtime.getURL("dist/content.js"), { cache: "no-store" })).text();
+    return `${text.length}:${text.slice(-200)}`;
+  } catch {
+    return null;
+  }
+}
+
+// Session storage outlives the worker going idle but not a reload, so it holds what this build looked like at install.
+async function reloadIfRebuilt() {
+  const current = await contentFingerprint();
+  if (!current) return;
+  const { builtFingerprint } = (await chrome.storage.session.get("builtFingerprint")) as { builtFingerprint?: string };
+  if (!builtFingerprint) return void chrome.storage.session.set({ builtFingerprint: current });
+  if (current !== builtFingerprint && !agent.status.busy) chrome.runtime.reload();
+}
+
+if (!("update_url" in chrome.runtime.getManifest())) {
+  void reloadIfRebuilt();
+  setInterval(() => void reloadIfRebuilt(), 5000);
+}
+
 chrome.runtime.onInstalled.addListener(async ({ reason }) => {
+  const built = await contentFingerprint();
+  if (built) await chrome.storage.session.set({ builtFingerprint: built });
   if (reason === "install" && !(await load()).onboarded) void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
   chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Adaptive Agent", contexts: ["all"] }, () => void chrome.runtime.lastError);
   for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {

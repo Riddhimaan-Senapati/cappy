@@ -194,7 +194,7 @@ export class Spotlight {
     this.grip.title = "Drag to move · double-click to reset";
     this.grip.setAttribute("aria-hidden", "true");
     this.makeMovable();
-    this.bar.append(this.grip, h("div", "row", "", [this.orb, this.focusTag, this.chip, this.input, this.mic, this.pickButton, this.gear, this.home, this.pill]), this.body, this.hints, this.live);
+    this.bar.append(this.grip, this.chip, h("div", "row", "", [this.orb, this.focusTag, this.input, this.mic, this.pickButton, this.gear, this.home, this.pill]), this.body, this.hints, this.live);
     this.layer.append(this.scrim, this.bar);
     shadow.append(this.layer);
 
@@ -337,7 +337,7 @@ export class Spotlight {
       this.render();
       this.input.focus({ preventScroll: true });
     });
-    this.chip.replaceChildren(icon("target", 12), h("span", "", target.label), remove);
+    this.chip.replaceChildren(icon("target", 12), h("small", "", "Selected"), h("span", "", target.label), remove);
     this.chip.title = `Selected: ${target.label}`;
   }
 

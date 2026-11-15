@@ -15,7 +15,6 @@ export const OVERLAY_CSS = `
   font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; flex: none; }
 .focus-tag[hidden] { display: none; }
 .sp.open .bar { opacity: 1; transform: translate(-50%, 0) scale(1); pointer-events: auto; }
-.sp.running .bar { top: 4vh; }
 
 .row { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 8px 0 14px; }
 .orb { position: relative; width: 14px; height: 14px; flex: none; border-radius: 50%; background: var(--grad); box-shadow: 0 0 14px rgba(139, 155, 255, 0.5); }
@@ -31,8 +30,9 @@ export const OVERLAY_CSS = `
 .bar.dragging { transition: none; user-select: none; }
 .bar.dragging .grip { cursor: grabbing; }
 .pick:focus-visible { outline: 2px solid var(--accent); }
-.target-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 45%; height: 24px; padding: 0 4px 0 8px; border-radius: 7px; flex: none;
+.target-chip { display: flex; align-items: center; gap: 6px; max-width: calc(100% - 24px); width: fit-content; box-sizing: border-box; height: 24px; margin: 12px 12px 0; padding: 0 4px 0 8px; border-radius: 7px;
   font-size: 12px; color: var(--accent-text); background: rgba(139, 155, 255, 0.16); border: 1px solid rgba(139, 155, 255, 0.3); animation: fade 0.22s var(--ease); }
+.target-chip small { flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.7; }
 .target-chip[hidden] { display: none; }
 .target-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .target-chip .ico { color: var(--accent); }
