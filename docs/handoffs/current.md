@@ -2,6 +2,8 @@
 
 Start here. `next.md` and `schedule-status.md` describe PR #7 before it merged and are kept for history.
 
+Update: #22, #20, #19 and #21 are merged and issues #14 to #18 are closed. The merges also fixed a broken import in `server/agent/classify.ts` and capped the server reconnect to one retry per failure. `fix/time-rules-focus` adds the time parsing fixes and Focus mode. The "Open issues" and "Open PRs" sections below are history.
+
 State as of 15 Nov 2026: `main` is at `6015376` (PR #23 merged). Four fix PRs are open (#19 to #22) and they close all five open issues (#14 to #18). No new feature work is in flight.
 
 ## What landed on main since the last handoff

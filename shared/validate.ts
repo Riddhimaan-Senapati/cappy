@@ -202,7 +202,9 @@ export function isOneShot(schedule: Change["schedule"]): boolean {
   return Boolean(schedule?.untilAt) && !schedule?.days?.length && schedule?.start == null && schedule?.end == null && schedule?.from == null && schedule?.until == null;
 }
 
-const SPOKEN_SPAN = String.raw`\b(?:(?:for|in)\s+)?(?:the\s+)?(?:next\s+)?\d+\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)\b`;
+const SPOKEN_COUNT = String.raw`(?:\d+(?:\.\d+)?|a couple of|a few|forty[- ]five|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|ninety)`;
+const SPOKEN_UNIT = String.raw`(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)`;
+const SPOKEN_SPAN = String.raw`(?:\b(?:for|next)\s+(?:the\s+)?(?:next\s+)?(?:half\s+an?\s+hour|${SPOKEN_COUNT}\s*${SPOKEN_UNIT}(?:\s+and\s+a\s+half)?)\b|\bfor\s+the\s+next\s+(?:hour|minute)\b|\b(?:until|till)\s+(?:noon|midnight|\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2})(?![\w:]))`;
 const SPOKEN_WINDOW = String.raw`\b(?:between|from)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+(?:and|to)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\b`;
 
 // "hide podcasts for 30 seconds" becomes "hide podcasts". Null when the message has no counted span.

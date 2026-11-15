@@ -289,6 +289,21 @@ export async function shadowButtonVisible(page: Page, label: string): Promise<bo
   }
 }
 
+// True when an element with this class exists in the extension's shadow UI and has no hidden attribute.
+export async function shadowClassShown(page: Page, className: string): Promise<boolean> {
+  const { session, root } = await pierce(page);
+  try {
+    for (const node of walk(root)) {
+      if (node.nodeType !== 1) continue;
+      await ensureAttrs(session, node);
+      if ((attr(node, "class") ?? "").split(/\s+/).includes(className)) return attr(node, "hidden") == null;
+    }
+    return false;
+  } finally {
+    await session.detach();
+  }
+}
+
 export async function shadowTextVisible(page: Page, fragment: string): Promise<boolean> {
   const { session, root } = await pierce(page);
   try {

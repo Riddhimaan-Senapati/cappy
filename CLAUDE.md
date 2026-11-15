@@ -99,7 +99,9 @@ Playbooks for kinds of requests live in `server/skills/*.md` (front matter: `nam
 
 ## Time-based rules
 
-Any change can carry a `schedule` (days, a daily window that may cross midnight, from/until dates, or an absolute `untilAt` instant) in `shared/adaptation.ts`. `isScheduleActive` in `shared/validate.ts` decides whether it is on; the engine keeps scheduled changes registered and switches them every 30 s, on tab focus, and at a short span's end. The server reads the user's words with chrono-node and date-fns (`server/agent/schedule.ts`) and writes that schedule onto `apply_change`, so "for the next 30 seconds, don't show videos" ends at that instant and "ignore podcasts on weekends" is Saturday and Sunday. Combined with `contentFilter` this also covers rules like "hide Shorts on weekdays 9 to 5". Showing the schedule and "on now / off right now" in the UI is PR #7 (`feat/schedule-status`).
+Any change can carry a `schedule` (days, a daily window that may cross midnight, from/until dates, or an absolute `untilAt` instant) in `shared/adaptation.ts`. `isScheduleActive` in `shared/validate.ts` decides whether it is on; the engine keeps scheduled changes registered and switches them every 30 s, on tab focus, and at a short span's end. The server reads the user's words with chrono-node and date-fns (`server/agent/schedule.ts`) and writes that schedule onto `apply_change`, so "for the next 30 seconds, don't show videos" ends at that instant and "ignore podcasts on weekends" is Saturday and Sunday. It also reads "for an hour", "for half an hour" and "until 5pm" as an end instant, and "9 to 5" with no am or pm as 9:00 to 17:00 (an unstated half takes the shorter span; a model reading of the same hours, such as 20:00 to 6:00 for "8 to 6", is kept). Combined with `contentFilter` this also covers rules like "hide Shorts on weekdays 9 to 5". Result cards, change history and Settings show each schedule and whether it is on now.
+
+Focus rules are the scheduled changes, listed in Settings, General, Focus rules. While one is on, the bar shows a Focus tag and the floating button a red ring (`onFocusLive` in `engine.ts`). The Focus mode switch there (`focusMode` in storage) turns every focus rule on, ignoring its times, until it is turned off; the engine's `scheduleOn` checks it before `isScheduleActive`.
 
 ## Repo layout
 
@@ -141,6 +143,9 @@ Load `extension/` unpacked at `chrome://extensions`, then set up a provider from
 
 Done:
 - Plain-language requests install live, with a reason on every change, one Undo for the whole run, pre-blur on page load, and a proactive page-load run from the saved profile.
+- Onboarding: a new install opens `welcome.html` to connect an AI, pick needs (each writes a profile line), try the shortcut and allow the microphone. It is a guided page, not the brief's chat.
+- Named profiles (`/profile`), settings inside the bar with tabs, `/always` commands that run once on each new site, filtering by meaning, custom OpenAI- or Anthropic-compatible providers, and export and import of the config.
+- Time-based focus rules with a Focus indicator and a Focus mode switch that keeps them all on.
 - Building blocks: form fixer (axe-checked), colorblind color fix, text scaling and focus (CSS, content filter, stop motion), and hand-gesture scrolling through camera control. Read-aloud is done as well.
 - Verification: matched counts and before/after accessibility stats on every change, with fix-or-revert. Change history toggles each change on and off.
 - Learning from friction (zoom, misclicks), with consent: every memory asks for a scope, the profile is editable in settings, and the injection trap page is blocked.
@@ -152,7 +157,7 @@ Partly done:
 - First change in about 1.5 s is not measured. Repeat requests and saved changes skip the model.
 
 Not started:
-- One-minute onboarding chat that builds the first profile.
+- A conversational onboarding chat (the guided setup page covers the same ground).
 - Approval before an "everywhere" change runs on a site for the first time (the brief asks for one click per new site).
 - Stretch blocks: Sentient OS connector (`server/agent/memory.ts` is the integration point), MongoDB adaptation library, Tiger Data friction dashboard, audio balance, flash calming, alt-text writer, Grok Bot QA.
 - Rehearsal on the brief's demo sites (W3C survey and tickets, Mars Commuter, GOV.UK forms, Silktide, Our World in Data), backup video, domain and Devpost write-up.

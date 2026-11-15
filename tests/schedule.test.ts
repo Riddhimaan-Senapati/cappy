@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { addHours, addSeconds } from "date-fns";
 import { describeSchedule, isOneShot, isScheduleActive, lastingRequest } from "../shared/validate.js";
 import type { Change } from "../shared/adaptation.js";
-import { parseSpokenSchedule } from "../server/agent/schedule.js";
+import { parseSpokenSchedule, withSpokenSchedule } from "../server/agent/schedule.js";
 
 type Schedule = NonNullable<Change["schedule"]>;
 const at = (y: number, mo: number, d: number, h: number, m = 0, s = 0) => new Date(y, mo - 1, d, h, m, s);
@@ -163,10 +163,52 @@ describe("parseSpokenSchedule", () => {
     assert.equal(isScheduleActive(schedule, end), false, "the end instant");
   });
 
-  it("treats a unit with no count as no time", () => {
-    assert.equal(parseSpokenSchedule("for a minute", now), null);
-    assert.equal(parseSpokenSchedule("don't show videos for a minute", now), null);
-    assert.equal(parseSpokenSchedule("for an hour", now), null);
+  it("reads spans written in words, so they still end", () => {
+    const end = (message: string) => parseSpokenSchedule(message, now)?.untilAt ?? null;
+    assert.equal(end("don't show videos for a minute"), addSeconds(now, 60).toISOString());
+    assert.equal(end("hide videos for an hour"), addHours(now, 1).toISOString());
+    assert.equal(end("hide videos for the next hour"), addHours(now, 1).toISOString());
+    assert.equal(end("dim the page for half an hour"), addSeconds(now, 1800).toISOString());
+    assert.equal(end("hide videos for an hour and a half"), addSeconds(now, 5400).toISOString());
+    assert.equal(end("hide 5 minute videos"), null);
+  });
+
+  it("turns until a clock time into the next time that clock comes round", () => {
+    assert.equal(parseSpokenSchedule("hide videos until 5pm", now)?.untilAt, at(2026, 11, 14, 17).toISOString());
+    assert.equal(parseSpokenSchedule("hide videos until noon", now)?.untilAt, at(2026, 11, 15, 12).toISOString());
+    assert.equal(parseSpokenSchedule("hide videos until December 15", now), null);
+  });
+
+  it("reads 9 to 5 as a working day, not 9 to 5 in the morning", () => {
+    const window = (message: string) => {
+      const schedule = parseSpokenSchedule(message, now);
+      return [schedule?.start ?? null, schedule?.end ?? null];
+    };
+    assert.deepEqual(window("hide shorts on weekdays from 9 to 5"), ["09:00", "17:00"]);
+    assert.deepEqual(window("hide shorts on weekdays 9 to 5"), ["09:00", "17:00"]);
+    assert.deepEqual(window("hide shorts weekdays 9-5"), ["09:00", "17:00"]);
+    assert.deepEqual(window("hide shorts from 1 to 3"), ["13:00", "15:00"]);
+    assert.deepEqual(window("dark mode from 9pm to 6"), ["21:00", "06:00"]);
+    assert.deepEqual(window("dark mode from 8pm to 6am"), ["20:00", "06:00"]);
+    assert.deepEqual(window("hide twitter 9am-5pm"), ["09:00", "17:00"]);
+    assert.deepEqual(window("hide twitter from 09:00 to 17:00"), ["09:00", "17:00"]);
+    assert.equal(parseSpokenSchedule("make it 2-3 px bigger", now), null);
+    assert.equal(parseSpokenSchedule("make text 2 to 3 times bigger", now), null);
+  });
+});
+
+describe("withSpokenSchedule", () => {
+  const now = at(2026, 11, 14, 16, 33, 0);
+  const base: Change = { id: "dark", summary: "Dark mode", reason: "asked", css: "", dom: [], block: null, scope: "site" };
+
+  it("keeps the model's overnight reading when the user gave no am or pm", () => {
+    const change = withSpokenSchedule({ ...base, schedule: { start: "20:00", end: "06:00" } }, "dark mode from 8 to 6", now);
+    assert.deepEqual([change.schedule?.start, change.schedule?.end], ["20:00", "06:00"]);
+  });
+
+  it("fixes a model clock that disagrees with the user's hours", () => {
+    const change = withSpokenSchedule({ ...base, schedule: { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "05:00" } }, "hide shorts weekdays 9 to 5pm", now);
+    assert.deepEqual([change.schedule?.start, change.schedule?.end], ["09:00", "17:00"]);
   });
 });
 

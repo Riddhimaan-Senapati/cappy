@@ -2,7 +2,7 @@ import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
 import { DEFAULTS, forgetStoredChange, load, save, type StoredState } from "../storage.js";
-import { isScheduleActive, scheduleStatus, scopeLabel } from "../../../shared/validate.js";
+import { describeSchedule, isScheduleActive, scheduleStatus, scopeLabel } from "../../../shared/validate.js";
 import { h } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 import { createProfilesView } from "./profiles.js";
@@ -374,10 +374,11 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
               where = host;
             }
           }
-          const on = change.schedule != null && isScheduleActive(change.schedule, new Date());
+          const on = state.focusMode || (change.schedule != null && isScheduleActive(change.schedule, new Date()));
+          const when = state.focusMode ? `${describeSchedule(change.schedule) ?? ""} · on now, Focus mode` : scheduleStatus(change.schedule) ?? "";
           return h("div", `s-change${on ? " on" : ""}`, "", [
             h("div", "top", "", [h("b", "", change.summary), h("span", "s-tag", where), remove]),
-            h("div", "why", scheduleStatus(change.schedule) ?? ""),
+            h("div", "why", when),
           ]);
         })
       : [h("div", "s-empty", "No focus rules yet. Ask to hide clutter during work or study, such as Shorts on weekdays 9 to 5.")];
@@ -492,7 +493,12 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           toggle("Act on page load", "Fix new pages before you ask", state.proactive, set("proactive")),
           toggle("Floating button", "Opens the bar with a click", state.floatingButton, set("floatingButton")),
         ),
-        section("Focus rules", ...focusRows),
+        section(
+          "Focus rules",
+          h("div", "s-note", "Time-based rules that hide clutter while you study or work. They turn on and off with the clock, and the bar shows Focus while one is on."),
+          toggle("Focus mode", "Turns on every focus rule now, ignoring its times, until you turn this off", state.focusMode, set("focusMode")),
+          ...focusRows,
+        ),
         section(`On this page${changes.length ? ` · ${changes.length}` : ""}`, ...changeRows),
       ],
       memory: () => [
