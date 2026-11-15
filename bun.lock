@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "browser-agent",
+      "name": "cappy",
       "dependencies": {
         "@ai-sdk/anthropic": "^4.0.105",
         "@ai-sdk/openai-compatible": "^3.0.92",

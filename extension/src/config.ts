@@ -52,18 +52,19 @@ const settings = profile.extend({
   && Object.entries(value.profiles).every(([id, entry]) => id === value.activeProfileId || entry.state),
 "Invalid profiles");
 
-const config = z.object({ format: z.literal("browser-agent-config"), version: z.literal(1), settings });
+// Files exported before the rename to Cappy say "browser-agent-config" and still import.
+const config = z.object({ format: z.enum(["cappy-config", "browser-agent-config"]), version: z.literal(1), settings });
 export type ImportedConfig = z.infer<typeof settings>;
 
 export async function exportConfig(): Promise<string> {
-  return JSON.stringify({ format: "browser-agent-config", version: 1, settings: settings.parse(await load()) }, null, 2);
+  return JSON.stringify({ format: "cappy-config", version: 1, settings: settings.parse(await load()) }, null, 2);
 }
 
 export function parseConfig(text: string): ImportedConfig {
   try {
     return config.parse(JSON.parse(text)).settings;
   } catch {
-    throw new Error("Invalid config file. Choose a JSON file exported by Browser Agent (version 1).");
+    throw new Error("Invalid config file. Choose a JSON file exported by Cappy (version 1).");
   }
 }
 

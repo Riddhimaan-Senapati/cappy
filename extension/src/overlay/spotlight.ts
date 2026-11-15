@@ -159,7 +159,7 @@ export class Spotlight {
     private onPointStatus: (status: { text: string; label?: string; countdown?: number | null } | null) => void = () => undefined,
   ) {
     this.bar.setAttribute("role", "dialog");
-    this.bar.setAttribute("aria-label", "Adaptive agent");
+    this.bar.setAttribute("aria-label", "Cappy");
     this.bar.setAttribute("aria-modal", "true");
     this.input.setAttribute("role", "combobox");
     this.input.setAttribute("aria-label", "Ask the agent, or type / for commands");
@@ -215,7 +215,7 @@ export class Spotlight {
   setFocus(on: boolean) {
     this.bar.classList.toggle("focus", on);
     this.focusTag.hidden = !on;
-    this.bar.setAttribute("aria-label", on ? "Adaptive agent, focus is on" : "Adaptive agent");
+    this.bar.setAttribute("aria-label", on ? "Cappy, focus is on" : "Cappy");
   }
 
   private onStorage = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {

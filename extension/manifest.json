@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Adaptive Browser Agent",
+  "name": "Cappy",
   "version": "0.2.0",
   "description": "Adapts every website to your needs. Press the shortcut on any page and say what you need.",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "storage", "tabs", "activeTab", "scripting", "tts", "offscreen", "contextMenus"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "dist/background.js", "type": "module" },
-  "action": { "default_title": "Adaptive Agent" },
+  "action": { "default_title": "Cappy" },
   "side_panel": { "default_path": "sidepanel.html" },
   "commands": {
     "toggle-spotlight": {
@@ -15,11 +15,11 @@
         "default": "Ctrl+Shift+Space",
         "mac": "Command+Shift+Space"
       },
-      "description": "Open the adaptive agent bar"
+      "description": "Open the Cappy bar"
     },
     "start-voice": {
       "suggested_key": { "default": "Alt+Shift+M" },
-      "description": "Open the adaptive agent bar and start voice input"
+      "description": "Open the Cappy bar and start voice input"
     },
     "open-debug": {
       "suggested_key": {

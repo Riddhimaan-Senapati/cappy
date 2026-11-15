@@ -137,7 +137,7 @@ async function flagUnavailable(tabId: number) {
   await chrome.action.setTitle({ tabId, title: "The bar can't open on this page. Chrome blocks extensions here." }).catch(() => undefined);
   setTimeout(() => {
     void chrome.action.setBadgeText({ tabId, text: "" }).catch(() => undefined);
-    void chrome.action.setTitle({ tabId, title: "Adaptive Agent" }).catch(() => undefined);
+    void chrome.action.setTitle({ tabId, title: "Cappy" }).catch(() => undefined);
   }, 4000);
 }
 
@@ -189,7 +189,7 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   const built = await contentFingerprint();
   if (built) await chrome.storage.session.set({ builtFingerprint: built });
   if (reason === "install" && !(await load()).onboarded) void chrome.tabs.create({ url: chrome.runtime.getURL("welcome.html") });
-  chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Adaptive Agent", contexts: ["all"] }, () => void chrome.runtime.lastError);
+  chrome.contextMenus.create({ id: "adapt-element", title: "Adapt this with Cappy", contexts: ["all"] }, () => void chrome.runtime.lastError);
   for (const tab of await chrome.tabs.query({ url: ["http://*/*", "https://*/*"] })) {
     if (tab.id) void injectContent(tab.id).catch(() => undefined);
   }

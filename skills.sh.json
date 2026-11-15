@@ -4,8 +4,8 @@
   "groupings": [
     {
       "title": "Setup",
-      "description": "Install and run the browser-agent extension and its local server.",
-      "skills": ["install-browser-agent"]
+      "description": "Install and run the Cappy extension and its local server.",
+      "skills": ["install-cappy"]
     }
   ]
 }

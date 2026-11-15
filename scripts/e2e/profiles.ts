@@ -81,7 +81,7 @@ try {
   await waitFor("profile commands", () => shadowTextVisible(page, "New profile"));
   assert.equal(await shadowTextVisible(page, "Select profile: Default"), true);
   assert.equal(await shadowTextVisible(page, "New Gaming profile"), false);
-  await page.screenshot({ path: "/tmp/browser-agent-profile-command.png" });
+  await page.screenshot({ path: "/tmp/cappy-profile-command.png" });
   await typeCommand("/profile new Personal", true);
   await waitFor("slash command creates profile", () => panel.evaluate(async () => {
     const state = await chrome.storage.local.get(["profiles", "activeProfileId", "profile", "globalChanges", "siteChanges"]) as StoredState;
