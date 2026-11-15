@@ -3,6 +3,7 @@ import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot, isScheduleActive, savedChangeOnThisPage, validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
 import { applyBlock } from "./blocks.js";
+import { keywordPattern, leftovers } from "./content-filter.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
 import { computeStats, lowContrastSamples, readInjectionSurface } from "./outline.js";
 import { isSiteControlInput, siteControlId, useSiteControl } from "./site-controls.js";
@@ -170,6 +171,7 @@ function materialize(change: Change, matched: Record<string, number>): Live {
       if (block.note) live.note = block.note;
       if (block.matched && change.block.name === "contentFilter") {
         matched[`contentFilter ${change.block.itemSelector ?? "all item groups"}`] = block.matched();
+        if (change.block.action === "hide") matched["contentFilter still showing"] = leftovers(document, keywordPattern(change.block.keywords));
       }
       if (block.matched && change.block.name === "formFixer") matched.formFixer = block.matched();
     }

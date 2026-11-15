@@ -13,7 +13,7 @@ import { load, recordApplied, recordReverted, save, savedChangesFor, type Stored
 import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
-import { setFilterClassifier, setFilterPauseNotice } from "./content-filter.js";
+import { setFilterClassifier, setFilterPauseNotice, setLeftoverListener } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
@@ -442,6 +442,20 @@ const LOADED_FLAG = "__adaptiveAgentLoaded";
 
 function start() {
   setFilterClassifier((match, items) => send({ kind: "classify", match, items }) as Promise<boolean[] | null>);
+  // A filter that said it hid something but left matches on screen says so, once per rule per page.
+  const toldLeftovers = new Set<string>();
+  setLeftoverListener((filter, count) => {
+    const change = activeChanges().find((active) => active.block?.name === "contentFilter" && active.block.keywords.join() === filter.keywords.join());
+    const name = change?.summary ?? `Hide ${filter.keywords.join(", ")}`;
+    const key = `${change?.id ?? filter.keywords.join()}|${location.href}`;
+    if (toldLeftovers.has(key)) return;
+    toldLeftovers.add(key);
+    recordActivity(`${name}: ${count} still showing on this page.`);
+    ensureOverlay().showToast(`${name}: ${count} still showing here.`, [], false, undefined, {
+      label: "Fix it",
+      run: async () => void send({ kind: "runChat", message: `${name} missed ${count} on this page. Hide the rest of the ${filter.keywords.join(", ")} here too.`, fresh: false }),
+    });
+  });
   setFilterPauseNotice((match, reason, judged, resume) => {
     const text = reason === "mostly"
       ? `Most of this page matches "${match}", so I stopped checking new items to save AI usage. Keyword matches still hide.`

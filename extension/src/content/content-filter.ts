@@ -42,6 +42,18 @@ function release(el: HTMLElement, holder: object): void {
 
 export type Classifier = (match: string, items: string[]) => Promise<boolean[] | null>;
 
+// Called when a filter has settled and keyword matches are still visible, so a claim like "hid Shorts" can be checked on every page.
+export type LeftoverListener = (filter: Filter, count: number) => void;
+let leftoverListener: LeftoverListener | null = null;
+export const LEFTOVER_SETTLE_MS = 1_500;
+const LEFTOVER_SCAN_MAX = 400;
+// Site chrome the filter leaves alone on purpose: menus, tabs, search and bars that stay on screen.
+const CHROME = "nav, header, footer, aside, form, button, [role=navigation], [role=tablist], [role=tab], [role=menu], [role=menubar], [role=banner], [role=search], [role=button]";
+
+export function setLeftoverListener(next: LeftoverListener | null) {
+  leftoverListener = next;
+}
+
 const CLASSIFY_BATCH = 40;
 const CLASSIFY_DELAY_MS = 250;
 let classifier: Classifier | null = null;
@@ -149,11 +161,20 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const matches = (el: HTMLElement) => pattern.test(searchableText(el)) || (match !== null && verdictFor(match, el) === true);
   let groupsAt = Number.NEGATIVE_INFINITY;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let leftoverTimer: ReturnType<typeof setTimeout> | undefined;
   let undone = false;
+
+  const checkLeftovers = (): void => {
+    leftoverTimer = undefined;
+    if (undone || !leftoverListener) return;
+    const count = leftovers(doc, pattern);
+    if (count > 0) leftoverListener(filter, count);
+  };
 
   // Groups seen once stay in the set: a group whose items are all hidden no longer looks like a group, and would otherwise be un-hidden.
   const selectorsToCheck = (): string[] => {
-    if (filter.itemSelector) return [filter.itemSelector];
+    // A selector saved on one page of a site (a home feed card) may not exist on another (search results); then fall back to the page's own groups.
+    if (filter.itemSelector && queryItems(doc, filter.itemSelector).length > 0) return [filter.itemSelector];
     const now = Date.now();
     if (now - groupsAt >= GROUP_REFRESH_MS) {
       groupsAt = now;
@@ -165,7 +186,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const pass = (): void => {
     if (undone) return;
     const desired = new Map<HTMLElement, Action>();
-    for (const el of targets(doc, selectorsToCheck(), matches)) desired.set(el, filter.action);
+    for (const el of targets(doc, selectorsToCheck(), matches, (el) => pattern.test(el.textContent?.toLowerCase() ?? ""))) desired.set(el, filter.action);
 
     for (const el of Array.from(held.keys())) {
       if (desired.has(el)) continue;
@@ -176,6 +197,10 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
       if (held.has(el)) continue;
       claim(el, holder, action);
       held.set(el, action);
+    }
+    if (filter.action === "hide" && leftoverListener) {
+      clearTimeout(leftoverTimer);
+      leftoverTimer = setTimeout(checkLeftovers, LEFTOVER_SETTLE_MS);
     }
   };
 
@@ -201,6 +226,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
     undone = true;
     if (match) waiting.get(match)?.delete(schedulePass);
     observer.disconnect();
+    clearTimeout(leftoverTimer);
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     for (const el of held.keys()) release(el, holder);
@@ -210,40 +236,92 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   return { undo, matched: () => held.size };
 }
 
+// Links that still name the filtered thing ("/shorts/abc", "Podcasts") and are on screen, outside site chrome.
+export function leftovers(doc: Document, pattern: RegExp): number {
+  let count = 0;
+  const links = Array.from(doc.querySelectorAll<HTMLElement>("a[href]")).slice(0, LEFTOVER_SCAN_MAX * 5);
+  for (const link of links) {
+    if (isOwn(link) || link.closest(CHROME)) continue;
+    const text = `${link.getAttribute("href") ?? ""} ${link.getAttribute("aria-label") ?? ""} ${link.textContent ?? ""}`.toLowerCase();
+    if (!pattern.test(text) || !shown(link) || pinned(link)) continue;
+    count++;
+    if (count >= LEFTOVER_SCAN_MAX) break;
+  }
+  return count;
+}
+
+function shown(el: HTMLElement): boolean {
+  const check = (el as HTMLElement & { checkVisibility?: () => boolean }).checkVisibility;
+  if (typeof check === "function") return check.call(el);
+  for (let a: HTMLElement | null = el; a; a = a.parentElement) if (a.style.display === "none") return false;
+  return true;
+}
+
+// Fixed and sticky bars are site chrome such as a side menu, which the filter leaves in place.
+function pinned(el: HTMLElement): boolean {
+  const view = el.ownerDocument.defaultView;
+  if (!view) return false;
+  for (let a: HTMLElement | null = el.parentElement; a && a !== el.ownerDocument.body; a = a.parentElement) {
+    const position = view.getComputedStyle(a).position;
+    if (position === "fixed" || position === "sticky") return true;
+  }
+  return false;
+}
+
+const HEADING = "h1, h2, h3, h4, [role=heading], #title";
+const PAGE_REGION = "main, [role=main], #content, #primary";
+
 // A keyword hit on an item also matches every container around it, since text is inherited, so a
-// selector like "div" would hide the whole page. Containers holding unmatched members of the same
-// selector are skipped, and only the outermost hit is hidden, so a card goes as one unit.
-function targets(doc: Document, selectors: readonly string[], matches: (el: HTMLElement) => boolean): HTMLElement[] {
+// selector like "div" would hide the whole page. A container holding any unmatched item (from any
+// selector) is skipped, and only the outermost hit is hidden, so a card goes as one unit.
+// A shelf whose own heading matches ("Podcasts", "Shorts") is about that topic and goes whole, heading included.
+// Nothing that holds the page's main region is ever hidden.
+function targets(doc: Document, selectors: readonly string[], matches: (el: HTMLElement) => boolean, headingMatches: (el: HTMLElement) => boolean): HTMLElement[] {
+  const items = new Set<HTMLElement>();
+  for (const selector of selectors) for (const el of queryItems(doc, selector)) items.add(el);
+
   const hits: HTMLElement[] = [];
-  const missesAbove = new Map<HTMLElement, Set<string>>();
-  const hitsAbove = new Map<HTMLElement, Set<string>>();
-  for (const selector of selectors) {
-    for (const el of queryItems(doc, selector)) {
-      const matched = matches(el);
-      if (matched) hits.push(el);
-      const table = matched ? hitsAbove : missesAbove;
-      for (let a = el.parentElement; a; a = a.parentElement) {
-        let set = table.get(a);
-        if (!set) {
-          set = new Set();
-          table.set(a, set);
-        }
-        set.add(selector);
-      }
+  const titled = new Set<HTMLElement>();
+  const holdsMiss = new Set<HTMLElement>();
+  for (const el of items) {
+    const heading = ownHeading(el, items);
+    const named = heading !== null && headingMatches(heading);
+    if (named) titled.add(el);
+    if (named || matches(el)) {
+      hits.push(el);
+      continue;
     }
+    for (let a = el.parentElement; a; a = a.parentElement) holdsMiss.add(a);
   }
 
+  const region = doc.querySelector(PAGE_REGION);
   const candidates = new Set<HTMLElement>();
   for (const el of hits) {
-    const misses = missesAbove.get(el);
-    const contained = hitsAbove.get(el);
-    const mixed = misses !== undefined && contained !== undefined && [...misses].some((s) => contained.has(s));
-    if (!mixed) candidates.add(el);
+    if (region && el.contains(region)) continue;
+    // A matching heading names a shelf, not a whole result list: one holding most of the page's items stays.
+    if (holdsMiss.has(el) && !(titled.has(el) && share(el, items) <= 0.5)) continue;
+    candidates.add(el);
   }
   return [...candidates].filter((el) => {
     for (let a = el.parentElement; a; a = a.parentElement) if (candidates.has(a)) return false;
     return true;
   });
+}
+
+function share(el: HTMLElement, items: ReadonlySet<HTMLElement>): number {
+  let inside = 0;
+  for (const item of items) if (item !== el && el.contains(item)) inside++;
+  return items.size ? inside / items.size : 0;
+}
+
+// The first heading that belongs to this element rather than to an item nested inside it.
+function ownHeading(el: HTMLElement, items: ReadonlySet<HTMLElement>): HTMLElement | null {
+  for (const heading of Array.from(el.querySelectorAll<HTMLElement>(HEADING))) {
+    let owner: HTMLElement | null = heading.parentElement;
+    while (owner && owner !== el && !items.has(owner)) owner = owner.parentElement;
+    if (owner === el) return heading;
+  }
+  return null;
 }
 
 function queryItems(doc: Document, selector: string): HTMLElement[] {
@@ -290,6 +368,8 @@ export function searchableText(el: HTMLElement): string {
   if (aria) parts.push(aria);
   const own = el.getAttribute("title");
   if (own) parts.push(own);
+  // An item that is itself a link ("a[href*='/shorts/']" groups) is named by its own address.
+  if (el.localName === "a") parts.push(el.getAttribute("href") ?? "");
   for (const node of Array.from(el.querySelectorAll("[title], a[href]"))) {
     const title = node.getAttribute("title");
     if (title) parts.push(title);
