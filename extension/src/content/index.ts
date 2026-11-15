@@ -11,7 +11,7 @@ import { LARGER_TEXT, learnedTextScale } from "../zoom-preference.js";
 import { OverlayUi } from "../overlay/ui.js";
 import { load, recordApplied, recordReverted, save, savedChangesFor, type StoredState } from "../storage.js";
 import { detectInjectionFields } from "../../../shared/safety.js";
-import { isOneShot } from "../../../shared/validate.js";
+import { dropsOnRouteChange, isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
 import { setFilterClassifier, setFilterPauseNotice, setLeftoverListener } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
@@ -317,8 +317,7 @@ async function resyncSaved() {
   const wanted = await savedChangesFor(origin, location.pathname);
   const wantedIds = new Set(wanted.map((change) => change.id));
   for (const change of activeChanges()) {
-    if (change.id.startsWith("site-control-") || change.id === learnedTextScale.id) continue;
-    if (!wantedIds.has(change.id)) await revertChange(change.id, false);
+    if (dropsOnRouteChange(change, wantedIds, learnedTextScale.id)) await revertChange(change.id, false);
   }
   for (const change of wanted) {
     if (activeChanges().some((active) => active.id === change.id)) continue;

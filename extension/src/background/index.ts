@@ -5,6 +5,7 @@ import { load, recordRequestSession, recordSubmittedRequest, removeSubmittedRequ
 import { lastingRequest } from "../../../shared/validate.js";
 import { settle } from "../coalesce.js";
 import { AgentClient, sendToTab } from "./agent.js";
+import { ProactiveClaims } from "./proactive-claims.js";
 import { handleVoiceRequest } from "./voice.js";
 import { registerFriction } from "./friction.js";
 import { registerTts } from "./tts.js";
@@ -28,11 +29,13 @@ const agent = new AgentClient({
       const request = sessionRequests.get(event.runId);
       if (request) request.options = { question: event.question, options: event.options };
     }
-    if ((event.type === "done" && event.trigger === "page_load") || event.type === "error" || event.type === "cancelled") {
-      const checked = proactivePending.get(tabId);
-      if (checked && event.type === "done" && event.trigger === "page_load") void markChecked(checked).finally(() => checksInFlight.delete(checked));
-      else if (checked) checksInFlight.delete(checked);
-      proactivePending.delete(tabId);
+    if (event.type === "start" && event.trigger === "page_load") proactive.noteStart(tabId, event.runId);
+    if (event.type === "done" && event.trigger === "page_load") {
+      const checked = proactive.finish(tabId, event.runId);
+      if (checked) void markChecked(checked).finally(() => proactive.drop(checked));
+    } else if (event.type === "error" || event.type === "cancelled") {
+      const checked = proactive.finish(tabId, event.runId);
+      if (checked) proactive.drop(checked);
     }
     if (event.type === "done" || event.type === "error") {
       const message = sessionRequests.get(event.runId);
@@ -210,10 +213,8 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
 });
 
 const CHECKED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
-// Tab id to the site and profile its page-load run is checking; saved as checked once that run finishes.
-const proactivePending = new Map<number, string>();
-// Origin+profile keys whose check has started but not finished. Two tabs must not both call the model.
-const checksInFlight = new Set<string>();
+// Origin+profile keys whose page-load check has started but not finished. Two tabs must not both call the model.
+const proactive = new ProactiveClaims();
 
 const checkedKey = (state: { activeProfileId: string; profile: string[] }, origin: string) => JSON.stringify([state.activeProfileId, origin, state.profile]);
 
@@ -251,32 +252,29 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
     return;
   }
   const checked = checkedKey(state, origin);
-  if (checksInFlight.has(checked)) {
+  if (!proactive.begin(tabId, checked)) {
     await note("Automatic page adaptation skipped: another tab is already checking this site.");
     return;
   }
-  checksInFlight.add(checked);
   if (!profileChanged && (await checkedRecently(checked))) {
-    checksInFlight.delete(checked);
+    proactive.release(tabId, checked);
     await note("Automatic page adaptation skipped: this profile already checked this site in the last week.");
     return;
   }
   // Asking first costs nothing until the user accepts; the offer counts as this week's check so it does not repeat on every visit.
   if (state.askBeforeAdapting && !profileChanged) {
     await markChecked(checked);
-    checksInFlight.delete(checked);
+    proactive.release(tabId, checked);
     await sendToTab(tabId, { kind: "offerAdapt" }).catch(() => undefined);
     await note("Offered to adapt this page instead of adapting it automatically.");
     return;
   }
-  proactivePending.set(tabId, checked);
-  if (await agent.startRun(tab, "page_load", "")) {
+  if ((await agent.startRun(tab, "page_load", "")) === "started") {
     await note("Automatic page adaptation started: enabled, profile present, no saved site adaptation, first check for this site and profile in this tab.");
     const { proactiveSeen: seen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
     await chrome.storage.session.set({ proactiveSeen: [...seen.filter((entry) => entry !== key).slice(-100), key] });
   } else {
-    proactivePending.delete(tabId);
-    checksInFlight.delete(checked);
+    proactive.release(tabId, checked);
   }
 }
 

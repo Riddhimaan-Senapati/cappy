@@ -206,6 +206,13 @@ export function isOneShot(schedule: Change["schedule"]): boolean {
   return Boolean(schedule?.untilAt) && !schedule?.days?.length && schedule?.start == null && schedule?.end == null && schedule?.from == null && schedule?.until == null;
 }
 
+// In-page navigation drops saved rules that do not belong on the new path. A one-shot is not saved, so it stays until its time ends.
+export function dropsOnRouteChange(change: { id: string; schedule?: Change["schedule"] }, wantedIds: ReadonlySet<string>, learnedId: string): boolean {
+  if (change.id.startsWith("site-control-") || change.id === learnedId) return false;
+  if (isOneShot(change.schedule)) return false;
+  return !wantedIds.has(change.id);
+}
+
 const SPOKEN_COUNT = String.raw`(?:\d+(?:\.\d+)?|a couple of|a few|forty[- ]five|an?|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|ninety)`;
 const SPOKEN_UNIT = String.raw`(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)`;
 const SPOKEN_SPAN = String.raw`(?:\b(?:for|next)\s+(?:the\s+)?(?:next\s+)?(?:half\s+an?\s+hour|${SPOKEN_COUNT}\s*${SPOKEN_UNIT}(?:\s+and\s+a\s+half)?)\b|\bfor\s+the\s+next\s+(?:hour|minute)\b|\b(?:until|till)\s+(?:noon|midnight|\d{1,2}(?::\d{2})?\s*(?:am|pm)|\d{1,2}:\d{2})(?![\w:]))`;

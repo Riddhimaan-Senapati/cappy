@@ -142,10 +142,11 @@ function liveOp(op: DomOp): LiveOp {
     }
     if (op.op === "reorder") {
       // A tile that loads later is the only node in the reapply root, so pull in its matching siblings.
+      // Walk each parent once; scanning every child for every item is quadratic on a large grid.
+      const parents = new Set<Element>();
+      for (const item of elements) if (item.parentElement) parents.add(item.parentElement);
       const withSiblings = new Set(elements);
-      for (const item of elements) {
-        const parent = item.parentElement;
-        if (!parent) continue;
+      for (const parent of parents) {
         for (const child of parent.children) {
           if (child.matches(op.selector)) withSiblings.add(child);
         }
@@ -202,10 +203,20 @@ export function keyText(item: Element, keySelector: string | null) {
 
 function compareKeys(op: Extract<DomOp, { op: "reorder" }>) {
   const direction = op.direction === "asc" ? 1 : -1;
-  if (!op.ranking) return (a: Element, b: Element) => collator.compare(keyText(a, op.keySelector), keyText(b, op.keySelector)) * direction;
-  const ranks = new Map(op.ranking.map((entry) => [entry.key.replace(/\s+/g, " ").trim().toLowerCase(), entry.rank]));
-  const front = Math.min(...op.ranking.map((entry) => entry.rank));
   const promoted = op.keywords?.length ? keywordPattern(op.keywords) : null;
+  const ranking = op.ranking?.length ? op.ranking : null;
+  if (!ranking) {
+    return (a: Element, b: Element) => {
+      if (promoted) {
+        const left = promoted.test(keyText(a, op.keySelector)) ? 0 : 1;
+        const right = promoted.test(keyText(b, op.keySelector)) ? 0 : 1;
+        if (left !== right) return left - right;
+      }
+      return collator.compare(keyText(a, op.keySelector), keyText(b, op.keySelector)) * direction;
+    };
+  }
+  const ranks = new Map(ranking.map((entry) => [entry.key.replace(/\s+/g, " ").trim().toLowerCase(), entry.rank]));
+  const front = Math.min(...ranking.map((entry) => entry.rank));
   const rankOf = (item: Element) => {
     const listed = ranks.get(keyText(item, op.keySelector).toLowerCase());
     if (listed !== undefined) return listed;
