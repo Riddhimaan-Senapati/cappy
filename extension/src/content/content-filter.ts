@@ -101,22 +101,113 @@ function pauseIfNeeded(match: string) {
 }
 
 const verdictKey = (match: string, text: string) => `${match}\u0000${text}`;
+const CACHE_MATCHES = 8;
+const CACHE_TEXTS = 300;
+const CACHE_KEY = "classifyCache";
+
+export function classifyTextKey(text: string): string {
+  return text.replace(/\s+/g, " ").trim().toLowerCase().slice(0, 240);
+}
+
+type SiteVerdicts = Record<string, Record<string, boolean>>;
+type ClassifyCacheFile = Record<string, SiteVerdicts>;
+
+let cacheHost = "";
+let cacheReady = true;
+let cacheWrite: ReturnType<typeof setTimeout> | undefined;
+const cacheWaiters = new Set<() => void>();
+const siteVerdicts: SiteVerdicts = {};
+
+function storageArea(): { get: (key: string) => Promise<Record<string, unknown>>; set: (value: Record<string, unknown>) => Promise<void> } | undefined {
+  const chromeApi = (globalThis as { chrome?: typeof chrome }).chrome;
+  const area = chromeApi?.storage?.local;
+  if (!area) return undefined;
+  return area;
+}
+
+// Saved verdicts are per site, so a reload or a new tab does not ask the model about items it already judged.
+export function beginClassifyCache(host: string): Promise<void> {
+  cacheHost = host;
+  const area = storageArea();
+  if (!area || !host) return Promise.resolve();
+  cacheReady = false;
+  return area.get(CACHE_KEY).then((stored) => {
+    const file = (stored[CACHE_KEY] ?? {}) as ClassifyCacheFile;
+    const site = file[host] ?? {};
+    for (const [match, rows] of Object.entries(site)) {
+      siteVerdicts[match] = { ...rows };
+      for (const [text, verdict] of Object.entries(rows)) {
+        if (typeof verdict === "boolean") verdicts.set(verdictKey(match, text), verdict);
+      }
+    }
+  }).catch(() => undefined).then(() => {
+    cacheReady = true;
+    for (const wake of cacheWaiters) wake();
+    cacheWaiters.clear();
+  });
+}
+
+function rememberVerdict(match: string, text: string, verdict: boolean) {
+  const key = classifyTextKey(text);
+  if (!siteVerdicts[match]) siteVerdicts[match] = {};
+  siteVerdicts[match][key] = verdict;
+  const texts = Object.keys(siteVerdicts[match]);
+  for (const old of texts.slice(0, Math.max(0, texts.length - CACHE_TEXTS))) delete siteVerdicts[match][old];
+  const matches = Object.keys(siteVerdicts);
+  for (const old of matches.slice(0, Math.max(0, matches.length - CACHE_MATCHES))) delete siteVerdicts[old];
+  verdicts.set(verdictKey(match, key), verdict);
+  if (!cacheHost || !storageArea()) return;
+  clearTimeout(cacheWrite);
+  cacheWrite = setTimeout(() => {
+    const area = storageArea();
+    if (!area) return;
+    void area.get(CACHE_KEY).then((stored) => {
+      const file = { ...((stored[CACHE_KEY] ?? {}) as ClassifyCacheFile) };
+      file[cacheHost] = { ...siteVerdicts };
+      const hosts = Object.keys(file);
+      for (const old of hosts.slice(0, Math.max(0, hosts.length - 40))) delete file[old];
+      return area.set({ [CACHE_KEY]: file });
+    }).catch(() => undefined);
+  }, 200);
+}
+
+export function clearClassifyMemory() {
+  verdicts.clear();
+  inFlight.clear();
+  queued.clear();
+  for (const key of Object.keys(siteVerdicts)) delete siteVerdicts[key];
+}
+
+export function onClassifyCacheReady(wake: () => void): () => void {
+  if (cacheReady) return () => undefined;
+  cacheWaiters.add(wake);
+  return () => cacheWaiters.delete(wake);
+}
 
 const TITLE = "h1, h2, h3, h4, [id*='title' i], [class*='title' i]";
 
 // Leading with the title keeps durations and badges from crowding out what the item is about.
+function formatMark(el: HTMLElement): string {
+  const links = [el, ...Array.from(el.querySelectorAll("a[href]"))].map((node) => node.getAttribute("href") ?? "").join(" ");
+  const label = `${el.getAttribute("aria-label") ?? ""} ${el.getAttribute("class") ?? ""}`;
+  if (el.hasAttribute("data-shorts") || /\/shorts\//i.test(links) || /\bshorts\b/i.test(label)) return "[shorts] ";
+  if (el.hasAttribute("data-reel") || /\/reels?\//i.test(links) || /\breels?\b/i.test(label)) return "[reel] ";
+  return "";
+}
+
 export function itemText(el: HTMLElement): string {
   const clean = (text: string) => text.replace(/\s+/g, " ").trim();
   const title = clean(el.querySelector(TITLE)?.textContent ?? "");
   const body = clean(spacedText(el));
-  return (title ? `${title} | ${body}` : body).slice(0, 240);
+  return `${formatMark(el)}${title ? `${title} | ${body}` : body}`.slice(0, 240);
 }
 
 // Undefined means not judged yet; the item stays as it is until its verdict arrives.
 function verdictFor(match: string, el: HTMLElement): boolean | undefined {
   const text = itemText(el);
   if (!text) return false;
-  const key = verdictKey(match, text);
+  const key = verdictKey(match, classifyTextKey(text));
+  if (!cacheReady) return undefined;
   const verdict = verdicts.get(key);
   if (verdict !== undefined || !classifier || inFlight.has(key) || usageFor(match).paused) return verdict;
   if (!queued.has(match)) queued.set(match, new Set());
@@ -136,12 +227,14 @@ async function flushClassify() {
         const state = usageFor(match);
         if (state.paused) break;
         const chunk = all.slice(start, start + Math.min(CLASSIFY_BATCH, Math.max(1, JUDGE_BUDGET - state.judged)));
-        chunk.forEach((text) => inFlight.add(verdictKey(match, text)));
+        chunk.forEach((text) => inFlight.add(verdictKey(match, classifyTextKey(text))));
         const result = await classifier?.(match, chunk).catch(() => null);
-        // A failed call leaves those items shown instead of queueing them again on every scroll.
+        // A failed call leaves those items shown instead of queueing them again on every scroll. Only a real answer is saved for the next visit.
         chunk.forEach((text, index) => {
-          inFlight.delete(verdictKey(match, text));
-          verdicts.set(verdictKey(match, text), Boolean(result?.[index]));
+          const key = verdictKey(match, classifyTextKey(text));
+          inFlight.delete(key);
+          if (result) rememberVerdict(match, text, Boolean(result[index]));
+          else verdicts.set(key, false);
         });
         state.judged += chunk.length;
         state.matched += result ? result.filter(Boolean).length : 0;
@@ -217,6 +310,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
     if (!waiting.has(match)) waiting.set(match, new Set());
     waiting.get(match)!.add(schedulePass);
   }
+  const stopCacheWait = onClassifyCacheReady(schedulePass);
   pass();
   const observer = new MutationObserver(schedulePass);
   observer.observe(doc.body ?? doc.documentElement, { childList: true, subtree: true, characterData: true });
@@ -224,6 +318,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const undo = (): void => {
     if (undone) return;
     undone = true;
+    stopCacheWait();
     if (match) waiting.get(match)?.delete(schedulePass);
     observer.disconnect();
     clearTimeout(leftoverTimer);

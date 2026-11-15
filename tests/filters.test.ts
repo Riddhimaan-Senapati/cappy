@@ -307,3 +307,40 @@ describe("content filter hides the whole card around a matched link", () => {
     handle.undo();
   });
 });
+
+describe("classify cache", () => {
+  it("does not ask the model again for an item this site already judged", async () => {
+    const data: Record<string, unknown> = {};
+    const previous = globalThis.chrome;
+    globalThis.chrome = {
+      storage: { local: {
+        get: async (key: string) => ({ [key]: data[key] }),
+        set: async (patch: Record<string, unknown>) => { Object.assign(data, patch); },
+      } },
+    } as unknown as typeof chrome;
+    const { beginClassifyCache, clearClassifyMemory } = await import("../extension/src/content/content-filter.js");
+    const asked: string[] = [];
+    setFilterClassifier(async (_match, items) => {
+      asked.push(...items);
+      return items.map((item) => item.includes("Shorts"));
+    });
+    document.body.innerHTML = `<main><feed-card><h3>Shorts: pasta hack</h3></feed-card><feed-card><h3>Rust in 100 seconds</h3></feed-card></main>`;
+    await beginClassifyCache("localhost");
+    const first = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "shorts clips" }), document);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    assert.ok(asked.length >= 2);
+    const judged = asked.length;
+    first.undo();
+    clearClassifyMemory();
+    await beginClassifyCache("localhost");
+    const second = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "shorts clips" }), document);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(asked.length, judged, "saved verdicts were classified again");
+    const hidden = [...document.querySelectorAll<HTMLElement>("feed-card")].map((el) => el.style.display === "none");
+    assert.deepEqual(hidden, [true, false]);
+    second.undo();
+    setFilterClassifier(null);
+    globalThis.chrome = previous;
+    clearClassifyMemory();
+  });
+});
