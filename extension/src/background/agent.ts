@@ -60,6 +60,7 @@ interface StartOptions {
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  claimKey?: string;
 }
 
 export class AgentClient {
@@ -341,7 +342,7 @@ export class AgentClient {
   // A busy tab queues new requests; interrupt cancels the active run instead. The queue drains only after a successful reply.
   async startRun(tab: chrome.tabs.Tab, trigger: Trigger, message: string, options: StartOptions = {}): Promise<"started" | "queued" | false> {
     if (!tab.id || !tab.url?.startsWith("http")) return false;
-    const { fresh = false, interrupt = false, queuedId, commandId, thread, target } = options;
+    const { fresh = false, interrupt = false, queuedId, commandId, thread, target, claimKey } = options;
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const host = new URL(tab.url).host;
@@ -356,7 +357,7 @@ export class AgentClient {
       this.emit(run, { type: "queued", runId, message, thread });
       return "queued";
     }
-    this.emit(run, { type: "start", runId, trigger, message, thread });
+    this.emit(run, { type: "start", runId, trigger, message, thread, ...(claimKey ? { claimKey } : {}) });
     this.runs.set(runId, run);
     this.setStatus({});
 

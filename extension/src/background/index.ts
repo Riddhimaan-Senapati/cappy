@@ -29,7 +29,7 @@ const agent = new AgentClient({
       const request = sessionRequests.get(event.runId);
       if (request) request.options = { question: event.question, options: event.options };
     }
-    if (event.type === "start" && event.trigger === "page_load") proactive.noteStart(tabId, event.runId);
+    if (event.type === "start" && event.trigger === "page_load") proactive.noteStart(tabId, event.runId, event.claimKey);
     if (event.type === "done" && event.trigger === "page_load") {
       const checked = proactive.finish(tabId, event.runId);
       if (checked) void markChecked(checked).finally(() => proactive.drop(checked));
@@ -269,7 +269,7 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
     await note("Offered to adapt this page instead of adapting it automatically.");
     return;
   }
-  if ((await agent.startRun(tab, "page_load", "")) === "started") {
+  if ((await agent.startRun(tab, "page_load", "", { claimKey: checked })) === "started") {
     await note("Automatic page adaptation started: enabled, profile present, no saved site adaptation, first check for this site and profile in this tab.");
     const { proactiveSeen: seen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
     await chrome.storage.session.set({ proactiveSeen: [...seen.filter((entry) => entry !== key).slice(-100), key] });

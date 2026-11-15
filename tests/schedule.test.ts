@@ -79,7 +79,9 @@ describe("isScheduleActive", () => {
       env,
       encoding: "utf8",
     });
-    assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
+    const output = `${child.stdout}\n${child.stderr}`;
+    assert.equal(child.status, 0, output);
+    assert.match(output, /\bpass 1\b/);
   });
 });
 

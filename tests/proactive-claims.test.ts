@@ -34,4 +34,17 @@ describe("page-load claims", () => {
     assert.equal(claims.holds("site-a"), false);
     assert.equal(claims.begin(2, "site-a"), true);
   });
+
+  it("credits a late start to the site that began it, not the site the tab has moved to", () => {
+    const claims = new ProactiveClaims();
+    assert.equal(claims.begin(1, "site-a"), true);
+    assert.equal(claims.begin(1, "site-b"), true);
+    assert.equal(claims.holds("site-a"), false);
+    claims.noteStart(1, "run-a", "site-a");
+    assert.equal(claims.holds("site-a"), true);
+    assert.equal(claims.holds("site-b"), true);
+    assert.equal(claims.finish(1, "run-a"), "site-a");
+    assert.equal(claims.holds("site-b"), true);
+    assert.equal(claims.begin(2, "site-b"), false);
+  });
 });

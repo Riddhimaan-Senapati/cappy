@@ -23,7 +23,15 @@ export class ProactiveClaims {
     return true;
   }
 
-  noteStart(tabId: number, runId: string) {
+  // The key comes from the run that started, not from whichever site the tab shows now.
+  noteStart(tabId: number, runId: string, key?: string) {
+    if (key) {
+      this.inFlight.add(key);
+      this.runs.set(runId, key);
+      const pending = this.pending.get(tabId);
+      if (pending?.key === key && pending.runId === undefined) pending.runId = runId;
+      return;
+    }
     const pending = this.pending.get(tabId);
     if (!pending || pending.runId !== undefined) return;
     pending.runId = runId;
