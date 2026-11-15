@@ -11,6 +11,7 @@ export interface CameraHooks {
   release(): void;
   cancel(): boolean;
   hasSelection(): boolean;
+  pointAt(x: number, y: number): { covered: boolean; control: HTMLElement | null };
 }
 
 const CSS = `
@@ -77,6 +78,8 @@ export class CameraController {
   private pauseButton = document.createElement("button");
   private offButton = document.createElement("button");
   private overButton: HTMLButtonElement | null = null;
+  private overOverlay: { covered: boolean; control: HTMLElement | null } = { covered: false, control: null };
+  private pinchOnOverlay = false;
   private mode = document.createElement("span");
   private cursor = document.createElement("div");
   private ringCircle: SVGCircleElement;
@@ -340,8 +343,10 @@ export class CameraController {
       return this.stable.x >= rect.left - 4 && this.stable.x <= rect.right + 4 && this.stable.y >= rect.top - 4 && this.stable.y <= rect.bottom + 4;
     };
     this.overButton = [this.pauseButton, this.offButton].find(inside) ?? null;
+    this.overOverlay = this.overButton || this.paused ? { covered: false, control: null } : this.hooks.pointAt(this.stable.x, this.stable.y);
     if (this.overButton) this.hover(this.overButton);
     else if (this.paused) this.hover(null);
+    else if (this.overOverlay.covered) this.hover(this.overOverlay.control);
     else {
       const under = document.elementFromPoint(this.stable.x, this.stable.y);
       const target = under?.closest(CLICKABLE) ?? under;
@@ -352,6 +357,7 @@ export class CameraController {
       this.pinching = true;
       this.pinchStart = t;
       this.pinchTarget = this.hovered;
+      this.pinchOnOverlay = this.overOverlay.covered;
       this.holdFired = false;
       this.dwellAnchor = null;
     }
@@ -359,7 +365,7 @@ export class CameraController {
       // A quick pinch clicks; holding the pinch selects the element as the agent's target.
       const held = t - this.pinchStart;
       this.setRing(held > 200 ? (held - 200) / (SELECT_HOLD_MS - 200) : 0);
-      if (!this.holdFired && held >= SELECT_HOLD_MS && this.pinchTarget && !this.isPreviewButton(this.pinchTarget) && !this.paused) {
+      if (!this.holdFired && held >= SELECT_HOLD_MS && this.pinchTarget && !this.isPreviewButton(this.pinchTarget) && !this.pinchOnOverlay && !this.paused) {
         this.holdFired = true;
         this.setRing(0);
         this.hooks.select(this.pinchTarget);

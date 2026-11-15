@@ -1,3 +1,4 @@
+import { llmFetch } from "../../llm-logs.js";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createXai } from "@ai-sdk/xai";
@@ -77,7 +78,7 @@ async function listedModels(url: string, headers: Record<string, string>): Promi
 
 export function createXaiProvider(): AgentProvider {
   const apiKey = getKey("XAI_API_KEY");
-  const client = createXai({ apiKey });
+  const client = createXai({ apiKey, fetch: llmFetch });
   const models: Record<Tier, string> = {
     fast: process.env.XAI_MODEL_FAST ?? "grok-4.7",
     frontier: process.env.XAI_MODEL_FRONTIER ?? process.env.XAI_MODEL ?? "grok-4.7",
@@ -100,7 +101,7 @@ function compatibleModels(fastEnv: string | undefined, frontierEnv: string | und
 export function createOpenAICompatibleProvider(): AgentProvider {
   const apiKey = getKey("OPENAI_COMPAT_API_KEY");
   const baseURL = getKey("OPENAI_COMPAT_BASE_URL") ?? "";
-  const client = createOpenAICompatible({ name: "openai-compatible", apiKey, baseURL, includeUsage: true, supportsMultiPartToolContent: true });
+  const client = createOpenAICompatible({ name: "openai-compatible", fetch: llmFetch, apiKey, baseURL, includeUsage: true, supportsMultiPartToolContent: true });
   const models = compatibleModels(process.env.OPENAI_COMPAT_MODEL_FAST, process.env.OPENAI_COMPAT_MODEL_FRONTIER ?? process.env.OPENAI_COMPAT_MODEL, "gpt-4o-mini", "gpt-4o");
   return {
     name: "openai-compat",
@@ -114,7 +115,7 @@ export function createOpenAICompatibleProvider(): AgentProvider {
 export function createAnthropicCompatibleProvider(): AgentProvider {
   const apiKey = getKey("ANTHROPIC_COMPAT_API_KEY");
   const baseURL = getKey("ANTHROPIC_COMPAT_BASE_URL") ?? "";
-  const client = createAnthropic({ apiKey, baseURL });
+  const client = createAnthropic({ apiKey, baseURL, fetch: llmFetch });
   const models = compatibleModels(process.env.ANTHROPIC_COMPAT_MODEL_FAST, process.env.ANTHROPIC_COMPAT_MODEL_FRONTIER ?? process.env.ANTHROPIC_COMPAT_MODEL, "claude-haiku-5-5", "claude-opus-5-5");
   return {
     name: "anthropic-compat",

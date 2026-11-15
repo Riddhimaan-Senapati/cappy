@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { describeActivity } from "./activity.js";
 import type { FrictionCount, SuggestMessage, Suggestion, SuggestionFeedback, UsageReporter } from "../../shared/protocol.js";
-import { detectInjection } from "../safety.js";
+import { detectInjection } from "../../shared/safety.js";
 import type { AgentProvider } from "./providers/types.js";
 
 const SYSTEM = `You suggest one adaptation for the web page a person is looking at that would help with the friction they have noticed and with their needs, or nothing.

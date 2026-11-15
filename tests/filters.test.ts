@@ -4,7 +4,7 @@ import type { BlockCall } from "../shared/adaptation.js";
 import { installDom } from "./dom-setup.js";
 
 installDom();
-const { applyContentFilter, keywordPattern } = await import("../extension/src/content/content-filter.js");
+const { applyContentFilter, keywordPattern, setFilterClassifier } = await import("../extension/src/content/content-filter.js");
 const { findItemGroups } = await import("../extension/src/content/item-groups.js");
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
@@ -129,5 +129,34 @@ describe("content filter", () => {
   it("escapes regex characters in keywords", () => {
     assert.equal(keywordPattern(["c++"]).test("learn c++ today"), true);
     assert.equal(keywordPattern(["c++"]).test("learn cxx today"), false);
+  });
+});
+
+describe("content filter judged by meaning", () => {
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const feed = (titles: string[]) => titles.map((title) => `<feed-card><h3>${title}</h3></feed-card>`).join("");
+
+  it("hides items the keywords miss, including ones that load later, and judges each title once", async () => {
+    const asked: string[][] = [];
+    setFilterClassifier(async (_match, items) => {
+      asked.push(items);
+      return items.map((item) => /minecraft|elden ring|fortnite|zelda/i.test(item));
+    });
+    document.body.innerHTML = `<main>${feed(["Minecraft day 100", "How CPUs work", "Elden Ring boss guide", "Gaming news roundup"])}</main>`;
+    const handle = applyContentFilter(filter({ keywords: ["gaming"], itemSelector: "feed-card", match: "gaming videos" }), document);
+    assert.deepEqual(hiddenTitles(), ["Gaming news roundup"]);
+    await wait(700);
+    assert.deepEqual(hiddenTitles(), ["Minecraft day 100", "Elden Ring boss guide", "Gaming news roundup"]);
+
+    document.querySelector("main")!.insertAdjacentHTML("beforeend", feed(["Fortnite trailer", "Cooking pasta", "Minecraft day 100"]));
+    await wait(700);
+    assert.deepEqual(hiddenTitles(), ["Minecraft day 100", "Elden Ring boss guide", "Gaming news roundup", "Fortnite trailer", "Minecraft day 100"]);
+    const judged = asked.flat();
+    assert.equal(judged.filter((text) => text.startsWith("Minecraft day 100")).length, 1);
+    assert.ok(!judged.some((text) => text.startsWith("Gaming news roundup")));
+
+    handle.undo();
+    assert.deepEqual(hiddenTitles(), []);
+    setFilterClassifier(null);
   });
 });

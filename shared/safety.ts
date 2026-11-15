@@ -1,5 +1,12 @@
 import type { PageOutline } from "./adaptation.js";
 
+export interface InjectionSurface {
+  title: string;
+  headings: string[];
+  texts: string[];
+  textSample: string;
+}
+
 const INJECTION_PATTERNS = [
   /ignore (all |any )?(previous|prior|above|earlier) (instructions|prompts|rules)/i,
   /disregard (the |your |all )?(system|previous|prior) (prompt|instructions)/i,
@@ -18,6 +25,15 @@ export function detectInjectionText(text: string): string | null {
   return null;
 }
 
+export function detectInjectionFields(surface: InjectionSurface): string | null {
+  return detectInjectionText([surface.title, ...surface.headings, ...surface.texts, surface.textSample].join("\n"));
+}
+
 export function detectInjection(page: PageOutline): string | null {
-  return detectInjectionText([page.title, ...page.headings, ...page.elements.map((element) => element.text ?? ""), page.textSample].join("\n"));
+  return detectInjectionFields({
+    title: page.title,
+    headings: page.headings,
+    texts: page.elements.map((element) => element.text ?? ""),
+    textSample: page.textSample,
+  });
 }

@@ -103,6 +103,10 @@ export async function launchBrowser(name: string, options: E2EOptions = {}): Pro
   let worker = context.serviceWorkers()[0];
   worker ??= await context.waitForEvent("serviceworker", { timeout: 20_000 });
   const extensionId = new URL(worker.url()).host;
+  // A fresh install opens the setup page; tests that query the active tab would otherwise hit it.
+  await worker.evaluate(() => chrome.storage.local.set({ onboarded: true }));
+  const welcome = await context.waitForEvent("page", { predicate: (page) => page.url().includes("/welcome.html"), timeout: 3_000 }).catch(() => context.pages().find((page) => page.url().includes("/welcome.html")));
+  await welcome?.close();
   return {
     context,
     extensionId,

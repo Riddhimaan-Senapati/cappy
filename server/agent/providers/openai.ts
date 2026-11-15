@@ -1,3 +1,4 @@
+import { llmFetch } from "../../llm-logs.js";
 import OpenAI from "openai";
 import type { ResponseInputItem, ResponseOutputItem } from "openai/resources/responses/responses";
 import { z } from "zod";
@@ -90,8 +91,11 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
   return "I stopped after too many steps. Some changes may be partly applied; you can undo them in the panel.";
 }
 
+// One-shot calls (suggestions, judging feed items) need speed more than depth; older non-reasoning models reject the field.
+const quickReasoning = (model: string) => (/^(gpt-[5-9]|o\d)/.test(model) ? { reasoning: { effort: "low" as const } } : {});
+
 async function completeText(client: OpenAI, model: string, system: string, user: string, reportUsage: UsageReporter): Promise<string> {
-  const stream = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: user }], store: false, stream: true });
+  const stream = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: user }], store: false, stream: true, ...quickReasoning(model) });
   let text = "";
   for await (const event of stream) {
     if (event.type === "response.completed") reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0 });
@@ -102,7 +106,7 @@ async function completeText(client: OpenAI, model: string, system: string, user:
 }
 
 export function createOpenAIKeyProvider(): AgentProvider {
-  const client = new OpenAI({ apiKey: getKey("OPENAI_API_KEY") });
+  const client = new OpenAI({ fetch: llmFetch, apiKey: getKey("OPENAI_API_KEY") });
   const models: Record<Tier, string> = {
     fast: process.env.OPENAI_MODEL_FAST ?? "gpt-6-luna",
     frontier: process.env.OPENAI_MODEL_FRONTIER ?? process.env.OPENAI_MODEL ?? "gpt-6.1-sol",
@@ -126,7 +130,7 @@ export function createChatGptProvider(): AgentProvider {
     frontier: process.env.CHATGPT_MODEL_FRONTIER ?? process.env.CHATGPT_MODEL ?? "gpt-6.1-sol",
   };
   let retriedAuth = false;
-  const getClient = async () => new OpenAI({ apiKey: await getAccessToken(), baseURL: "https://api.openai.com/v1", maxRetries: 0 });
+  const getClient = async () => new OpenAI({ fetch: llmFetch, apiKey: await getAccessToken(), baseURL: "https://api.openai.com/v1", maxRetries: 0 });
 
   return {
     name: "chatgpt-signin",

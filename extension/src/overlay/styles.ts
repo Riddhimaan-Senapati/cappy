@@ -24,6 +24,12 @@ export const OVERLAY_CSS = `
 .pick { all: unset; flex: none; cursor: pointer; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 7px; color: rgba(255, 255, 255, 0.45); }
 .pick[hidden] { display: none; }
 .pick:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.pick[aria-pressed="true"] { color: var(--text); background: rgba(255, 255, 255, 0.1); }
+.grip { position: absolute; top: 0; left: 50%; z-index: 2; width: 72px; height: 12px; transform: translateX(-50%); cursor: grab; touch-action: none; }
+.grip::after { content: ""; position: absolute; left: 50%; top: 4px; width: 32px; height: 4px; border-radius: 999px; transform: translateX(-50%); background: rgba(255, 255, 255, 0.14); transition: background 0.15s, width 0.2s var(--ease); }
+.grip:hover::after { background: rgba(255, 255, 255, 0.32); width: 40px; }
+.bar.dragging { transition: none; user-select: none; }
+.bar.dragging .grip { cursor: grabbing; }
 .pick:focus-visible { outline: 2px solid var(--accent); }
 .target-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 45%; height: 24px; padding: 0 4px 0 8px; border-radius: 7px; flex: none;
   font-size: 12px; color: #dfe3ff; background: rgba(139, 155, 255, 0.16); border: 1px solid rgba(139, 155, 255, 0.3); animation: fade 0.22s var(--ease); }
@@ -44,6 +50,7 @@ export const OVERLAY_CSS = `
 .pill.flip { animation: flip 0.32s var(--spring); }
 .pill:focus-visible, .item:focus-visible, .link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+.bar.tall .body { max-height: min(72vh, 620px); }
 .body { border-top: 1px solid rgba(255, 255, 255, 0.05); max-height: min(50vh, 360px); overflow: auto; overscroll-behavior: contain; padding: 5px; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.15) transparent; }
 .body:empty { display: none; }
 .sec { padding: 8px 10px 4px; font-size: 11px; font-weight: 550; color: rgba(255, 255, 255, 0.34); }
@@ -51,8 +58,8 @@ export const OVERLAY_CSS = `
 .item .ico { color: rgba(255, 255, 255, 0.32); }
 .item .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .hint { color: rgba(255, 255, 255, 0.26); font-size: 11.5px; flex: none; }
-.item.sel { background: rgba(255, 255, 255, 0.06); color: #fff; }
-.item.sel .ico { color: var(--accent); }
+.item:hover, .item.sel { background: rgba(255, 255, 255, 0.06); color: #fff; }
+.item:hover .ico, .item.sel .ico { color: var(--accent); }
 .enter .item { animation: fade 0.22s var(--ease) both; animation-delay: calc(var(--i, 0) * 12ms); }
 
 .run { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -179,6 +186,7 @@ export const OVERLAY_CSS = `
 .hints .grow { flex: 1; }
 .home { all: unset; flex: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: 7px; font-size: 12px; color: rgba(255, 255, 255, 0.5); }
 .home:hover { color: var(--text); background: rgba(255, 255, 255, 0.09); }
+.home[hidden] { display: none; }
 .home:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mic { width: 28px; height: 28px; }
 .request-row { display: flex; align-items: center; gap: 4px; }

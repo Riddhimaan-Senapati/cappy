@@ -9,6 +9,8 @@ import { findRequestSessions, load, recipeKey, save, saveRecipe, saveSiteNotes }
 import { speakIfEnabled } from "./tts.js";
 import { detectInjection } from "../../../shared/safety.js";
 import { scheduleStatus } from "../../../shared/validate.js";
+import { settle } from "../coalesce.js";
+import { paintedStatusKey } from "../status-key.js";
 
 interface Run {
   runId: string;
@@ -22,6 +24,8 @@ interface Run {
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  // Set when the run request is sent, so a replaced socket can still fail its own runs.
+  socket?: WebSocket;
 }
 
 export interface AgentHooks {
@@ -29,6 +33,8 @@ export interface AgentHooks {
   tool(tabId: number, name: string, ms: number, ok: boolean, detail: string): void;
   status(status: StatusInfo): void;
 }
+
+const SERVER_OFFLINE = new Error("The local agent server is offline. Start it to send a new AI request.");
 
 const STAT_LABELS: Record<keyof PageStats, string> = {
   inputsWithoutLabel: "unlabeled inputs",
@@ -61,6 +67,11 @@ export class AgentClient {
   private usageUpdates = Promise.resolve();
   private socket: WebSocket | null = null;
   private opening: Promise<void> | null = null;
+  private nextConnectAt = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private retrying = false;
+  private paintedKey = "";
+  private statusWrite: Promise<void> = Promise.resolve();
   private keepAlive: ReturnType<typeof setInterval> | undefined;
   private runs = new Map<string, Run>();
   private providers: ProviderInfo[] = [];
@@ -69,15 +80,25 @@ export class AgentClient {
   private modelsRequested = new Set<string>();
   private suggestionTabs = new Map<string, number>();
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
+  private classifications = new Map<string, (verdicts: boolean[] | null) => void>();
   private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
 
   constructor(private hooks: AgentHooks) {}
 
   private setStatus(patch: Partial<StatusInfo>) {
     this.status = { ...this.status, ...patch, busy: this.runs.size > 0 };
-    void this.getStatus().then((status) => this.hooks.status(status));
-    // Settings views repaint on storage changes, so a stamp tells them the status moved.
-    void chrome.storage.local.set({ statusStamp: Date.now() });
+    this.statusWrite = this.statusWrite.then(() => this.publishStatus()).catch(() => undefined);
+  }
+
+  private async publishStatus() {
+    const status = await settle(this.getStatus(), undefined, 8_000);
+    if (!status) return;
+    this.hooks.status(status);
+    const key = paintedStatusKey(status);
+    // Settings repaints on storage changes. An unchanged painted status must not stamp, or every paint probes the server again.
+    if (key === this.paintedKey) return;
+    this.paintedKey = key;
+    await chrome.storage.local.set({ statusStamp: Date.now() });
   }
 
   async getStatus(): Promise<StatusInfo> {
@@ -130,6 +151,29 @@ export class AgentClient {
     });
   }
 
+  async classify(match: string, items: string[]): Promise<boolean[] | null> {
+    try {
+      await this.ensureConnected();
+    } catch {
+      return null;
+    }
+    const state = await load();
+    const { activeProvider } = await this.getStatus();
+    if (!activeProvider) return null;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.classifications.delete(requestId);
+        resolve(null);
+      }, 20_000);
+      this.classifications.set(requestId, (verdicts) => {
+        clearTimeout(timer);
+        resolve(verdicts);
+      });
+      this.send({ type: "classify", requestId, provider: activeProvider, models: state.modelChoices[activeProvider] ?? {}, match, items });
+    });
+  }
+
   async setKey(provider: string, key: string | null, baseURL?: string | null) {
     await this.ensureConnected();
     this.send({ type: "setKey", provider, key, ...(baseURL != null ? { baseURL } : {}) });
@@ -146,45 +190,82 @@ export class AgentClient {
     this.send({ type: "chatgptLogin" });
   }
 
-  ensureConnected(): Promise<void> {
+  ensureConnected(options?: { probe?: boolean }): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (options?.probe && Date.now() < this.nextConnectAt) {
+      this.scheduleReconnect();
+      return Promise.reject(SERVER_OFFLINE);
+    }
     this.opening ??= this.open().finally(() => {
       this.opening = null;
     });
     return this.opening;
   }
 
+  private scheduleReconnect() {
+    if (this.reconnectTimer !== undefined) return;
+    const wait = Math.max(0, this.nextConnectAt - Date.now());
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.retrying = true;
+      void this.ensureConnected()
+        .then(
+          () => this.setStatus({ connected: true, error: undefined }),
+          () => undefined,
+        )
+        .finally(() => {
+          this.retrying = false;
+        });
+    }, wait);
+  }
+
+  private clearReconnect() {
+    if (this.reconnectTimer === undefined) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+  }
+
   private async open() {
     const { serverUrl } = await load();
     await new Promise<void>((resolve, reject) => {
-      const unreachable = new Error("The local agent server is offline. Start it to send a new AI request.");
       const socket = new WebSocket(serverUrl);
       let opened = false;
+      const rejectOffline = () => {
+        this.nextConnectAt = Date.now() + 4000;
+        // One retry per failure; a failed retry waits for the next status probe instead of looping forever.
+        if (!this.retrying) this.scheduleReconnect();
+        reject(SERVER_OFFLINE);
+      };
       const timer = setTimeout(() => {
         socket.close();
-        reject(unreachable);
+        rejectOffline();
       }, 4000);
       socket.onopen = () => {
         opened = true;
         clearTimeout(timer);
+        this.nextConnectAt = 0;
+        this.clearReconnect();
+        clearInterval(this.keepAlive);
         this.socket = socket;
         this.keepAlive = setInterval(() => this.send({ type: "ping" }), 20_000);
         resolve();
       };
       socket.onerror = () => {
-        // A live socket's error is followed by onclose. A socket we already replaced must not mark us offline.
-        if (opened || (this.socket && this.socket !== socket)) return;
+        // A socket that already opened reports the drop through onclose. A failed handshake rejects now.
+        if (opened) return;
         clearTimeout(timer);
-        this.setStatus({ connected: false, error: unreachable.message });
-        reject(unreachable);
+        this.setStatus({ connected: false, error: SERVER_OFFLINE.message });
+        rejectOffline();
       };
       socket.onmessage = (event) => void this.onMessage(JSON.parse(event.data) as ServerMessage);
       socket.onclose = () => {
-        // A socket this client already replaced must not drop the live connection or fail its runs.
+        for (const run of [...this.runs.values()]) {
+          if (run.socket === socket) this.fail(run, "Lost connection to the agent server.");
+        }
+        // Only the live socket owns the connection. Runs sent on a replaced socket were failed above.
         if (this.socket !== socket) return;
         clearInterval(this.keepAlive);
         this.socket = null;
-        for (const run of [...this.runs.values()]) this.fail(run, "Lost connection to the agent server.");
         this.setStatus({ connected: false });
       };
     });
@@ -203,8 +284,6 @@ export class AgentClient {
   }
 
   private fail(run: Run, message: string) {
-    // A close can land after the run already finished. Emitting again would mark that success as failed.
-    if (!this.runs.has(run.runId)) return;
     this.finish(run);
     this.emit(run, { type: "error", runId: run.runId, message });
   }
@@ -281,7 +360,7 @@ export class AgentClient {
         await this.markCommandApplied(run);
         return;
       }
-      if (recipe === "blocked") return;
+      if (recipe === "blocked" || recipe === "stopped") return;
     }
     if (!this.runs.has(runId)) return;
 
@@ -325,6 +404,7 @@ export class AgentClient {
       const historyText = target ? `${message} (selected: ${target.label})` : message;
       if (trigger === "chat") await save({ history: [...state.history, { role: "user" as const, text: historyText }].slice(-20) });
       if (!this.runs.has(runId)) return;
+      run.socket = this.socket ?? undefined;
       this.send(request);
       return true;
     } catch (error) {
@@ -332,11 +412,11 @@ export class AgentClient {
     }
   }
 
-  private async tryRecipe(run: Run, changes: ActiveChange[] | undefined): Promise<"applied" | "blocked" | false> {
+  private async tryRecipe(run: Run, changes: ActiveChange[] | undefined): Promise<"applied" | "blocked" | "stopped" | false> {
     if (!changes?.length) return false;
     try {
       const page = await sendToTab<PageOutline>(run.tabId, { kind: "tool", name: "read_page", input: {} });
-      if (!this.runs.has(run.runId)) return "applied";
+      if (!this.runs.has(run.runId)) return "stopped";
       // Same check the server runs before a model call, so a saved change cannot land on a trap page.
       const injection = detectInjection(page);
       if (injection) {
@@ -349,12 +429,12 @@ export class AgentClient {
       }
       this.step(run, "Using your saved version of this request", "info");
       for (const change of changes) {
-        if (!this.runs.has(run.runId)) return "applied";
+        if (!this.runs.has(run.runId)) return "stopped";
         const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
         if (!outcome.ok) return false;
         run.applied.set(change.id, change);
       }
-      if (!this.runs.has(run.runId)) return "applied";
+      if (!this.runs.has(run.runId)) return "stopped";
       this.finish(run, true);
       const reply = "Done, from your saved version. Hold Shift+Enter to ask the AI again.";
       void speakIfEnabled(reply, run.tabId);
@@ -406,6 +486,11 @@ export class AgentClient {
       if (this.notice?.level === "info") this.notice = undefined;
       this.setStatus({ connected: true, error: undefined });
       void this.ensureModels();
+      return;
+    }
+    if (message.type === "classified") {
+      this.classifications.get(message.requestId)?.(message.verdicts);
+      this.classifications.delete(message.requestId);
       return;
     }
     if (message.type === "suggestion") {

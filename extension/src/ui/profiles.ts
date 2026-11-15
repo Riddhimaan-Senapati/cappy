@@ -18,8 +18,10 @@ export function profilePicker(state: StoredState, onChange: (id: string) => void
 
 export function createProfilesView(rerender: () => void) {
   let name = "";
+  let renameDraft: string | null = null;
   let error = "";
   let pending = false;
+  let managing = false;
   const act = async (action: ProfileAction) => {
     if (pending) return;
     pending = true;
@@ -27,6 +29,7 @@ export function createProfilesView(rerender: () => void) {
     try {
       await updateProfile(action);
       name = "";
+      renameDraft = null;
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
     } finally {
@@ -35,8 +38,8 @@ export function createProfilesView(rerender: () => void) {
     }
   };
   return (state: StoredState) => {
-    const button = (label: string, action: () => void) => {
-      const el = h("button", "s-btn s-small", label);
+    const button = (label: string, className: string, action: () => void) => {
+      const el = h("button", className, label);
       el.type = "button";
       el.disabled = pending;
       el.addEventListener("click", action);
@@ -45,30 +48,32 @@ export function createProfilesView(rerender: () => void) {
     const picker = profilePicker(state, (id) => void act({ action: "switch", id }));
     picker.classList.add("s-select");
     picker.disabled = pending;
-    const rename = h("input");
-    rename.value = state.profiles[state.activeProfileId].name;
-    rename.setAttribute("aria-label", "Current profile name");
-    const renameForm = h("form", "s-add", "", [rename, button("Rename", () => void act({ action: "rename", name: rename.value }))]);
-    renameForm.addEventListener("submit", (event) => {
-      event.preventDefault();
-      void act({ action: "rename", name: rename.value });
+    const manage = button(managing ? "Done" : "Manage", "s-link", () => {
+      managing = !managing;
+      rerender();
     });
-    const input = h("input");
-    input.placeholder = "New profile name";
-    input.setAttribute("aria-label", "New profile name");
-    input.value = name;
-    input.addEventListener("input", () => { name = input.value; });
-    return h("section", "s-sec", "", [
-      h("h3", "", "Profiles"),
-      h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Active on all websites"), h("small", "", "Each profile saves its own preferences, layouts, filters, commands, and request history. Changes are saved automatically.")]), picker]),
-      renameForm,
-      h("div", "s-note", "Type /profile in the command bar to create or switch profiles. New profiles start without saved directives or layouts."),
-      h("div", "s-add", "", [input]),
-      h("div", "s-acts", "", [
-        button("New profile", () => void act({ action: "create", name })),
-      ]),
-      h("div", "s-note", "Switching updates open websites and future pages. Saved layouts restore locally; adapting a new website needs the AI connection."),
-      ...(error ? [h("div", "s-note s-error", error)] : []),
-    ]);
+    const rows: Node[] = [h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Profile"), h("small", "", "Needs, saved changes and commands")]), picker, manage])];
+    if (managing) {
+      const form = (label: string, value: string, placeholder: string, submitLabel: string, submit: (value: string) => void, onInput?: (value: string) => void) => {
+        const input = h("input");
+        input.value = value;
+        input.placeholder = placeholder;
+        input.setAttribute("aria-label", label);
+        if (onInput) input.addEventListener("input", () => onInput(input.value));
+        const element = h("form", "s-add", "", [input, h("button", "s-btn s-small", submitLabel)]);
+        element.addEventListener("submit", (event) => {
+          event.preventDefault();
+          submit(input.value);
+        });
+        return element;
+      };
+      rows.push(
+        form("Current profile name", renameDraft ?? state.profiles[state.activeProfileId].name, "Profile name", "Rename", (value) => void act({ action: "rename", name: value }), (value) => (renameDraft = value)),
+        form("New profile name", name, "New profile, e.g. Mom or Study", "Create", (value) => void act({ action: "create", name: value }), (value) => (name = value)),
+        h("div", "s-note", "A new profile starts empty. Tip: type /profile in the bar to switch quickly."),
+      );
+    }
+    if (error) rows.push(h("div", "s-note s-error", error));
+    return h("section", "s-sec", "", rows);
   };
 }

@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { logViewer } from "./log-viewer.js";
+import { withLogRun } from "./llm-logs.js";
 import express from "express";
 import { createServer } from "node:http";
 import path from "node:path";
@@ -10,11 +12,12 @@ import { baseKeyFor, defaultProviderId, describeProviders, forget, getProvider, 
 import type { AgentProvider } from "./agent/providers/types.js";
 import { recallForRun } from "./agent/memory.js";
 import { pickTier } from "./agent/router.js";
+import { classifyItems } from "./agent/classify.js";
 import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, RunCancelledError } from "./agent/session.js";
 import { normalizeBaseURL, setKey } from "./keys.js";
 import { audio } from "./audio.js";
-import { detectInjection } from "./safety.js";
+import { detectInjection } from "../shared/safety.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -22,6 +25,7 @@ const sockets = new Set<WebSocket>();
 let signingIn = false;
 
 const app = express();
+app.use(logViewer);
 app.use("/api/audio", audio);
 app.use("/demo", express.static(path.join(rootDir, "demo-sites")));
 app.get("/api/health", async (_req, res) => {
@@ -130,6 +134,14 @@ wss.on("connection", (socket, request) => {
         return void broadcastProviders();
       case "chatgptLogin":
         return void signIn(socket);
+      case "classify": {
+        const provider = resolveProvider(message.provider);
+        const started = Date.now();
+        const model = message.models?.fast || provider?.models.fast;
+        const verdicts = provider ? await classifyItems(provider, message, (usage) => sendTo(socket, { type: "usage", usage, requestId: message.requestId, model: model ?? "" })).catch(() => null) : null;
+        console.log(`[classify] ${message.items.length} items for "${message.match.slice(0, 60)}" in ${Date.now() - started}ms: ${verdicts ? verdicts.filter(Boolean).length : "failed"} matched`);
+        return sendTo(socket, { type: "classified", requestId: message.requestId, verdicts });
+      }
       case "suggest": {
         const provider = resolveProvider(message.provider);
         const suggestion = provider ? await suggestFor(provider, message, (usage) => sendTo(socket, { type: "usage", usage, requestId: message.requestId, model: message.models?.fast || provider.models.fast })).catch(() => null) : null;
@@ -173,7 +185,7 @@ wss.on("connection", (socket, request) => {
     sessions.set(message.runId, session);
     const started = Date.now();
     try {
-      await execute(session, message, provider);
+      await withLogRun(message.runId, () => execute(session, message, provider));
       console.log(`[run] ${message.trigger} via ${provider.name} done in ${Date.now() - started}ms`);
     } catch (error) {
       if (session.cancelled) return;
