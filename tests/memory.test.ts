@@ -33,6 +33,7 @@ test("receiveMemory keeps only the latest unanswered proposals", () => {
   assert.equal(decision.pendingMemory.at(-1), "Line 9");
   assert.equal(decision.pendingSites["line 0"], undefined);
   assert.ok(decision.pendingSites["line 9"]);
+  assert.deepEqual(decision.proposed, incoming.slice(2));
 });
 
 test("receiveMemory ignores lines already saved, saved for this site, or already proposed", () => {

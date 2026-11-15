@@ -625,6 +625,16 @@ export function clearChangeHistory() {
   changeLog.clear();
 }
 
+export function rescopeLiveChanges(updates: ReadonlyArray<{ id: string; scope: ActiveChange["scope"]; pagePath?: string | null }>) {
+  for (const update of updates) {
+    const next = (change: ActiveChange): ActiveChange => ({ ...change, scope: update.scope, pagePath: update.pagePath });
+    const entry = applied.get(update.id);
+    if (entry) entry.change = next(entry.change);
+    const logged = changeLog.get(update.id);
+    if (logged) changeLog.set(update.id, next(logged));
+  }
+}
+
 export function activeChanges(): ActiveChange[] {
   return [...applied.values(), ...siteControls.values()].map((entry) => entry.change);
 }

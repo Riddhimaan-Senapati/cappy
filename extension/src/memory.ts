@@ -61,7 +61,7 @@ export function receiveMemory(state: Memory, incoming: readonly string[], origin
   for (const key of Object.keys(pendingSites)) {
     if (!pendingMemory.some((line) => pendingKey(line) === key)) delete pendingSites[key];
   }
-  return { profile: [...state.profile], pendingMemory, pendingSites, proposed: fresh };
+  return { profile: [...state.profile], pendingMemory, pendingSites, proposed: fresh.filter((line) => pendingMemory.some((kept) => same(kept, line))) };
 }
 
 export function pendingSite(state: Pick<StoredState, "pendingSites">, line: string): PendingSite | undefined {

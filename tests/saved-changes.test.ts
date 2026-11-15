@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { ActiveChange, Change } from "../shared/adaptation.js";
-import { DEFAULTS, load, recipeKey, recordApplied, recordReverted, rescopeStoredChanges, saveRecipe, savedChangesFor } from "../extension/src/storage.js";
+import { DEFAULTS, load, recipeKey, recordApplied, recordReverted, rescopeStoredChanges, saveRecipe, savedChangesFor, scopeForPrompt } from "../extension/src/storage.js";
 import { prepareSavedChange, savedChangeOnThisPage } from "../shared/validate.js";
 
 const originalChrome = globalThis.chrome;
@@ -171,5 +171,38 @@ describe("the save prompt moves the change with the answer", () => {
     assert.equal(state.globalChanges.length, 0);
     assert.equal(state.siteChanges[origin]?.[0]?.scope, "site");
     assert.equal(state.siteChanges[origin]?.[0]?.pagePath, undefined);
+  });
+
+  it("leaves another site's change alone when the id is the same", async () => {
+    storage();
+    const other = "https://news.ycombinator.com";
+    await recordApplied(origin, saved("dark-mode", "Dark mode", "site", undefined, { name: "darkMode", allowSiteControls: true }));
+    await recordApplied(other, saved("dark-mode", "Dark mode", "site", undefined, { name: "darkMode", allowSiteControls: true }));
+    await rescopeStoredChanges(origin, ["dark-mode"], "site", "/demo/campus.html");
+    const state = await load();
+    assert.equal(state.siteChanges[origin]?.length, 1);
+    assert.equal(state.siteChanges[origin]?.[0]?.scope, "site");
+    assert.equal(state.siteChanges[other]?.[0]?.scope, "site");
+  });
+
+  it("holds an all-sites preference on this page, and does not publish site-specific CSS everywhere", async () => {
+    const text = saved("bigger-text", "Larger text", "everywhere", undefined, { name: "textScale", scale: 1.3 });
+    const css = { ...saved("dim", "Dim", "everywhere"), css: "body { filter: brightness(0.9); }", block: null };
+    const shorts = saved("hide-shorts", "Hide Shorts", "site", undefined, { name: "contentFilter", keywords: ["shorts"], itemSelector: "ytd-rich-item-renderer", action: "hide", match: null });
+    assert.equal(scopeForPrompt(text, "hold"), "page");
+    assert.equal(scopeForPrompt(css, "hold"), "page");
+    assert.equal(scopeForPrompt(shorts, "hold"), null);
+    assert.equal(scopeForPrompt(css, "everywhere"), "site");
+    assert.equal(scopeForPrompt({ ...shorts, schedule: { days: ["mon"], start: "09:00", end: "17:00" } }, "everywhere"), "site");
+  });
+
+  it("updates the saved recipe when the prompt changes where the change applies", async () => {
+    storage();
+    const change = saved("bigger-text", "Larger text", "everywhere", undefined, { name: "textScale", scale: 1.3 });
+    await recordApplied(origin, change);
+    await saveRecipe(recipeKey(origin, "make the text bigger"), { message: "make the text bigger", changes: [change], at: 1 });
+    await rescopeStoredChanges(origin, ["bigger-text"], "site", "/demo/campus.html");
+    const state = await load();
+    assert.equal(state.recipes[recipeKey(origin, "make the text bigger")]?.changes[0]?.scope, "site");
   });
 });

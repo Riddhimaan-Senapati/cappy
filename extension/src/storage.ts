@@ -274,41 +274,92 @@ function writeSite(siteChanges: Record<string, ActiveChange[]>, origin: string, 
   return next;
 }
 
-// The save prompt decides where a change lives. "Only on this site" must not leave it in the everywhere list.
-export async function rescopeStoredChanges(origin: string, ids: readonly string[], scope: "page" | "site" | "everywhere", pagePath: string) {
-  if (!ids.length) return;
-  const state = await load();
-  const wanted = new Set(ids);
-  const taken: ActiveChange[] = [];
-  const globalChanges = state.globalChanges.filter((change) => {
-    if (!wanted.has(change.id)) return true;
-    taken.push(change);
-    return false;
-  });
-  let siteChanges = { ...state.siteChanges };
-  for (const [key, list] of Object.entries(siteChanges)) {
-    const next = list.filter((change) => {
+type StoredScope = "page" | "site" | "everywhere";
+
+function portableChange(change: ActiveChange): boolean {
+  if (change.css || change.dom?.length) return false;
+  return !(change.block?.name === "contentFilter" && change.block.itemSelector);
+}
+
+// A weekday rule or a host selector was asked for this site. "Don't save" must not shrink it to one page.
+function anchoredChange(change: ActiveChange): boolean {
+  if (change.schedule != null) return true;
+  if (change.block?.name === "contentFilter" && change.block.itemSelector) return true;
+  return change.scope === "site";
+}
+
+// "hold" runs when the prompt appears: an all-sites preference waits on this page until the user accepts.
+export function scopeForPrompt(change: ActiveChange, answer: "hold" | "site" | "everywhere"): StoredScope | null {
+  if (answer === "hold") return !anchoredChange(change) && change.scope === "everywhere" ? "page" : null;
+  if (answer === "everywhere") return portableChange(change) ? "everywhere" : "site";
+  return "site";
+}
+
+let storageChain: Promise<unknown> = Promise.resolve();
+
+function withStoredChanges<T>(work: () => Promise<T>): Promise<T> {
+  const run = () => {
+    const next = storageChain.then(work, work);
+    storageChain = next.then(() => undefined, () => undefined);
+    return next;
+  };
+  const locks = globalThis.navigator?.locks;
+  if (locks?.request) return locks.request("cappy-stored-changes", run);
+  return run();
+}
+
+function placeChange(change: ActiveChange, scope: StoredScope, pagePath: string): ActiveChange {
+  return { ...change, scope, pagePath: scope === "page" ? pagePath : undefined };
+}
+
+// The save prompt decides where a change lives. Only this origin and the everywhere list move; another site's copy of the same id stays.
+export async function rescopeStoredChanges(origin: string, ids: readonly string[], answer: "hold" | "site" | "everywhere", pagePath: string) {
+  if (!ids.length) return [];
+  return withStoredChanges(async () => {
+    const state = await load();
+    const wanted = new Set(ids);
+    const taken = new Map<string, ActiveChange>();
+    const globalChanges = state.globalChanges.filter((change) => {
       if (!wanted.has(change.id)) return true;
-      taken.push(change);
+      taken.set(change.id, change);
       return false;
     });
-    siteChanges = writeSite(siteChanges, key, next);
-  }
-  for (const change of taken) {
-    const next = { ...change, scope, pagePath: scope === "page" ? pagePath : undefined };
-    if (scope === "everywhere") globalChanges.push(next);
-    else siteChanges = writeSite(siteChanges, origin, [...(siteChanges[origin] ?? []), next]);
-  }
-  await save({ globalChanges, siteChanges });
+    let siteChanges = { ...state.siteChanges };
+    const here = (siteChanges[origin] ?? []).filter((change) => {
+      if (!wanted.has(change.id)) return true;
+      if (!taken.has(change.id)) taken.set(change.id, change);
+      return false;
+    });
+    siteChanges = writeSite(siteChanges, origin, here);
+    const updates: Array<{ id: string; scope: StoredScope; pagePath?: string | null }> = [];
+    const recipes = { ...state.recipes };
+    for (const change of taken.values()) {
+      const scope = scopeForPrompt(change, answer);
+      const next = scope ? placeChange(change, scope, pagePath) : change;
+      if (scope) updates.push({ id: next.id, scope: next.scope, pagePath: next.pagePath });
+      if (next.scope === "everywhere") globalChanges.push(next);
+      else siteChanges = writeSite(siteChanges, origin, [...(siteChanges[origin] ?? []), next]);
+      if (!scope) continue;
+      const prefix = `${origin}::`;
+      for (const [key, recipe] of Object.entries(recipes)) {
+        if (!key.startsWith(prefix) || !recipe.changes.some((item) => item.id === next.id)) continue;
+        recipes[key] = { ...recipe, changes: recipe.changes.map((item) => (item.id === next.id ? placeChange(item, scope, pagePath) : item)) };
+      }
+    }
+    await save({ globalChanges, siteChanges, recipes });
+    return updates;
+  });
 }
 
 export async function recordApplied(origin: string, change: ActiveChange) {
-  const state = await load();
-  const site = without(state.siteChanges[origin] ?? [], change.id);
-  const globalChanges = without(state.globalChanges, change.id);
-  if (change.scope === "everywhere") globalChanges.push(change);
-  else site.push(change);
-  await save({ globalChanges, siteChanges: writeSite(state.siteChanges, origin, site) });
+  await withStoredChanges(async () => {
+    const state = await load();
+    const site = without(state.siteChanges[origin] ?? [], change.id);
+    const globalChanges = without(state.globalChanges, change.id);
+    if (change.scope === "everywhere") globalChanges.push(change);
+    else site.push(change);
+    await save({ globalChanges, siteChanges: writeSite(state.siteChanges, origin, site) });
+  });
 }
 
 export async function forgetStoredChange(host: string | null, id: string) {
@@ -323,6 +374,7 @@ export async function forgetStoredChange(host: string | null, id: string) {
 }
 
 export async function recordReverted(origin: string, id: string) {
+  await withStoredChanges(async () => {
   const state = await load();
   const recipes = { ...state.recipes };
   const prefix = `${origin}::`;
@@ -336,6 +388,7 @@ export async function recordReverted(origin: string, id: string) {
     globalChanges: without(state.globalChanges, id),
     siteChanges: writeSite(state.siteChanges, origin, without(state.siteChanges[origin] ?? [], id)),
     recipes,
+  });
   });
 }
 

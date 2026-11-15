@@ -1,6 +1,7 @@
 import type { UiEvent } from "../messages.js";
 import type { MemoryScope, Suggestion } from "../../../shared/protocol.js";
 import { forgetLine, rejectProposal } from "../memory.js";
+import { rescopeLiveChanges } from "../content/engine.js";
 import { rescopeStoredChanges } from "../storage.js";
 import { outcomeText, scopeChoices } from "../ui/memory-choice.js";
 import { countdownRing, paintCountdown } from "../voice/button.js";
@@ -23,6 +24,7 @@ export class OverlayUi {
   private fab = h("button", "fab");
   private fabOrb = h("div", "orb");
   private toast: HTMLElement | null = null;
+  private toastDismiss: (() => Promise<void>) | undefined;
   private toastTimer: number | undefined;
   private triggers = new Map<string, string>();
   private fabWanted = false;
@@ -227,13 +229,13 @@ export class OverlayUi {
     this.triggers.delete(event.runId);
 
     if (event.type === "done" && event.applied.length) {
-      this.showToast(`Done: ${event.applied.map((change) => change.summary).join(", ")}.`, event.applied.map((change) => change.id));
+      this.showToast(`Done: ${event.applied.map((change) => change.summary).join(", ")}.`, { undoIds: event.applied.map((change) => change.id) });
     } else if (event.type === "done") {
-      if (event.reply) this.showToast(event.reply, []);
+      if (event.reply) this.showToast(event.reply);
     } else if (event.type === "error") {
-      this.showToast(event.message, [], true);
+      this.showToast(event.message, { isError: true });
     } else {
-      this.showToast("Blocked. This page tried to give Cappy instructions.", [], true);
+      this.showToast("Blocked. This page tried to give Cappy instructions.", { isError: true });
     }
   }
 
@@ -241,34 +243,46 @@ export class OverlayUi {
   private announceMemory(status: "saved" | "proposed", lines: string[], host?: string, scope?: MemoryScope, undoIds: string[] = []) {
     const text = lines.join("; ");
     if (status === "saved") {
-      return this.showToast(`Remembered: ${text}`, [], false, async () => {
+      return this.showToast(`Remembered: ${text}`, { onUndo: async () => {
         for (const line of lines) await forgetLine(line);
-      });
+      } });
     }
-    const place = async (next: "page" | "site" | "everywhere") => {
-      await rescopeStoredChanges(location.origin, undoIds, next, location.pathname);
+    const place = async (answer: "hold" | "site" | "everywhere") => {
+      const updates = await rescopeStoredChanges(location.origin, undoIds, answer, location.pathname);
+      rescopeLiveChanges(updates);
     };
+    // An all-sites preference waits on this page until the user accepts. A site rule is left where it is.
+    void place("hold");
     const actions = scopeChoices(lines, host, scope).map((choice) => ({
       label: choice.label,
       run: async () => {
         const outcome = await choice.run();
-        await place(outcome.saved ? outcome.scope : "page");
-        this.showToast(`${outcomeText(outcome, host)}: ${text}`, []);
+        if (outcome.saved) await place(outcome.scope);
+        this.showToast(`${outcomeText(outcome, host)}: ${text}`);
       },
     }));
-    this.showToast(`Save this preference? ${text}`, undoIds, false, undefined, actions, true, async () => {
-      for (const line of lines) await rejectProposal(line);
-      await place("page");
+    this.showToast(`Save this preference? ${text}`, {
+      undoIds,
+      action: actions,
+      sticky: true,
+      onDismiss: async () => {
+        for (const line of lines) await rejectProposal(line);
+      },
     });
   }
 
-  showToast(text: string, undoIds: string[], isError = false, onUndo?: () => Promise<void>, action?: ToastAction | ToastAction[], sticky = false, onDismiss?: () => Promise<void>) {
+  showToast(text: string, options: { undoIds?: string[]; isError?: boolean; onUndo?: () => Promise<void>; action?: ToastAction | ToastAction[]; sticky?: boolean; onDismiss?: () => Promise<void> } = {}) {
+    const { undoIds = [], isError = false, onUndo, action, sticky = false, onDismiss } = options;
     window.clearTimeout(this.toastTimer);
     const previous = this.toast;
+    const replaced = this.toastDismiss;
+    this.toastDismiss = undefined;
     if (previous) {
+      void replaced?.();
       previous.classList.remove("show");
       setTimeout(() => previous.remove(), 300);
     }
+    this.toastDismiss = onDismiss;
 
     const close = h("button", "link", "", [icon("x", 13)]);
     close.type = "button";
@@ -289,6 +303,7 @@ export class OverlayUi {
       const button = h("button", "link", each.label);
       button.type = "button";
       button.addEventListener("click", () => {
+        this.toastDismiss = undefined;
         this.dismissToast();
         void each.run();
       });
@@ -303,7 +318,9 @@ export class OverlayUi {
     const toast = h("div", `toast${isError ? " error" : ""}${stacked ? " stack" : ""}`, "", nodes);
     toast.setAttribute("role", "status");
     close.addEventListener("click", () => {
-      void onDismiss?.();
+      const dismiss = this.toastDismiss;
+      this.toastDismiss = undefined;
+      void dismiss?.();
       this.dismissToast();
     });
     this.toast = toast;
