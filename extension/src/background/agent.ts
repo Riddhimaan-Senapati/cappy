@@ -35,6 +35,7 @@ export interface AgentHooks {
 }
 
 const SERVER_OFFLINE = new Error("The local agent server is offline. Start it to send a new AI request.");
+class ReplacedDial extends Error {}
 
 const STAT_LABELS: Record<keyof PageStats, string> = {
   inputsWithoutLabel: "unlabeled inputs",
@@ -247,6 +248,21 @@ export class AgentClient {
     this.reconnectTimer = undefined;
   }
 
+  // A request that was already waiting follows the new address instead of failing with the old dial.
+  private async connectForRun(): Promise<void> {
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const generation = this.connectGeneration;
+      try {
+        await this.ensureConnected();
+        return;
+      } catch (error) {
+        if (this.connectGeneration !== generation || error instanceof ReplacedDial) continue;
+        throw error;
+      }
+    }
+    throw SERVER_OFFLINE;
+  }
+
   private async open(generation: number) {
     const { serverUrl } = await load();
     if (generation !== this.connectGeneration) throw SERVER_OFFLINE;
@@ -256,7 +272,7 @@ export class AgentClient {
       const stale = () => generation !== this.connectGeneration;
       const rejectOffline = () => {
         if (stale()) {
-          reject(SERVER_OFFLINE);
+          reject(new ReplacedDial());
           return;
         }
         this.nextConnectAt = Date.now() + 4000;
@@ -273,7 +289,7 @@ export class AgentClient {
         if (stale()) {
           opened = true;
           socket.close();
-          reject(SERVER_OFFLINE);
+          reject(new ReplacedDial());
           return;
         }
         opened = true;
@@ -400,7 +416,7 @@ export class AgentClient {
     if (!this.runs.has(runId)) return;
 
     try {
-      await this.ensureConnected();
+      await this.connectForRun();
     } catch (error) {
       if (this.runs.has(runId)) this.fail(run, error instanceof Error ? error.message : String(error));
       return;
@@ -463,12 +479,16 @@ export class AgentClient {
         return "blocked";
       }
       this.step(run, "Using your saved version of this request", "info");
+      let appliedAny = false;
       for (const change of changesWithDarkModeLast(changes)) {
         if (!this.runs.has(run.runId)) return "stopped";
         const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
         if (!outcome.ok) return false;
+        if (outcome.noop) continue;
         run.applied.set(change.id, change);
+        appliedAny = true;
       }
+      if (!appliedAny) return false;
       if (!this.runs.has(run.runId)) return "stopped";
       this.finish(run, true);
       const reply = "Done, from your saved version. Hold Shift+Enter to ask the AI again.";

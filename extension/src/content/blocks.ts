@@ -114,9 +114,46 @@ export function rescaleFonts(elements: readonly HTMLElement[]) {
 const STATE_PSEUDO = /:(?:hover|focus-visible|focus-within|focus|active|visited)\b/;
 const TEXT_PSEUDO = /::?(?:before|after|placeholder|selection|marker|first-line|first-letter)\b/;
 
+function splitSelectorList(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < selector.length; index++) {
+    const char = selector[index];
+    if (char === "(") depth++;
+    else if (char === ")" && depth > 0) depth--;
+    else if (char === "," && depth === 0) {
+      parts.push(selector.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  const last = selector.slice(start).trim();
+  if (last) parts.push(last);
+  return parts;
+}
+
+function withoutNot(selector: string): string {
+  let out = "";
+  for (let index = 0; index < selector.length; index++) {
+    if (!selector.startsWith(":not(", index)) {
+      out += selector[index];
+      continue;
+    }
+    let depth = 1;
+    index += 4;
+    while (index + 1 < selector.length && depth > 0) {
+      index++;
+      if (selector[index] === "(") depth++;
+      else if (selector[index] === ")") depth--;
+    }
+  }
+  return out;
+}
+
 // Hover and focus rules must not release text scale on every matching element while the pointer is elsewhere.
+// :not(:hover) is a resting rule. Commas inside :is() and :not() stay in one selector.
 export function restingFontSizeSelector(selector: string): string | null {
-  const parts = selector.split(",").map((part) => part.trim()).filter((part) => part && !STATE_PSEUDO.test(part) && !TEXT_PSEUDO.test(part));
+  const parts = splitSelectorList(selector).filter((part) => !STATE_PSEUDO.test(withoutNot(part)) && !TEXT_PSEUDO.test(withoutNot(part)));
   return parts.length ? parts.join(", ") : null;
 }
 

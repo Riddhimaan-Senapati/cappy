@@ -181,6 +181,23 @@ describe("recipe replay when the run stops", () => {
     assert.deepEqual(bridge.data.commands[0]?.appliedOrigins, []);
     assert.equal(FakeSocket.all.length, 0);
   });
+
+  it("does not mark an everywhere command done when the saved change is a no-op", async () => {
+    rememberRecipe();
+    bridge.sendMessage = async (_tabId, request) => {
+      if (request.kind === "tool" && request.name === "read_page") return { ok: true, result: outline };
+      if (request.kind === "tool" && request.name === "apply_change") {
+        return { ok: true, result: { ok: true, noop: true, matched: {}, before: outline.stats, after: outline.stats } };
+      }
+      return { ok: true, result: [] };
+    };
+    const agent = new AgentClient({ event: () => undefined, tool: () => undefined, status: () => undefined });
+    const pending = agent.startRun(tab, "chat", "make the text bigger", { commandId: "cmd-1" });
+    const socket = await nextSocket(FakeSocket.all.length);
+    socket.succeed();
+    await pending;
+    assert.deepEqual(bridge.data.commands[0]?.appliedOrigins, []);
+  });
 });
 
 describe("socket lifetime", () => {
@@ -250,6 +267,23 @@ describe("socket lifetime", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(socketA.readyState, FakeSocket.CLOSED);
     assert.equal(intervals.size, 1);
+  });
+
+  it("follows a server change instead of failing the request that was already waiting", async () => {
+    const events: UiEvent[] = [];
+    const agent = new AgentClient({ event: (_tabId, event) => events.push(event), tool: () => undefined, status: () => undefined });
+    const started = FakeSocket.all.length;
+    const pending = agent.startRun(tab, "chat", "make the text bigger", { fresh: true });
+    const socketA = await nextSocket(started);
+    const next = "ws://127.0.0.1:10001/agent";
+    bridge.data.serverUrl = next;
+    agent.useServer(next);
+    const socketB = await nextSocket(started + 1);
+    socketA.succeed();
+    socketB.succeed();
+    await pending;
+    assert.equal(events.some((event) => event.type === "error"), false);
+    assert.ok(socketB.sent.some((body) => body.includes("make the text bigger")));
   });
 
   it("ignores a socket that opens after the server address changed", async () => {

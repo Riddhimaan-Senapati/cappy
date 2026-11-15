@@ -111,6 +111,7 @@ describe("one-off scope is the same for every change type", () => {
     assert.equal(prepareSavedChange({ ...text, scope: "everywhere" }, "make the text bigger across all websites", "chat", "/demo/campus.html").scope, "everywhere");
     assert.equal(prepareSavedChange({ ...dark, scope: "site" }, "dark mode everywhere on the web", "chat", "/demo/campus.html").scope, "everywhere");
     assert.equal(prepareSavedChange({ ...dark, scope: "everywhere" }, "dark mode everywhere on this page", "chat", "/demo/campus.html").scope, "page");
+    assert.equal(prepareSavedChange({ ...dark, scope: "everywhere", schedule: { start: "22:00", end: "06:00" } }, "dark mode on this page after 10pm", "chat", "/demo/campus.html").scope, "page");
     const weekdays = { days: ["mon", "tue", "wed", "thu", "fri"], start: "09:00", end: "17:00" };
     const portable = prepareSavedChange(
       { ...text, scope: "everywhere", schedule: weekdays, block: { name: "contentFilter", keywords: ["shorts"], itemSelector: null, action: "hide" } },

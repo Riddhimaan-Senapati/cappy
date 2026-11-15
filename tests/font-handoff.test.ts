@@ -62,6 +62,29 @@ describe("font-size rules and text scale", () => {
   });
 });
 
+describe("focus outlines", () => {
+  it("keeps a focus-visible rule even though nothing is focused", async () => {
+    document.body.innerHTML = "<a id='link' href='/a'>Link</a>";
+    const { applyChange } = await import("../extension/src/content/engine.js");
+    const { restingFontSizeSelector } = await import("../extension/src/content/blocks.js");
+    const path = location.pathname || "/";
+    const outcome = await applyChange({
+      id: "focus-ring",
+      summary: "Thicker focus outline",
+      reason: "Request",
+      css: "a:focus-visible { outline: 2px solid red; }",
+      dom: null,
+      block: null,
+      scope: "page",
+      pagePath: path,
+    }, true);
+    assert.equal(outcome.ok, true, outcome.error ?? "");
+    assert.match(document.querySelector(`style[data-ba="change:focus-ring"]`)?.textContent ?? "", /focus-visible/);
+    assert.equal(restingFontSizeSelector(":is(h1, h2), a:not(:hover)"), ":is(h1, h2), a:not(:hover)");
+    assert.equal(restingFontSizeSelector("a:hover, p"), "p");
+  });
+});
+
 describe("dark mode no-op", () => {
   it("reports a flag when the page is already dark and does not stay applied", async () => {
     document.body.innerHTML = "<main style='background-color: rgb(10, 10, 10); color: rgb(240, 240, 240)'>Night</main>";

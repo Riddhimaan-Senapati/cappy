@@ -68,7 +68,8 @@ function applyCss(change: Change, matched: Record<string, number>): Undo {
   const watches: Array<() => void> = [];
   for (const rule of sheet.cssRules) {
     if (!(rule instanceof CSSStyleRule)) continue;
-    const testable = rule.selectorText.replace(/::?(before|after|placeholder|selection|marker|first-line|first-letter)\b/g, "");
+    // State pseudo-classes are stripped only for the match count. A :focus-visible rule matches nothing until that state is active, and "no matches" would revert it.
+    const testable = rule.selectorText.replace(/::?(?:before|after|placeholder|selection|marker|first-line|first-letter|hover|focus-visible|focus-within|focus|active|visited)\b/g, "");
     try {
       matched[rule.selectorText] = document.querySelectorAll(testable || "*").length;
     } catch {

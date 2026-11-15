@@ -97,6 +97,9 @@ export function prepareSavedChange<T extends { scope: string; pagePath?: string 
 ): T {
   let scope = change.scope;
   if (trigger === "chat" && (scope === "site" || scope === "everywhere")) {
+    if (THIS_PAGE.test(message)) {
+      scope = "page";
+    } else {
     const namedSite = requestedSiteWide(message);
     const siteSpecificFilter = change.block?.name === "contentFilter" && Boolean(change.block.itemSelector);
     // A schedule keeps a portable all-sites filter (no host selector) on every site. A selector is this site only.
@@ -105,6 +108,7 @@ export function prepareSavedChange<T extends { scope: string; pagePath?: string 
     const everywhere = requestedEverywhere(message) || preferenceEverywhere || portableEverywhere;
     const siteWide = !everywhere && (namedSite || change.schedule != null || siteSpecificFilter);
     scope = everywhere ? "everywhere" : siteWide ? "site" : "page";
+    }
   }
   if (scope === "page") return { ...change, scope, pagePath: normalizePagePath(pathname || change.pagePath || "/") };
   return { ...change, scope, pagePath: undefined };
