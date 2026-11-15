@@ -40,11 +40,74 @@ function release(el: HTMLElement, holder: object): void {
   for (const action of entry.holders.values()) apply(el, action);
 }
 
+export type Classifier = (match: string, items: string[]) => Promise<boolean[] | null>;
+
+const CLASSIFY_BATCH = 40;
+const CLASSIFY_DELAY_MS = 250;
+let classifier: Classifier | null = null;
+const verdicts = new Map<string, boolean>();
+const inFlight = new Set<string>();
+const queued = new Map<string, Set<string>>();
+const waiting = new Map<string, Set<() => void>>();
+let classifyTimer: ReturnType<typeof setTimeout> | undefined;
+
+export function setFilterClassifier(next: Classifier | null) {
+  classifier = next;
+}
+
+const verdictKey = (match: string, text: string) => `${match}\u0000${text}`;
+
+const TITLE = "h1, h2, h3, h4, [id*='title' i], [class*='title' i]";
+
+// Leading with the title keeps durations and badges from crowding out what the item is about.
+export function itemText(el: HTMLElement): string {
+  const clean = (text: string) => text.replace(/\s+/g, " ").trim();
+  const title = clean(el.querySelector(TITLE)?.textContent ?? "");
+  const body = clean(spacedText(el));
+  return (title ? `${title} | ${body}` : body).slice(0, 240);
+}
+
+// Undefined means not judged yet; the item stays as it is until its verdict arrives.
+function verdictFor(match: string, el: HTMLElement): boolean | undefined {
+  const text = itemText(el);
+  if (!text) return false;
+  const key = verdictKey(match, text);
+  const verdict = verdicts.get(key);
+  if (verdict !== undefined || !classifier || inFlight.has(key)) return verdict;
+  if (!queued.has(match)) queued.set(match, new Set());
+  queued.get(match)!.add(text);
+  if (classifyTimer === undefined) classifyTimer = setTimeout(() => void flushClassify(), CLASSIFY_DELAY_MS);
+  return undefined;
+}
+
+async function flushClassify() {
+  classifyTimer = undefined;
+  const batches = [...queued.entries()];
+  queued.clear();
+  await Promise.all(
+    batches.map(async ([match, texts]) => {
+      const all = [...texts];
+      for (let start = 0; start < all.length; start += CLASSIFY_BATCH) {
+        const chunk = all.slice(start, start + CLASSIFY_BATCH);
+        chunk.forEach((text) => inFlight.add(verdictKey(match, text)));
+        const result = await classifier?.(match, chunk).catch(() => null);
+        chunk.forEach((text, index) => {
+          inFlight.delete(verdictKey(match, text));
+          if (result) verdicts.set(verdictKey(match, text), Boolean(result[index]));
+        });
+        waiting.get(match)?.forEach((wake) => wake());
+      }
+    }),
+  );
+}
+
 export function applyContentFilter(filter: Filter, doc: Document): ContentFilterHandle {
   const holder = {};
   const held = new Map<HTMLElement, Action>();
   const groupSelectors = new Set<string>();
   const pattern = keywordPattern(filter.keywords);
+  const match = filter.match?.trim() || null;
+  const matches = (el: HTMLElement) => pattern.test(searchableText(el)) || (match !== null && verdictFor(match, el) === true);
   let groupsAt = Number.NEGATIVE_INFINITY;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let undone = false;
@@ -63,7 +126,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const pass = (): void => {
     if (undone) return;
     const desired = new Map<HTMLElement, Action>();
-    for (const el of targets(doc, selectorsToCheck(), pattern)) desired.set(el, filter.action);
+    for (const el of targets(doc, selectorsToCheck(), matches)) desired.set(el, filter.action);
 
     for (const el of Array.from(held.keys())) {
       if (desired.has(el)) continue;
@@ -86,6 +149,10 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
     }, FILTER_DEBOUNCE_MS);
   };
 
+  if (match) {
+    if (!waiting.has(match)) waiting.set(match, new Set());
+    waiting.get(match)!.add(schedulePass);
+  }
   pass();
   const observer = new MutationObserver(schedulePass);
   observer.observe(doc.body ?? doc.documentElement, { childList: true, subtree: true, characterData: true });
@@ -93,6 +160,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const undo = (): void => {
     if (undone) return;
     undone = true;
+    if (match) waiting.get(match)?.delete(schedulePass);
     observer.disconnect();
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
@@ -106,13 +174,13 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
 // A keyword hit on an item also matches every container around it, since text is inherited, so a
 // selector like "div" would hide the whole page. Containers holding unmatched members of the same
 // selector are skipped, and only the outermost hit is hidden, so a card goes as one unit.
-function targets(doc: Document, selectors: readonly string[], pattern: RegExp): HTMLElement[] {
+function targets(doc: Document, selectors: readonly string[], matches: (el: HTMLElement) => boolean): HTMLElement[] {
   const hits: HTMLElement[] = [];
   const missesAbove = new Map<HTMLElement, Set<string>>();
   const hitsAbove = new Map<HTMLElement, Set<string>>();
   for (const selector of selectors) {
     for (const el of queryItems(doc, selector)) {
-      const matched = pattern.test(searchableText(el));
+      const matched = matches(el);
       if (matched) hits.push(el);
       const table = matched ? hitsAbove : missesAbove;
       for (let a = el.parentElement; a; a = a.parentElement) {

@@ -69,6 +69,7 @@ export class AgentClient {
   private modelsRequested = new Set<string>();
   private suggestionTabs = new Map<string, number>();
   private suggestions = new Map<string, (suggestion: Suggestion | null) => void>();
+  private classifications = new Map<string, (verdicts: boolean[] | null) => void>();
   private queues = new Map<number, Array<{ runId: string; message: string; fresh: boolean; commandId?: string; thread?: string; target?: TargetElement }>>();
 
   constructor(private hooks: AgentHooks) {}
@@ -127,6 +128,29 @@ export class AgentClient {
       });
       const host = (() => { try { return new URL(page.url).host; } catch { return ""; } })();
       this.send({ type: "suggest", requestId, provider: activeProvider, models: state.modelChoices[activeProvider] ?? {}, profile: profileFor(state.profile, host), applied, page, host, friction, feedback });
+    });
+  }
+
+  async classify(match: string, items: string[]): Promise<boolean[] | null> {
+    try {
+      await this.ensureConnected();
+    } catch {
+      return null;
+    }
+    const state = await load();
+    const { activeProvider } = await this.getStatus();
+    if (!activeProvider) return null;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.classifications.delete(requestId);
+        resolve(null);
+      }, 20_000);
+      this.classifications.set(requestId, (verdicts) => {
+        clearTimeout(timer);
+        resolve(verdicts);
+      });
+      this.send({ type: "classify", requestId, provider: activeProvider, models: state.modelChoices[activeProvider] ?? {}, match, items });
     });
   }
 
@@ -406,6 +430,11 @@ export class AgentClient {
       if (this.notice?.level === "info") this.notice = undefined;
       this.setStatus({ connected: true, error: undefined });
       void this.ensureModels();
+      return;
+    }
+    if (message.type === "classified") {
+      this.classifications.get(message.requestId)?.(message.verdicts);
+      this.classifications.delete(message.requestId);
       return;
     }
     if (message.type === "suggestion") {

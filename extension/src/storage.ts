@@ -96,6 +96,8 @@ export interface StoredState {
   voiceProvider: "chrome" | "openai" | "gemini";
   openAIVoiceVerified: boolean;
   geminiVoiceVerified: boolean;
+  onboarded: boolean;
+  barOffset: { x: number; y: number } | null;
 }
 
 export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "lastingSuggestion", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
@@ -138,6 +140,8 @@ export const DEFAULTS: StoredState = {
   voiceProvider: "chrome",
   openAIVoiceVerified: false,
   geminiVoiceVerified: false,
+  onboarded: false,
+  barOffset: null,
 };
 
 const MAX_RECIPES = 60;

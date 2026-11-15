@@ -22,8 +22,9 @@ How you work
    - textScale: scales every text element's real computed size; use when the site sets px sizes so CSS rem or % changes do nothing.
    - stopMotion: pauses all running CSS/Web animations and autoplaying media.
    - formFixer: improves form targets and tab order, adds missing visible labels and readable validation errors when enabled, and checks form labels and tab order with axe. Use oneQuestionMode only if requested. The user submits through the original form control.
-   - contentFilter: hides or dims repeated items (feed posts, videos, search results, shelves, reels) whose text, aria-label or links contain keywords. Fields:
-     - keywords: 1 to 12 words that identify the items to filter (e.g. ["podcast", "podcasts"]). Matching is whole word, and a simple -s or -es ending also matches. Include the plural in your list anyway.
+   - contentFilter: hides or dims repeated items (feed posts, videos, search results, shelves, reels) that match. Fields:
+     - keywords: 1 to 12 words that identify the items to filter (e.g. ["podcast", "podcasts"]). Matching is whole word, and a simple -s or -es ending also matches. Include the plural in your list anyway. Keyword hits are hidden instantly.
+     - match: a plain description of what to filter (e.g. "gaming videos", "clickbait or sensational titles", "posts about crypto"). A model judges every item the keywords miss, by meaning, including items that load later. Set it whenever the request is about a kind or topic of content rather than one exact word; set null only for a literal word filter.
      - itemSelector: for a site-level change, copy one selector exactly from the page outline's itemGroups (the card, the outermost repeated element). Pick the group whose label and samples match what the user wants filtered.
      - itemSelector null: applies to every repeated item group the page has, on any site. Use it for portable filters when all repeated item groups are in scope. If the preference targets a kind of card that needs a site-specific selector, adapt it separately on each site.
      - action: "hide" to remove the items, or "dim" to fade them.

@@ -10,6 +10,7 @@ import { Spotlight, type SpotlightDeps } from "./spotlight.js";
 import { OVERLAY_CSS } from "./styles.js";
 
 const TOAST_MS = 9000;
+const POINTABLE = "button, a[href], input, textarea, select, [role='button'], [role='option'], [role='switch'], [role='tab'], [tabindex]:not([tabindex='-1'])";
 const NUDGE_MS = 25000;
 
 type ToastAction = { label: string; run: () => Promise<void> };
@@ -54,6 +55,27 @@ export class OverlayUi {
   }
 
   private pointPill: HTMLElement | null = null;
+
+  // The page cannot see into this closed shadow root, so the air pointer asks here before falling through to the page.
+  pointAt(x: number, y: number): { covered: boolean; control: HTMLElement | null } {
+    const contains = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+    const covered = [...this.shadow.children].some((child) => child instanceof HTMLElement && contains(child) && getComputedStyle(child).visibility !== "hidden" && getComputedStyle(child).display !== "none");
+    if (!covered) return { covered: false, control: null };
+    let control: HTMLElement | null = null;
+    let area = Infinity;
+    for (const element of this.shadow.querySelectorAll<HTMLElement>(POINTABLE)) {
+      if (!contains(element) || (element as HTMLButtonElement).disabled) continue;
+      const rect = element.getBoundingClientRect();
+      if (rect.width * rect.height < area) {
+        area = rect.width * rect.height;
+        control = element;
+      }
+    }
+    return { covered: true, control };
+  }
 
   // Listening without the bar: a small pill shows what was heard and what the user is pointing at.
   private showPointStatus(status: { text: string; label?: string; countdown?: number | null } | null) {

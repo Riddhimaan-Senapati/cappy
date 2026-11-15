@@ -7,7 +7,7 @@
   "permissions": ["sidePanel", "storage", "tabs", "activeTab", "scripting", "tts", "offscreen", "contextMenus"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "dist/background.js", "type": "module" },
-  "action": { "default_title": "Adaptive Agent settings", "default_popup": "popup.html" },
+  "action": { "default_title": "Adaptive Agent" },
   "side_panel": { "default_path": "sidepanel.html" },
   "commands": {
     "toggle-spotlight": {
