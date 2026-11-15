@@ -59,6 +59,8 @@ body { background: radial-gradient(ellipse at 15% 0%, rgba(110,168,255,0.12), tr
 .w-need:hover { background: var(--raise2); }
 .w-need:active { transform: scale(0.98); }
 .w-need[aria-pressed="true"] { border-color: rgba(139,155,255,0.6); background: rgba(139,155,255,0.12); }
+.w-seg2 { grid-template-columns: repeat(2, 1fr); }
+.w-note { display: block; margin-top: 8px; color: var(--muted); line-height: 1.45; }
 .w-need .ico { color: var(--muted); margin-top: 1px; }
 .w-need[aria-pressed="true"] .ico { color: var(--accent); }
 .w-need b { display: block; font-size: 13.5px; font-weight: 600; }
@@ -220,7 +222,7 @@ function aiStep(): Node[] {
   return [...head, h("section", "s-sec", "", [...rows, ...notice])];
 }
 
-function needsStep(): Node[] {
+function needsStep(state: StoredState): Node[] {
   const cards = NEEDS.map((need) => {
     const card = button("w-need", "", () => {
       if (chosen.has(need.id)) chosen.delete(need.id);
@@ -263,7 +265,32 @@ function needsStep(): Node[] {
     h("div", "w-grid", "", cards),
     ...colorPicker,
     h("div", "w-extra", "", [label, textarea]),
+    autoAdaptQuestion(state),
   ];
+}
+
+// Asked here because the page-load run acts on these needs. Automatic costs one AI request and a short blur the first time each site opens.
+function autoAdaptQuestion(state: StoredState): Node {
+  const choices: Array<{ value: boolean; label: string }> = [
+    { value: true, label: "Adapt it for me" },
+    { value: false, label: "Wait until I ask" },
+  ];
+  const seg = h(
+    "div",
+    "s-seg w-seg2",
+    "",
+    choices.map((choice) => {
+      const option = button("", choice.label, () => void save({ proactive: choice.value }).then(render));
+      option.setAttribute("aria-pressed", String(state.proactive === choice.value));
+      return option;
+    }),
+  );
+  seg.setAttribute("role", "group");
+  seg.setAttribute("aria-label", "When you open a new website");
+  const note = state.proactive
+    ? "The first time you open a site, the page blurs for a moment while the agent applies what clearly fits your needs. Later visits reuse the result with no AI request."
+    : "Nothing changes until you open the bar and ask. Changes you save still come back on their own.";
+  return h("div", "w-sub", "", [h("label", "", "When you open a new website"), seg, h("small", "w-note", note)]);
 }
 
 async function shortcutFor(name: string) {
@@ -347,7 +374,6 @@ function handsFreeStep(state: StoredState): Node[] {
       toggleRow("Read replies aloud", "Speaks what the agent changed", state.speakReplies, (value) => void save({ speakReplies: value })),
       toggleRow("Camera control", "Point to hover, pinch to click, hold a pinch to select, palm to scroll", state.camera.enabled, (value) => void save({ camera: { ...state.camera, enabled: value } })),
       toggleRow("Floating button", "A small button on pages that opens the bar", state.floatingButton, (value) => void save({ floatingButton: value })),
-      toggleRow("Adapt pages when they open", "Applies what clearly fits your needs on new sites", state.proactive, (value) => void save({ proactive: value })),
     ]),
   ];
 }
@@ -398,7 +424,7 @@ async function render() {
   progress.style.gridTemplateColumns = `repeat(${STEPS.length}, 1fr)`;
   progress.setAttribute("aria-label", finished ? "Setup complete" : `Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`);
 
-  const views = [welcomeStep, aiStep, needsStep, shortcutStep, () => handsFreeStep(state), tipsStep];
+  const views = [welcomeStep, aiStep, () => needsStep(state), shortcutStep, () => handsFreeStep(state), tipsStep];
   const body = finished ? doneView() : views[step]();
   const ready = (status.providers ?? []).some((provider) => provider.ready);
   const skipping = (step === 1 && !ready) || (step === 4 && micState !== "granted" && !state.camera.enabled && !state.speakReplies);

@@ -40,6 +40,7 @@ Chrome extension                                        Local Node server (holds
 - LLM usage and the page inspector: providers report token counts per run, shown in Settings (AI tab); the side panel can list what the extension changed on the current page. Settings has Track events, on by default, which keeps the inspector's event log (the latest 100). Turning it off stops recording and clears that log. It does not affect friction counts or suggestions.
 - Reopening a saved request continues its session: follow-ups carry up to four earlier successful prompt-and-reply pairs from it.
 - Saved changes replay on page load with no model call. A one-off is scope `page` and replays only on that pathname; scope `site` replays across the origin and the UI says so; scope `everywhere` replays on every site. Repeating the same request on that page is served from storage; undo drops the saved change and the recipe. Shift+Enter asks the model again.
+- Page load is kept fast on purpose (see "Speed" below): saved changes reapply without verification scans, and the page-load AI run checks each site once per profile.
 - DOM ops and text scaling re-apply to content added later (a MutationObserver in `extension/src/content/engine.ts`). CSS keeps applying on its own.
 - The overlay lives in a closed shadow root rendered in the top layer (`popover`), so page-wide filters and site modals do not affect it.
 
@@ -103,6 +104,29 @@ Any change can carry a `schedule` (days, a daily window that may cross midnight,
 
 Focus rules are the scheduled changes, listed in Settings, General, Focus rules. While one is on, the bar shows a Focus tag and the floating button a red ring (`onFocusLive` in `engine.ts`). The Focus mode switch there (`focusMode` in storage) turns every focus rule on, ignoring its times, until it is turned off; the engine's `scheduleOn` checks it before `isScheduleActive`.
 
+## Speed
+
+Measured on a 2,500-card feed page (about a YouTube home page) with the e2e browser, from DOMContentLoaded to every saved change on screen.
+
+- **Reapplying saved changes.** `applyChange` verifies a change by computing page stats before and after (`computeStats`, each a layout-forcing scan of up to 3,000 elements) and sampling low contrast over 2,500 text elements. That is worth it when the model makes a change, not when a saved, already verified change comes back. Restore and recipe replay now pass `verify: false`, and restore runs the injection check once per page (`pageChecked: true`) instead of once per change. 12 saved changes went from 2.8 s to 0.19 s; it used to cost about 225 ms per change.
+- **The page-load AI run.** With Act on page load on, a site with no saved changes gets one model run, and the page blurs (`ba-busy`) while it starts. Since onboarding fills the profile, this ran for every site in every new tab, with a blur of up to 8 s. Now:
+  - A finished run marks the site checked for this profile (`proactiveChecked` in `chrome.storage.local`, keyed by profile id, origin and profile lines, kept 7 days). Later tabs and visits skip the model call. Changing the profile lines checks again.
+  - Restored page or site changes skip the run. Global changes alone do not, since a cross-site preference may need a site-specific version here.
+  - The blur lifts after 1.5 s (`BUSY_BLUR_MS` in `engine.ts`) or at the first applied change; later changes animate in.
+- Onboarding asks "When you open a new website": adapt it for me, or wait until I ask (`proactive`). The Settings toggle says the same.
+- `scripts/e2e/page-load.ts` checks the run happens once per site and profile; the timing harness is not committed (it needs a generated large page).
+
+## Hackathon talking points
+
+What we can show and say, with the numbers behind it.
+
+- **Saved changes come back almost instantly, with no AI call.** Reapplying 12 saved changes on a feed-sized page went from 2.8 s to 0.19 s, about 15 times faster, by not re-verifying work that was verified when it was made. The safety check against injected instructions still runs on every page.
+- **The AI looks at a new site once, not on every visit.** The first visit gets a short blur (at most 1.5 s, down from 8 s) while it applies what fits your needs. Every later visit reuses the result, so there is no waiting and no API cost. Users choose this during setup.
+- **Time rules that understand how people talk.** "Hide Shorts on weekdays 9 to 5" means 9 AM to 5 PM, not 9 AM to 5 AM. "For an hour", "for half an hour" and "until 5pm" all end on time. Ambiguous hours defer to the model's reading when it matches the same clock positions.
+- **Focus mode.** One switch turns on every focus rule now, ignoring its schedule, until you turn it off. The bar shows Focus while any rule is on.
+- **Safety held up under merging.** Merging five parallel agent PRs surfaced a server that could not start (an import of a deleted module), a reconnect loop that kept the extension awake forever while the server was offline, and tests that no longer matched the UI. All were caught by typecheck, 192 unit tests and 16 browser scenarios before anything reached main.
+- **Every speed claim has a test.** The page-load scenario fails if a second tab makes another model call, and was checked to fail with the fix removed.
+
 ## Repo layout
 
 ```
@@ -154,7 +178,7 @@ Done:
 Partly done:
 - Before/after verification is shown as stat deltas, not as screenshots judged by a model or a before/after toggle in the side panel.
 - Color fix covers images, video and pages with a color matrix; recoloring chart CSS is not specific.
-- First change in about 1.5 s is not measured. Repeat requests and saved changes skip the model.
+- First change from the model in about 1.5 s is not measured. Saved changes reapply in about 0.2 s with no model call (measured, see "Speed"), and repeat requests skip the model.
 
 Not started:
 - A conversational onboarding chat (the guided setup page covers the same ground).

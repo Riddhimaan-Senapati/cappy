@@ -28,6 +28,11 @@ const agent = new AgentClient({
       const request = sessionRequests.get(event.runId);
       if (request) request.options = { question: event.question, options: event.options };
     }
+    if (event.type === "done" && event.trigger === "page_load") {
+      const checked = proactivePending.get(tabId);
+      if (checked) void markChecked(checked);
+    }
+    if ((event.type === "done" && event.trigger === "page_load") || event.type === "error" || event.type === "cancelled") proactivePending.delete(tabId);
     if (event.type === "done" || event.type === "error") {
       const message = sessionRequests.get(event.runId);
       sessionRequests.delete(event.runId);
@@ -203,11 +208,31 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
   }
 });
 
-// A site with its own saved changes was already adapted without a model call. Global changes alone do not count,
+const CHECKED_FOR_MS = 7 * 24 * 60 * 60 * 1000;
+// Tab id to the site and profile its page-load run is checking; saved as checked once that run finishes.
+const proactivePending = new Map<number, string>();
+
+const checkedKey = (state: { activeProfileId: string; profile: string[] }, origin: string) => JSON.stringify([state.activeProfileId, origin, state.profile]);
+
+async function markChecked(key: string) {
+  const { proactiveChecked = {} } = (await chrome.storage.local.get("proactiveChecked")) as { proactiveChecked?: Record<string, number> };
+  const now = Date.now();
+  const kept = Object.entries(proactiveChecked).filter(([, at]) => now - at < CHECKED_FOR_MS).slice(-500);
+  await chrome.storage.local.set({ proactiveChecked: Object.fromEntries([...kept, [key, now]]) });
+}
+
+async function checkedRecently(key: string) {
+  const { proactiveChecked = {} } = (await chrome.storage.local.get("proactiveChecked")) as { proactiveChecked?: Record<string, number> };
+  const at = proactiveChecked[key];
+  return at !== undefined && Date.now() - at < CHECKED_FOR_MS;
+}
+
+// A page or site with its own saved changes was already adapted without a model call. Global changes alone do not count,
 // since cross-site preferences such as a content filter still need a site-specific implementation here.
+// A site this profile already checked in the last week is skipped too, in any tab: its changes, if any, were saved then.
 async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restored: number, profileChanged = false) {
   const state = await load();
-  const adaptedHere = restored > 0 && (state.siteChanges[origin]?.length ?? 0) > 0;
+  const adaptedHere = restored > 0;
   if (!tab.id) return;
   const tabId = tab.id;
   const note = (text: string) => sendToTab(tabId, { kind: "activity", text }).catch(() => undefined);
@@ -222,11 +247,17 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
     await note("Automatic page adaptation skipped: already checked this site and profile in this tab during this browser session.");
     return;
   }
+  const checked = checkedKey(state, origin);
+  if (!profileChanged && (await checkedRecently(checked))) {
+    await note("Automatic page adaptation skipped: this profile already checked this site in the last week.");
+    return;
+  }
+  proactivePending.set(tabId, checked);
   if (await agent.startRun(tab, "page_load", "")) {
     await note("Automatic page adaptation started: enabled, profile present, no saved site adaptation, first check for this site and profile in this tab.");
     const { proactiveSeen: seen = [] } = (await chrome.storage.session.get("proactiveSeen")) as { proactiveSeen?: string[] };
     await chrome.storage.session.set({ proactiveSeen: [...seen.filter((entry) => entry !== key).slice(-100), key] });
-  }
+  } else proactivePending.delete(tabId);
 }
 
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
