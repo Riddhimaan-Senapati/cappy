@@ -566,7 +566,7 @@ export class AgentClient {
         if (run.trigger !== "chat") throw new Error("Site controls require a chat request.");
         result = await sendToTab(run.tabId, { kind: "useSiteControl", input: message.input, userMessage: run.message });
       } else {
-        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input, source: "llm" });
+        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input, source: "llm", requested: run.trigger === "chat" });
       }
       if (!this.runs.has(run.runId)) return;
       if (message.name === "apply_change") this.afterApply(run, (message.input as { change: Change }).change, result as ApplyOutcome);

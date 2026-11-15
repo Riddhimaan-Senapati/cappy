@@ -36,7 +36,7 @@ export interface PageInspection {
 
 export type ContentRequest =
   | { kind: "prepareProfileSwitch" }
-  | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown; source?: "llm" | "recipe" }
+  | { kind: "tool"; name: Exclude<TabToolName, "screenshot" | "use_site_control">; input: unknown; source?: "llm" | "recipe"; requested?: boolean }
   | { kind: "useSiteControl"; input: unknown; userMessage: string }
   | { kind: "list" }
   | { kind: "inspectPage" }

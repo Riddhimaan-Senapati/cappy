@@ -4,7 +4,7 @@ import type { BlockCall } from "../shared/adaptation.js";
 import { installDom } from "./dom-setup.js";
 
 installDom();
-const { applyContentFilter, keywordPattern, leftovers, setFilterClassifier, setLeftoverListener, LEFTOVER_SETTLE_MS } = await import("../extension/src/content/content-filter.js");
+const { applyContentFilter, keywordPattern, leftovers, setFilterClassifier, setLeftoverListener, setFilterPauseNotice, LEFTOVER_SETTLE_MS } = await import("../extension/src/content/content-filter.js");
 const { findItemGroups } = await import("../extension/src/content/item-groups.js");
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
@@ -242,5 +242,55 @@ describe("YouTube search results", () => {
     await settle();
     assert.deepEqual(hidden(), ["grid-shelf-view-model"]);
     handle.undo();
+  });
+});
+
+describe("content filter judging limits", () => {
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const feed = (titles: string[]) => titles.map((title) => `<feed-card><h3>${title}</h3></feed-card>`).join("");
+
+  it("pauses judging when nearly every item matches, and resumes on request", async () => {
+    const asked: string[] = [];
+    const pauses: string[] = [];
+    let resume: (() => void) | null = null;
+    setFilterClassifier(async (_match, items) => {
+      asked.push(...items);
+      return items.map(() => true);
+    });
+    setFilterPauseNotice((_match, reason, _judged, again) => {
+      pauses.push(reason);
+      resume = again;
+    });
+    document.body.innerHTML = `<main>${feed(Array.from({ length: 45 }, (_, i) => `Podcast episode ${i}`))}</main>`;
+    const handle = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "podcasts only" }), document);
+    await wait(900);
+    assert.deepEqual(pauses, ["mostly"]);
+    const askedBeforeMore = asked.length;
+    document.querySelector("main")!.insertAdjacentHTML("beforeend", feed(Array.from({ length: 20 }, (_, i) => `Podcast special ${i}`)));
+    await wait(900);
+    assert.equal(asked.length, askedBeforeMore, "no new items are sent to the model while paused");
+    resume!();
+    await wait(900);
+    assert.ok(asked.length > askedBeforeMore, "Keep checking judges the waiting items");
+    handle.undo();
+    setFilterClassifier(null);
+    setFilterPauseNotice(null);
+  });
+
+  it("does not retry items whose judging call failed", async () => {
+    let calls = 0;
+    setFilterClassifier(async () => {
+      calls++;
+      return null;
+    });
+    document.body.innerHTML = `<main>${feed(["Alpha talk", "Beta talk", "Gamma talk"])}</main>`;
+    const handle = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "failing judge" }), document);
+    await wait(700);
+    document.querySelector("main")!.insertAdjacentHTML("beforeend", "<p>page grew</p>");
+    await wait(700);
+    assert.equal(calls, 1);
+    assert.deepEqual(hiddenTitles(), []);
+    handle.undo();
+    setFilterClassifier(null);
   });
 });

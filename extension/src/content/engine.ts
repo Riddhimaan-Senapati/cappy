@@ -452,6 +452,8 @@ const UNMEASURED: ApplyOutcome["before"] = { inputsWithoutLabel: 0, smallTargets
 export interface ApplyOptions {
   // Verification scans the whole page twice per change; a saved change was verified when it was made.
   verify?: boolean;
+  // The user asked for this change, so a rise in page-wide problem counts is reported instead of undoing it.
+  keepIfWorse?: boolean;
   // The caller already ran the injection check on this page (restore checks once, not once per change).
   pageChecked?: boolean;
 }
@@ -491,10 +493,12 @@ export async function applyChange(change: Change, animate = true, options: Apply
       after = entry.live && verify ? computeStats() : before;
       const counts = Object.values(matched);
       const missed = !change.block && counts.length > 0 && counts.every((count) => count === 0);
-      const worsened = verify && observedProblems(after, change) > observedProblems(before, change);
+      const increase = verify ? observedProblems(after, change) - observedProblems(before, change) : 0;
+      const worsened = increase > 0 && !options.keepIfWorse;
       if (!verify || !entry.live || (!missed && !worsened)) {
         return {
           ok: true, matched, before, after, note,
+          ...(increase > 0 ? { worsened: increase } : {}),
           ...(!entry.live ? { waitingForSchedule: true } : {}),
           ...(visual && entry.live && verify ? { lowContrast: lowContrastSamples() } : {}),
           ...(replaced.length ? { replaced } : {}),

@@ -68,6 +68,8 @@ export interface ApplyOutcome {
   waitingForSchedule?: boolean;
   lowContrast?: ContrastIssue[];
   replaced?: string[];
+  // How many more page-wide problems were counted after a change the user asked for; it is kept anyway.
+  worsened?: number;
   before: PageStats;
   after: PageStats;
   note?: string;
