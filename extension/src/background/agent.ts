@@ -57,6 +57,8 @@ interface StartOptions {
   fresh?: boolean;
   interrupt?: boolean;
   queuedId?: string;
+  // A caller that waits for this run's result (a GPT-Live task) picks the id; it stays the same if the run is queued.
+  runId?: string;
   commandId?: string;
   thread?: string;
   target?: TargetElement;
@@ -346,7 +348,7 @@ export class AgentClient {
     const tabId = tab.id;
     const origin = new URL(tab.url).origin;
     const host = new URL(tab.url).host;
-    const runId = queuedId ?? crypto.randomUUID();
+    const runId = queuedId ?? options.runId ?? crypto.randomUUID();
     const run: Run = { runId, tabId, windowId: tab.windowId, origin, trigger, message, applied: new Map(), siteControls: new Map(), commandId, thread, target };
 
     const active = [...this.runs.values()].filter((existing) => existing.tabId === tabId);

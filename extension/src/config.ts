@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { Change, validateChange } from "../../shared/adaptation.js";
-import { load } from "./storage.js";
+import { exportClassifyCaches, importClassifyCaches, load } from "./storage.js";
 
 const strings = z.array(z.string());
 const record = <T extends z.ZodType>(value: T) => z.record(z.string(), value);
@@ -53,22 +53,30 @@ const settings = profile.extend({
 "Invalid profiles");
 
 // Files exported before the rename to Cappy say "browser-agent-config" and still import.
-const config = z.object({ format: z.enum(["cappy-config", "browser-agent-config"]), version: z.literal(1), settings });
-export type ImportedConfig = z.infer<typeof settings>;
+const classifyCache = z.record(z.string().regex(/^classifyCache:\S+$/), z.object({
+  version: z.number(),
+  matches: z.record(z.string(), z.record(z.string(), z.object({ verdict: z.boolean(), at: z.number() }))),
+})).optional();
+
+const config = z.object({ format: z.enum(["cappy-config", "browser-agent-config"]), version: z.literal(1), settings, classifyCache });
+export type ImportedConfig = z.infer<typeof settings> & { classifyCache?: z.infer<typeof classifyCache> };
 
 export async function exportConfig(): Promise<string> {
-  return JSON.stringify({ format: "cappy-config", version: 1, settings: settings.parse(await load()) }, null, 2);
+  const [state, caches] = await Promise.all([load(), exportClassifyCaches()]);
+  return JSON.stringify({ format: "cappy-config", version: 1, settings: settings.parse(state), classifyCache: caches }, null, 2);
 }
 
 export function parseConfig(text: string): ImportedConfig {
   try {
-    return config.parse(JSON.parse(text)).settings;
+    const parsed = config.parse(JSON.parse(text));
+    return { ...parsed.settings, ...(parsed.classifyCache ? { classifyCache: parsed.classifyCache } : {}) };
   } catch {
     throw new Error("Invalid config file. Choose a JSON file exported by Cappy (version 1).");
   }
 }
 
-export async function importConfig(settings: ImportedConfig): Promise<void> {
+export async function importConfig(imported: ImportedConfig): Promise<void> {
+  const { classifyCache: caches, ...settings } = imported;
   // Keep this computer's server connection and credentials. Audio must be verified here.
   await chrome.storage.local.set({
     ...settings,
@@ -77,4 +85,5 @@ export async function importConfig(settings: ImportedConfig): Promise<void> {
     geminiVoiceVerified: false,
     configImportedAt: Date.now(),
   });
+  if (caches) await importClassifyCaches(caches);
 }

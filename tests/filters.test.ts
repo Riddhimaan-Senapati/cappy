@@ -295,6 +295,16 @@ describe("content filter judging limits", () => {
   });
 });
 
+describe("short-form format marks", () => {
+  it("marks a YouTube Shorts tile as shorts, not a reel", async () => {
+    const { itemText } = await import("../extension/src/content/content-filter.js");
+    document.body.innerHTML = `<ytd-reel-item-renderer class="ytd-reel-item-renderer"><h3>Cat jump</h3></ytd-reel-item-renderer><a class="reel" href="/reel/1"><h3>Instagram clip</h3></a>`;
+    const [shorts, reel] = [...document.querySelectorAll<HTMLElement>("ytd-reel-item-renderer, a.reel")].map((el) => itemText(el));
+    assert.match(shorts, /^\[shorts\] /);
+    assert.match(reel, /^\[reel\] /);
+  });
+});
+
 describe("content filter hides the whole card around a matched link", () => {
   it("hides a Short's tile, not just its link, and leaves other tiles", async () => {
     const tile = (id: string, title: string) =>
@@ -305,5 +315,74 @@ describe("content filter hides the whole card around a matched link", () => {
     const hidden = [...document.querySelectorAll<HTMLElement>("short-tile")].map((el) => el.style.display === "none");
     assert.deepEqual(hidden, [true, false, true]);
     handle.undo();
+  });
+});
+
+describe("classify cache", () => {
+  it("does not ask the model again for an item this site already judged", async () => {
+    const data: Record<string, unknown> = {};
+    const previous = globalThis.chrome;
+    globalThis.chrome = {
+      storage: { local: {
+        get: async (key: string) => ({ [key]: data[key] }),
+        set: async (patch: Record<string, unknown>) => { Object.assign(data, patch); },
+      } },
+    } as unknown as typeof chrome;
+    const { beginClassifyCache, clearClassifyMemory } = await import("../extension/src/content/content-filter.js");
+    const asked: string[] = [];
+    setFilterClassifier(async (_match, items) => {
+      asked.push(...items);
+      return items.map((item) => item.includes("Shorts"));
+    });
+    document.body.innerHTML = `<main><feed-card><h3>Shorts: pasta hack</h3></feed-card><feed-card><h3>Rust in 100 seconds</h3></feed-card></main>`;
+    await beginClassifyCache("localhost");
+    const first = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "shorts clips" }), document);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    assert.ok(asked.length >= 2);
+    const judged = asked.length;
+    first.undo();
+    clearClassifyMemory();
+    await beginClassifyCache("localhost");
+    const second = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "shorts clips" }), document);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(asked.length, judged, "saved verdicts were classified again");
+    const hidden = [...document.querySelectorAll<HTMLElement>("feed-card")].map((el) => el.style.display === "none");
+    assert.deepEqual(hidden, [true, false]);
+    second.undo();
+    setFilterClassifier(null);
+    globalThis.chrome = previous;
+    clearClassifyMemory();
+  });
+
+  it("judges the page when the cache read never returns", async () => {
+    const previous = globalThis.chrome;
+    globalThis.chrome = {
+      storage: { local: {
+        get: async (key: string | string[]) => {
+          const keys = Array.isArray(key) ? key : [key];
+          if (keys.some((entry) => entry.startsWith("classifyCache:"))) return new Promise(() => undefined);
+          return {};
+        },
+        set: async () => undefined,
+      } },
+    } as unknown as typeof chrome;
+    const { beginClassifyCache, clearClassifyMemory } = await import("../extension/src/content/content-filter.js");
+    let calls = 0;
+    setFilterClassifier(async () => {
+      calls += 1;
+      return [true];
+    });
+    const ready = beginClassifyCache("slow.example");
+    document.body.innerHTML = `<main><feed-card><h3>Alpha talk</h3><p>Some description text for Alpha talk</p></feed-card></main>`;
+    const handle = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "slow cache" }), document);
+    const result = await Promise.race([ready.then(() => "ready"), new Promise((resolve) => setTimeout(() => resolve("stuck"), 4_000))]);
+    assert.equal(result, "ready");
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    assert.equal(calls, 1);
+    assert.equal(document.querySelector("feed-card")?.getAttribute("style")?.includes("display"), true);
+    handle.undo();
+    setFilterClassifier(null);
+    clearClassifyMemory();
+    globalThis.chrome = previous;
   });
 });

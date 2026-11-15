@@ -1,7 +1,7 @@
 import { lineSite } from "./memory.js";
 import type { BackgroundRequest, StatusInfo } from "./messages.js";
 import { load, save, type StoredState } from "./storage.js";
-import { adoptStyles, h, icon, type IconName } from "./ui/dom.js";
+import { cappyLogo, adoptStyles, h, icon, type IconName } from "./ui/dom.js";
 import { SETTINGS_CSS, TOKENS } from "./ui/theme.js";
 
 interface Need {
@@ -36,7 +36,8 @@ html, body { margin: 0; min-height: 100%; }
 body { background: radial-gradient(ellipse at 15% 0%, rgba(110,168,255,0.12), transparent 50%), radial-gradient(ellipse at 90% 100%, rgba(244,114,182,0.08), transparent 45%), #0e0e13; color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
 .w { box-sizing: border-box; max-width: 620px; margin: 0 auto; padding: 48px 16px 64px; }
 .w-top { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
-.w-logo { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--grad); color: #0d0d12; }
+.w-logo { width: 40px; height: 40px; border-radius: 11px; overflow: hidden; flex: none; }
+.w-logo img { display: block; width: 100%; height: 100%; }
 .w-top b { font-size: 15px; font-weight: 650; }
 .w-top small { display: block; color: var(--muted); font-size: 12px; }
 .w-steps { display: grid; gap: 6px; margin-bottom: 26px; }
@@ -448,7 +449,7 @@ async function render() {
   const card = h("section", `w-card${view !== shownView ? " enter" : ""}`, "", [...body, ...nav]);
   shownView = view;
   root.replaceChildren(
-    h("header", "w-top", "", [h("div", "w-logo", "", [icon("sparkle", 18)]), h("div", "", "", [h("b", "", "Cappy"), h("small", "", finished ? "Setup complete" : `Setup · ${STEPS[step]}`)])]),
+    h("header", "w-top", "", [h("div", "w-logo", "", [cappyLogo(128)]), h("div", "", "", [h("b", "", "Cappy"), h("small", "", finished ? "Setup complete" : `Setup · ${STEPS[step]}`)])]),
     progress,
     card,
   );

@@ -1,4 +1,6 @@
 import type { BlockCall } from "../../../shared/adaptation.js";
+import { CLASSIFY_CACHE_LOAD_MS, CLASSIFY_CACHE_MATCHES, CLASSIFY_CACHE_TEXTS, CLASSIFY_CACHE_TTL_MS, classifyTextHash, type ClassifyHostCache } from "../../../shared/classify-cache.js";
+import { activeProfileId, loadClassifyHost, saveClassifyVerdicts } from "../storage.js";
 import { isOwn } from "./dom.js";
 import { findItemGroups } from "./item-groups.js";
 
@@ -102,21 +104,123 @@ function pauseIfNeeded(match: string) {
 
 const verdictKey = (match: string, text: string) => `${match}\u0000${text}`;
 
+export function classifyTextKey(text: string): string {
+  return classifyTextHash(text);
+}
+
+let cacheHost = "";
+let cacheProfile = "default";
+let cacheReady = true;
+let cacheWrite: ReturnType<typeof setTimeout> | undefined;
+const cacheWaiters = new Set<() => void>();
+const pendingWrites: Record<string, Record<string, boolean>> = {};
+
+function wakeCacheWaiters() {
+  cacheReady = true;
+  for (const wake of cacheWaiters) wake();
+}
+
+function adoptCache(cache: ClassifyHostCache | null) {
+  if (!cache) return;
+  const now = Date.now();
+  for (const [match, rows] of Object.entries(cache.matches)) {
+    for (const [text, row] of Object.entries(rows)) {
+      if (!row || typeof row.verdict !== "boolean" || now - row.at >= CLASSIFY_CACHE_TTL_MS) continue;
+      const key = verdictKey(match, text);
+      if (!verdicts.has(key)) verdicts.set(key, row.verdict);
+    }
+  }
+}
+
+// Saved verdicts are per profile and site, one storage key per site, so a reload does not ask again.
+export function beginClassifyCache(host: string): Promise<void> {
+  cacheHost = host;
+  if (!host) return Promise.resolve();
+  cacheReady = false;
+  let settled = false;
+  let finish = () => undefined;
+  const done = new Promise<void>((resolve) => {
+    finish = () => {
+      if (settled) return;
+      settled = true;
+      wakeCacheWaiters();
+      resolve();
+    };
+  });
+  const timeout = setTimeout(finish, CLASSIFY_CACHE_LOAD_MS);
+  void activeProfileId().then((profileId) => {
+    cacheProfile = profileId;
+    return loadClassifyHost(profileId, host);
+  }).then((cache) => {
+    adoptCache(cache);
+  }).catch(() => undefined).then(() => {
+    clearTimeout(timeout);
+    finish();
+  });
+  return done;
+}
+
+function rememberVerdict(match: string, text: string, verdict: boolean) {
+  const key = classifyTextKey(text);
+  if (!pendingWrites[match]) pendingWrites[match] = {};
+  const texts = pendingWrites[match];
+  delete texts[key];
+  texts[key] = verdict;
+  const extra = Object.keys(texts);
+  for (const old of extra.slice(0, Math.max(0, extra.length - CLASSIFY_CACHE_TEXTS))) delete texts[old];
+  const matches = Object.keys(pendingWrites);
+  for (const old of matches.slice(0, Math.max(0, matches.length - CLASSIFY_CACHE_MATCHES))) delete pendingWrites[old];
+  verdicts.set(verdictKey(match, key), verdict);
+  if (!cacheHost) return;
+  clearTimeout(cacheWrite);
+  cacheWrite = setTimeout(() => {
+    const updates: Record<string, Record<string, boolean>> = {};
+    for (const [name, rows] of Object.entries(pendingWrites)) updates[name] = { ...rows };
+    for (const name of Object.keys(pendingWrites)) delete pendingWrites[name];
+    void saveClassifyVerdicts(cacheProfile, cacheHost, updates).then((merged) => adoptCache(merged)).catch(() => undefined);
+  }, 200);
+}
+
+export function clearClassifyMemory() {
+  verdicts.clear();
+  inFlight.clear();
+  queued.clear();
+  for (const key of Object.keys(pendingWrites)) delete pendingWrites[key];
+}
+
+export function onClassifyCacheReady(wake: () => void): () => void {
+  if (cacheReady) return () => undefined;
+  cacheWaiters.add(wake);
+  return () => cacheWaiters.delete(wake);
+}
+
 const TITLE = "h1, h2, h3, h4, [id*='title' i], [class*='title' i]";
 
 // Leading with the title keeps durations and badges from crowding out what the item is about.
+function formatMark(el: HTMLElement): string {
+  const links = [el, ...Array.from(el.querySelectorAll("a[href]"))].map((node) => node.getAttribute("href") ?? "").join(" ");
+  const aria = el.getAttribute("aria-label") ?? "";
+  const raw = `${el.tagName} ${el.getAttribute("class") ?? ""}`.toLowerCase();
+  const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
+  // YouTube's Shorts tile is ytd-reel-item-renderer. "reel" in that name is not an Instagram reel.
+  if (raw.includes("ytd-reel") || el.hasAttribute("data-shorts") || /\/shorts\//i.test(links) || tokens.includes("shorts") || /\bshorts\b/i.test(aria)) return "[shorts] ";
+  if (el.hasAttribute("data-reel") || /\/reels?\//i.test(links) || tokens.includes("reel") || tokens.includes("reels") || /\breels?\b/i.test(aria)) return "[reel] ";
+  return "";
+}
+
 export function itemText(el: HTMLElement): string {
   const clean = (text: string) => text.replace(/\s+/g, " ").trim();
   const title = clean(el.querySelector(TITLE)?.textContent ?? "");
   const body = clean(spacedText(el));
-  return (title ? `${title} | ${body}` : body).slice(0, 240);
+  return `${formatMark(el)}${title ? `${title} | ${body}` : body}`.slice(0, 240);
 }
 
 // Undefined means not judged yet; the item stays as it is until its verdict arrives.
 function verdictFor(match: string, el: HTMLElement): boolean | undefined {
   const text = itemText(el);
   if (!text) return false;
-  const key = verdictKey(match, text);
+  const key = verdictKey(match, classifyTextKey(text));
+  if (!cacheReady) return undefined;
   const verdict = verdicts.get(key);
   if (verdict !== undefined || !classifier || inFlight.has(key) || usageFor(match).paused) return verdict;
   if (!queued.has(match)) queued.set(match, new Set());
@@ -136,12 +240,14 @@ async function flushClassify() {
         const state = usageFor(match);
         if (state.paused) break;
         const chunk = all.slice(start, start + Math.min(CLASSIFY_BATCH, Math.max(1, JUDGE_BUDGET - state.judged)));
-        chunk.forEach((text) => inFlight.add(verdictKey(match, text)));
+        chunk.forEach((text) => inFlight.add(verdictKey(match, classifyTextKey(text))));
         const result = await classifier?.(match, chunk).catch(() => null);
-        // A failed call leaves those items shown instead of queueing them again on every scroll.
+        // A failed call leaves those items shown instead of queueing them again on every scroll. Only a real answer is saved for the next visit.
         chunk.forEach((text, index) => {
-          inFlight.delete(verdictKey(match, text));
-          verdicts.set(verdictKey(match, text), Boolean(result?.[index]));
+          const key = verdictKey(match, classifyTextKey(text));
+          inFlight.delete(key);
+          if (result) rememberVerdict(match, text, Boolean(result[index]));
+          else verdicts.set(key, false);
         });
         state.judged += chunk.length;
         state.matched += result ? result.filter(Boolean).length : 0;
@@ -217,6 +323,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
     if (!waiting.has(match)) waiting.set(match, new Set());
     waiting.get(match)!.add(schedulePass);
   }
+  const stopCacheWait = onClassifyCacheReady(schedulePass);
   pass();
   const observer = new MutationObserver(schedulePass);
   observer.observe(doc.body ?? doc.documentElement, { childList: true, subtree: true, characterData: true });
@@ -224,6 +331,7 @@ export function applyContentFilter(filter: Filter, doc: Document): ContentFilter
   const undo = (): void => {
     if (undone) return;
     undone = true;
+    stopCacheWait();
     if (match) waiting.get(match)?.delete(schedulePass);
     observer.disconnect();
     clearTimeout(leftoverTimer);
