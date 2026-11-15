@@ -76,7 +76,7 @@ export function voiceErrorText(error: string): string {
     case "microphone-setup":
       return "Allow microphone access in Chrome, then try again.";
     case "not-allowed":
-      return "Microphone access is blocked for Adaptive Browser Agent. Check Chrome and your system microphone permissions.";
+      return "Microphone access is blocked for Cappy. Check Chrome and your system microphone permissions.";
     case "service-not-allowed":
       return "Chrome's speech service is turned off for this browser.";
     case "aborted":

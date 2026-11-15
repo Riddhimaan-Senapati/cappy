@@ -1,4 +1,4 @@
-# browser-agent
+# Cappy (your loyal captain of web browsing)
 
 Take control of the web with AI agents.
 
@@ -65,15 +65,15 @@ Each request runs as one tool-use loop. The agent reads an outline of the page, 
 You do not have to run the install commands yourself. Paste this into the coding agent you already use:
 
 ```
-Run curl -fsSL https://raw.githubusercontent.com/Riddhimaan-Senapati/browser-agent/main/skills/install-browser-agent/SKILL.md and follow the instructions in its output to install and run browser-agent.
+Run curl -fsSL https://raw.githubusercontent.com/Riddhimaan-Senapati/cappy/main/skills/install-cappy/SKILL.md and follow the instructions in its output to install and run Cappy.
 ```
 
-That fetches [skills/install-browser-agent/SKILL.md](skills/install-browser-agent/SKILL.md), which gives the agent each step.
+That fetches [skills/install-cappy/SKILL.md](skills/install-cappy/SKILL.md), which gives the agent each step.
 
 If the agent loads skills from the skills library, install the same skill with:
 
 ```
-npx skills add Riddhimaan-Senapati/browser-agent
+npx skills add Riddhimaan-Senapati/cappy
 ```
 
 [`skills.sh.json`](skills.sh.json) groups that skill on the skills.sh page.

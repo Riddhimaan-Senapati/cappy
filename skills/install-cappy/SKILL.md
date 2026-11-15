@@ -1,14 +1,14 @@
 ---
-name: install-browser-agent
+name: install-cappy
 description: >-
-  Install and run the browser-agent Chrome extension and its local server.
-  Use when asked to set up, install, or run browser-agent.
+  Install and run the Cappy Chrome extension and its local server.
+  Use when asked to set up, install, or run Cappy.
 license: MIT
 ---
 
-# Install browser-agent
+# Install Cappy
 
-browser-agent is a Chrome extension plus a local server. The server holds the API keys. The extension changes the page the user is on. It does not click, type, or navigate for them.
+Cappy is a Chrome extension plus a local server. The server holds the API keys. The extension changes the page the user is on. It does not click, type, or navigate for them.
 
 Follow the steps in order. Run each command and report what it prints.
 
@@ -22,11 +22,11 @@ If bun is missing, stop and tell the user to install bun from https://bun.sh.
 
 ## 2. Get the repo
 
-If the current directory is already the browser-agent checkout, stay there. Otherwise clone it and enter it.
+If the current directory is already the cappy checkout, stay there. Otherwise clone it and enter it.
 
 ```bash
-git clone https://github.com/Riddhimaan-Senapati/browser-agent.git
-cd browser-agent
+git clone https://github.com/Riddhimaan-Senapati/cappy.git
+cd cappy
 ```
 
 ## 3. Install dependencies
@@ -48,7 +48,7 @@ Leave this process running. It builds the extension, starts the server, and rebu
 The server prints both of these lines when it is up:
 
 ```text
-browser-agent server on http://localhost:8787
+cappy server on http://localhost:8787
 demo site: http://localhost:8787/demo/campus.html
 ```
 

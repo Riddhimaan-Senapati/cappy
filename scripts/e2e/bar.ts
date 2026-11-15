@@ -104,9 +104,9 @@ async function clickFab(page: Page): Promise<void> {
     for (const node of walk(opened.root)) {
       if (node.nodeName !== "BUTTON") continue;
       await ensureAttrs(opened.session, node);
-      if ((attr(node, "aria-label") ?? "").includes("Open adaptive agent")) fab = node;
+      if ((attr(node, "aria-label") ?? "").includes("Open Cappy")) fab = node;
     }
-    if (!fab) throw new Error("No adaptive agent button on the page");
+    if (!fab) throw new Error("No Cappy button on the page");
     await resolveAndCall(opened.session, fab, "function () { this.click(); }");
   } finally {
     await opened.session.detach();

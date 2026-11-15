@@ -11,7 +11,7 @@ test("LLM logging is opt-in, summarizes requests, and preserves streamed respons
   const originalFetch = globalThis.fetch;
   const originalSetting = process.env.log_llm_requests;
   const before = new Set(await readdir(directory).catch(() => []));
-  const image = Buffer.from("browser-agent-test-image");
+  const image = Buffer.from("cappy-test-image");
   const imageName = createHash("sha256").update(image).digest("hex") + ".png";
   const imagePath = new URL("images/" + imageName, directory);
   const imageExisted = await readFile(imagePath).then(() => true, () => false);
