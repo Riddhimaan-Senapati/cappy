@@ -362,7 +362,11 @@ chrome.runtime.onConnect.addListener((port) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.provider) void agent.ensureModels();
+  if (area !== "local") return;
+  if (changes.provider) void agent.ensureModels();
+  // A socket opened at startup keeps the address it dialed. Reconnect when the setting changes.
+  const url = changes.serverUrl?.newValue;
+  if (typeof url === "string") agent.useServer(url);
 });
 
 void agent.ensureConnected().catch(() => undefined);

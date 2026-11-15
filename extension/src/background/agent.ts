@@ -66,6 +66,7 @@ export class AgentClient {
   status: StatusInfo = { connected: false, busy: false };
   private usageUpdates = Promise.resolve();
   private socket: WebSocket | null = null;
+  private connectedUrl: string | null = null;
   private opening: Promise<void> | null = null;
   private nextConnectAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -190,6 +191,18 @@ export class AgentClient {
     this.send({ type: "chatgptLogin" });
   }
 
+  // Drop a socket that was opened against the previous address and dial the new one.
+  useServer(url: string) {
+    if (this.connectedUrl === url && this.socket?.readyState === WebSocket.OPEN) return;
+    this.nextConnectAt = 0;
+    this.clearReconnect();
+    const previous = this.socket;
+    this.socket = null;
+    this.connectedUrl = null;
+    previous?.close();
+    void this.ensureConnected().catch(() => undefined);
+  }
+
   ensureConnected(options?: { probe?: boolean }): Promise<void> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve();
     if (options?.probe && Date.now() < this.nextConnectAt) {
@@ -247,6 +260,7 @@ export class AgentClient {
         this.clearReconnect();
         clearInterval(this.keepAlive);
         this.socket = socket;
+        this.connectedUrl = serverUrl;
         this.keepAlive = setInterval(() => this.send({ type: "ping" }), 20_000);
         resolve();
       };
@@ -593,6 +607,7 @@ export class AgentClient {
 
   private afterApply(run: Run, change: Change, outcome: ApplyOutcome) {
     if (run.trigger === "page_load") void sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
+    if (outcome.noop) return this.step(run, outcome.note ?? "Nothing changed", "info");
     if (!outcome.ok) return this.step(run, `Couldn't apply "${change.summary}": ${outcome.error}`, "bad");
     run.applied.set(change.id, { ...change, appliedAt: Date.now() });
     const deltas = (Object.keys(STAT_LABELS) as Array<keyof PageStats>)

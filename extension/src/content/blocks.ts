@@ -90,8 +90,28 @@ interface ScaledRecord {
   px: number;
 }
 
+// Inline !important beats site CSS, so a later font-size rule has to take those elements back explicitly.
+interface FontScaler {
+  release(element: HTMLElement): void;
+  rescale(elements: readonly HTMLElement[]): void;
+}
+
+const fontScalers = new Set<FontScaler>();
+
+export function releaseScaledFont(elements: Iterable<Element>) {
+  for (const element of elements) {
+    if (!(element instanceof HTMLElement)) continue;
+    for (const scaler of fontScalers) scaler.release(element);
+  }
+}
+
+export function rescaleFonts(elements: readonly HTMLElement[]) {
+  for (const scaler of fontScalers) scaler.rescale(elements);
+}
+
 function textScale(scale: number): LiveBlock {
   const scaled = new Map<HTMLElement, ScaledRecord>();
+  const handedOff = new WeakSet<HTMLElement>();
 
   const restoreInline = (element: HTMLElement, record: ScaledRecord) => {
     if (record.value) element.style.setProperty("font-size", record.value, record.priority);
@@ -99,7 +119,7 @@ function textScale(scale: number): LiveBlock {
   };
 
   const scaleElements = (elements: HTMLElement[]) => {
-    const fresh = elements.filter((element) => element.isConnected && !scaled.has(element));
+    const fresh = elements.filter((element) => element.isConnected && !scaled.has(element) && !handedOff.has(element));
     if (!fresh.length) return;
 
     const scaledAncestors = new Set<HTMLElement>();
@@ -120,10 +140,26 @@ function textScale(scale: number): LiveBlock {
     });
   };
 
+  const scaler: FontScaler = {
+    release(element) {
+      const record = scaled.get(element);
+      if (!record) return;
+      restoreInline(element, record);
+      scaled.delete(element);
+      handedOff.add(element);
+    },
+    rescale(elements) {
+      const back = elements.filter((element) => handedOff.has(element));
+      for (const element of back) handedOff.delete(element);
+      scaleElements(back);
+    },
+  };
+  fontScalers.add(scaler);
   scaleElements(textElements());
   return {
     reapply: (roots) => scaleElements(textElements(1500, roots)),
     undo: () => {
+      fontScalers.delete(scaler);
       for (const [element, record] of scaled) restoreInline(element, record);
       scaled.clear();
     },

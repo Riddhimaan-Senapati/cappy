@@ -131,6 +131,11 @@ export const tools: AgentTool[] = [
       if (clash) id = `${id.slice(0, 36)}-${Math.random().toString(36).slice(2, 5)}`;
       const annotated: Change & { targetLabel?: string } = target ? { ...change, id, targetLabel: target.label } : change;
       const outcome = await session.callTab("apply_change", { change: annotated });
+      if (outcome.noop) {
+        const why = outcome.note ?? "Nothing changed.";
+        session.noops.push(why.endsWith(".") ? why : `${why}.`);
+        return { text: `NO CHANGE: ${why} The page looks the same as before this change. Tell the user that. Do not say you enabled or saved it.` };
+      }
       const counts = Object.values(outcome.matched);
       if (!outcome.ok || (counts.length > 0 && counts.every((count) => count === 0))) session.failures++;
       if (outcome.ok) session.appliedIds.add(annotated.id);

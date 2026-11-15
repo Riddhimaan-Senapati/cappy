@@ -75,6 +75,8 @@ export interface ApplyOutcome {
   before: PageStats;
   after: PageStats;
   note?: string;
+  // The change was checked and left the page as it was. It is not saved.
+  noop?: boolean;
 }
 
 export type SiteControl = { id: string; name: string } & (

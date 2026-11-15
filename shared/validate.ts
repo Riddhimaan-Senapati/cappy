@@ -48,9 +48,16 @@ export function scanCss(css: string): string | null {
 }
 
 const SITE_WIDE = /\b(?:only (?:on |for )?this (?:site|website)|(?:on |for )?this (?:site|website) only|(?:on|for) this (?:site|website)|every page|whole (?:site|website)|across (?:all of )?(?:the |this )?[\w.-]+|everywhere on [\w.-]+|all over [\w.-]+|on all of [\w.-]+)\b/i;
+const ALL_SITES = /\b(?:all (?:sites|websites)|every (?:site|website)|everywhere)\b/i;
+const PREFERENCE = /\bI (?:prefer|like|hate)\b/i;
 
 export function requestedSiteWide(message: string): boolean {
   return SITE_WIDE.test(message);
+}
+
+// "everywhere" alone means every website. "everywhere on youtube" is one site, and the site-wide pattern wins.
+export function requestedEverywhere(message: string): boolean {
+  return ALL_SITES.test(message) && !SITE_WIDE.test(message);
 }
 
 export function normalizePagePath(path: string): string {
@@ -72,6 +79,7 @@ export function scopeLabel(scope: string): string {
 }
 
 // One-off chat edits stay on this page, for a block and for CSS alike. A site-wide or scheduled change is the exception, and the UI names it.
+// All-sites is only for an explicit "everywhere" or a stated preference ("I prefer"). The memory prompt is what asks for consent.
 export function prepareSavedChange<T extends { scope: string; pagePath?: string | null; schedule?: unknown; block?: { name?: string; itemSelector?: string | null } | null }>(
   change: T,
   message: string,
@@ -79,14 +87,20 @@ export function prepareSavedChange<T extends { scope: string; pagePath?: string 
   pathname: string,
 ): T {
   let scope = change.scope;
-  if (trigger === "chat" && scope === "site") {
+  if (trigger === "chat" && (scope === "site" || scope === "everywhere")) {
     const siteWide = requestedSiteWide(message)
       || change.schedule != null
       || (change.block?.name === "contentFilter" && Boolean(change.block.itemSelector));
-    scope = siteWide ? "site" : "page";
+    const everywhere = requestedEverywhere(message) || (scope === "everywhere" && PREFERENCE.test(message) && !siteWide);
+    scope = everywhere ? "everywhere" : siteWide ? "site" : "page";
   }
   if (scope === "page") return { ...change, scope, pagePath: normalizePagePath(pathname || change.pagePath || "/") };
   return { ...change, scope, pagePath: undefined };
+}
+
+// Dark mode looks at the painted page, so it has to run after CSS that may have already darkened it.
+export function changesWithDarkModeLast<T extends { block?: { name?: string } | null }>(changes: readonly T[]): T[] {
+  return [...changes.filter((change) => change.block?.name !== "darkMode"), ...changes.filter((change) => change.block?.name === "darkMode")];
 }
 
 export function validateChange(change: Change): string | null {

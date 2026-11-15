@@ -14,7 +14,7 @@ import { recallForRun } from "./agent/memory.js";
 import { pickTier } from "./agent/router.js";
 import { classifyItems } from "./agent/classify.js";
 import { suggestFor } from "./agent/suggest.js";
-import { AgentSession, RunCancelledError } from "./agent/session.js";
+import { AgentSession, replyAfterTools, RunCancelledError } from "./agent/session.js";
 import { normalizeBaseURL, setKey } from "./keys.js";
 import { audio } from "./audio.js";
 import { detectInjection } from "../shared/safety.js";
@@ -76,6 +76,7 @@ async function execute(session: AgentSession, request: RunRequest, provider: Age
     session.send({ type: "blocked", runId: request.runId, reason: session.blockedReason });
     reply = "This page contains text that tries to instruct me, so I didn't change anything.";
   }
+  reply = replyAfterTools(reply, session.appliedIds.size, session.noops);
   session.send({ type: "done", runId: request.runId, reply });
 }
 

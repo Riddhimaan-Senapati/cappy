@@ -2,7 +2,8 @@ import type { ActiveChange, Change, DomOp } from "../../../shared/adaptation.js"
 import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot, isScheduleActive, savedChangeOnThisPage, validateChange } from "../../../shared/validate.js";
 import type { ApplyOutcome, SiteControlOutcome } from "../../../shared/protocol.js";
-import { applyBlock } from "./blocks.js";
+import { applyBlock, releaseScaledFont, rescaleFonts } from "./blocks.js";
+import { darkOutcomeNote } from "./dark-mode.js";
 import { keywordPattern, leftovers } from "./content-filter.js";
 import { accessibleName, isOwn, LABELLABLE, OWN_ATTR, queryIn } from "./dom.js";
 import { computeStats, lowContrastSamples, readInjectionSurface } from "./outline.js";
@@ -62,16 +63,26 @@ function applyCss(change: Change, matched: Record<string, number>): Undo {
 
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(change.css ?? "");
+  const handedOff: HTMLElement[] = [];
   for (const rule of sheet.cssRules) {
     if (!(rule instanceof CSSStyleRule)) continue;
     const testable = rule.selectorText.replace(/::?(before|after|placeholder|selection|marker|first-line|first-letter|hover|focus-visible|focus-within|focus|active|visited)\b/g, "");
+    let matches: Element[] = [];
     try {
-      matched[rule.selectorText] = document.querySelectorAll(testable || "*").length;
+      matches = [...document.querySelectorAll(testable || "*")];
+      matched[rule.selectorText] = matches.length;
     } catch {
       matched[rule.selectorText] = -1;
     }
+    // A font-size rule is the later request, so it takes those elements back from text scale's inline !important.
+    if (!rule.style.fontSize) continue;
+    for (const element of matches) if (element instanceof HTMLElement) handedOff.push(element);
   }
-  return () => style.remove();
+  releaseScaledFont(handedOff);
+  return () => {
+    style.remove();
+    rescaleFonts(handedOff);
+  };
 }
 
 interface LiveOp {
@@ -537,6 +548,11 @@ export async function applyChange(change: Change, animate = true, options: Apply
     let error: string;
     try {
       const note = await installChange(entry, matched, animate);
+      if (change.block?.name === "darkMode" && note === darkOutcomeNote("already-dark")) {
+        revertNow(change.id);
+        publishFocus();
+        return { ok: true, noop: true, note, matched, before, after: before };
+      }
       after = entry.live && verify ? computeStats() : before;
       const counts = Object.values(matched);
       const missed = !change.block && counts.length > 0 && counts.every((count) => count === 0);
