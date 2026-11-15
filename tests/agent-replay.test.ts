@@ -205,7 +205,7 @@ describe("socket lifetime", () => {
     socketB.succeed();
     await reconnect;
     socketA.close();
-    assert.ok(events.some((event) => event.type === "error" && event.message === "Lost connection to the agent server."));
+    assert.ok(events.some((event) => event.type === "error" && event.message === "Lost connection to the Cappy server."));
     assert.equal(agent.status.busy, false);
     assert.equal(agent.status.connected, true);
     await agent.startRun(tab, "chat", "again please", { fresh: true });

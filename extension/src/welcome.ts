@@ -261,7 +261,7 @@ function needsStep(state: StoredState): Node[] {
   label.htmlFor = "w-extra";
   return [
     h("h1", "", "What would help you?"),
-    h("p", "w-lead", "Pick any that apply. The agent uses these on every site, and you can change them later in settings."),
+    h("p", "w-lead", "Pick any that apply. Cappy uses these on every site, and you can change them later in settings."),
     h("div", "w-grid", "", cards),
     ...colorPicker,
     h("div", "w-extra", "", [label, textarea]),
@@ -293,7 +293,7 @@ function autoAdaptQuestion(state: StoredState): Node {
     mode === "ask"
       ? "The first time you open a site, a small suggestion offers to adapt it. Nothing changes until you click it."
       : mode === "auto"
-        ? "The first time you open a site, the page blurs for a moment while the agent applies what clearly fits your needs. Later visits reuse the result with no AI request."
+        ? "The first time you open a site, the page blurs for a moment while Cappy applies what clearly fits your needs. Later visits reuse the result with no AI request."
         : "Nothing changes until you open the bar and ask. Changes you save still come back on their own.";
   return h("div", "w-sub", "", [h("label", "", "When you open a new website"), seg, h("small", "w-note", note)]);
 }
@@ -327,7 +327,7 @@ function shortcutStep(): Node[] {
   const tried = pressed === "toggle-spotlight" ? "That's it. On a website, this opens the bar." : pressed === "start-voice" ? "That's the voice shortcut. On a website, it opens the bar and listens." : "";
   return [
     h("h1", "", "Your shortcut"),
-    h("p", "w-lead", "This is how you call the agent on any page. Try it now: press it while this page is open."),
+    h("p", "w-lead", "This is how you call Cappy on any page. Try it now: press it while this page is open."),
     h("div", "w-shortcut", "", [
       h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Open the bar"), h("small", "", "Type a request or pick a suggestion")]), keys(shortcuts.bar)]),
       h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Talk instead"), h("small", "", "Opens the bar and listens")]), keys(shortcuts.voice)]),
@@ -376,7 +376,7 @@ function handsFreeStep(state: StoredState): Node[] {
     h("div", "s-sec", "", [
       h("div", "s-row", "", [h("div", "grow", "", [h("div", "", "Microphone"), h("small", "", "Only listens after you press the mic button or the voice shortcut")]), micAction]),
       ...micNote,
-      toggleRow("Read replies aloud", "Speaks what the agent changed", state.speakReplies, (value) => void save({ speakReplies: value })),
+      toggleRow("Read replies aloud", "Speaks what Cappy changed", state.speakReplies, (value) => void save({ speakReplies: value })),
       toggleRow("Camera control", "Point to hover, pinch to click, hold a pinch to select, palm to scroll", state.camera.enabled, (value) => void save({ camera: { ...state.camera, enabled: value } })),
       toggleRow("Floating button", "A small button on pages that opens the bar", state.floatingButton, (value) => void save({ floatingButton: value })),
     ]),
