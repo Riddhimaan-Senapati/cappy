@@ -52,6 +52,11 @@ export const SETTINGS_CSS = `
 .s-more[open] { display: flex; flex-direction: column; gap: 6px; }
 .s-links { display: flex; justify-content: center; gap: 18px; padding-top: 4px; border-top: 1px solid var(--line); padding-top: 12px; }
 .s-row .s-link { flex: none; }
+.s-stats { display: grid; grid-template-columns: repeat(3, 1fr); border-radius: 12px; background: var(--raise); overflow: hidden; }
+.s-stat { display: flex; flex-direction: column; gap: 1px; padding: 11px 12px; }
+.s-stat + .s-stat { border-left: 1px solid var(--line); }
+.s-stat b { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.s-stat small { color: var(--muted); font-size: 11.5px; }
 .s-empty code { font-size: 11.5px; padding: 1px 6px; border-radius: 6px; background: rgba(255,255,255,0.08); }
 .s-sec { display: flex; flex-direction: column; gap: 6px; }
 .s-sec > h3 { margin: 0 0 2px 2px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }

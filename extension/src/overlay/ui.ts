@@ -245,6 +245,7 @@ export class OverlayUi {
     close.type = "button";
     close.setAttribute("aria-label", "Dismiss");
     const nodes: Node[] = [icon(isError ? "x" : "sparkle", 14), h("span", "msg", text)];
+    const buttons: HTMLButtonElement[] = [];
     if (undoIds.length || onUndo) {
       const undo = h("button", "link", "Undo");
       undo.type = "button";
@@ -253,7 +254,7 @@ export class OverlayUi {
         for (const id of [...undoIds].reverse()) await this.deps.revert(id);
         if (this.toast === toast) this.dismissToast();
       });
-      nodes.push(undo);
+      buttons.push(undo);
     }
     for (const each of action ? [action].flat() : []) {
       const button = h("button", "link", each.label);
@@ -262,11 +263,15 @@ export class OverlayUi {
         this.dismissToast();
         void each.run();
       });
-      nodes.push(button);
+      buttons.push(button);
     }
-    nodes.push(close, ...(sticky ? [] : [h("div", "life")]));
+    // Several choices get their own row so the message keeps its width.
+    const stacked = buttons.length > 1;
+    if (stacked) nodes.push(close, h("div", "acts", "", buttons));
+    else nodes.push(...buttons, close);
+    if (!sticky) nodes.push(h("div", "life"));
 
-    const toast = h("div", `toast${isError ? " error" : ""}`, "", nodes);
+    const toast = h("div", `toast${isError ? " error" : ""}${stacked ? " stack" : ""}`, "", nodes);
     toast.setAttribute("role", "status");
     close.addEventListener("click", () => this.dismissToast());
     this.toast = toast;

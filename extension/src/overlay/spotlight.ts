@@ -1640,6 +1640,12 @@ export class Spotlight {
     if (!this.opened || event.isComposing) return false;
     const { key } = event;
     const focused = this.shadow.activeElement;
+    // Clicking a toggle or tab moves focus off the search field; Backspace should still go back unless it is editing text.
+    const editing = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement || focused instanceof HTMLSelectElement || (focused instanceof HTMLElement && focused.isContentEditable);
+    if (key === "Backspace" && focused && focused !== this.input && !editing && BACK_VIEWS.includes(this.view)) {
+      this.goHome();
+      return true;
+    }
     // Buttons and fields inside the bar handle their own keys (Enter on Undo, typing a command name); only Escape still closes.
     if (focused && focused !== this.input && key !== "Escape") return false;
     if (focused instanceof HTMLInputElement && focused.classList.contains("option-input")) return false;

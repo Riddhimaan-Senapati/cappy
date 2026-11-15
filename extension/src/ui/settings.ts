@@ -301,7 +301,11 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     });
     const notice = status.notice ? [h("div", `s-note${status.notice.level === "error" ? " s-error" : ""}`, status.notice.text)] : [];
     const hint = status.activeProvider ? [] : [h("div", "s-note", "Sign in with ChatGPT or add a key. Keys stay on your computer.")];
-    return [h("section", "s-sec", "", [h("h3", "", "AI provider"), ...rows, ...notice, ...hint])];
+    const providers = status.providers ?? [];
+    const ready = rows.filter((_, index) => providers[index]?.ready);
+    const others = rows.filter((_, index) => !providers[index]?.ready);
+    const list = ready.length && others.length ? [...ready, more("Add another AI", others)] : rows;
+    return [h("section", "s-sec", "", [h("h3", "", "AI provider"), ...list, ...notice, ...hint])];
   };
   let queued = false;
   let speechError = "";
@@ -475,9 +479,13 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
 
     currentTab ??= status.connected && status.activeProvider ? "general" : "ai";
     const number = (value: number) => value.toLocaleString("en-US");
-    const usageRow = h("div", "s-row", "", [
-      h("div", "grow", "", [h("div", "", "Usage on this browser"), h("small", "", `${number(state.usage.calls)} calls · ${number(state.usage.inputTokens)} in · ${number(state.usage.outputTokens)} out tokens`)]),
-    ]);
+    const compact = (value: number) => (value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)}M` : value >= 10_000 ? `${Math.round(value / 1000)}k` : number(value));
+    const stat = (label: string, value: number) => {
+      const cell = h("div", "s-stat", "", [h("b", "", compact(value)), h("small", "", label)]);
+      cell.title = `${number(value)} ${label}`;
+      return cell;
+    };
+    const usageRow = h("div", "s-stats", "", [stat("calls", state.usage.calls), stat("tokens in", state.usage.inputTokens), stat("tokens out", state.usage.outputTokens)]);
     const panels: Record<Tab, () => Node[]> = {
       general: () => [
         profiles(state),
@@ -496,7 +504,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       ai: () => [
         ...providerSection(status, state),
         section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...(status.activeProvider ? [more("Choose models", modelPickers(state, status))] : [])),
-        section("Usage", usageRow),
+        section("Usage on this browser", usageRow),
       ],
       voice: () => [
         voiceSection(state),

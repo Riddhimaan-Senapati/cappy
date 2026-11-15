@@ -232,7 +232,13 @@ export const OVERLAY_CSS = `
 .nudge .x:hover { background: rgba(0, 0, 0, 0.28); color: #fff; }
 .toast > .ico { margin-top: 1px; color: var(--accent); }
 .toast.error > .ico { color: var(--bad); }
-.toast .msg { flex: 1; }
+.toast .msg { flex: 1; min-width: 0; }
+.toast.stack { flex-wrap: wrap; row-gap: 8px; }
+.toast.stack .msg { flex: 1 1 0; }
+.toast .acts { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 6px; padding-left: 24px; }
+.toast .acts .link { padding: 5px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.06); font-size: 12.5px; }
+.toast .acts .link:hover { background: rgba(255, 255, 255, 0.12); }
+.toast .acts .link:first-child { background: rgba(139, 155, 255, 0.18); color: #dfe3ff; }
 .toast .life { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--grad); opacity: 0.7; transform-origin: left; animation: life 9s linear forwards; }
 
 @keyframes fade { from { opacity: 0; transform: translateY(3px); } }
