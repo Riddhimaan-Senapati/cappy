@@ -18,7 +18,7 @@ export const REMOVABLE_ATTRIBUTES = ["autoplay", "loop", "tabindex", "aria-hidde
 
 
 const DOM_OPS = new Set(["addLabel", "setAttribute", "removeAttribute", "pauseMedia", "reorder"]);
-const BLOCKS = new Set(["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter", "formFixer"]);
+const BLOCKS = new Set(["colorblind", "textScale", "stopMotion", "darkMode", "contentFilter", "formFixer", "contrast"]);
 
 const FORBIDDEN_CSS: Array<[RegExp, string]> = [
   [/url\s*\(/i, "url() can load outside resources"],
@@ -110,6 +110,7 @@ export function validateChange(change: Change): string | null {
       if (op.ranking.some((entry) => typeof entry.key !== "string" || entry.key.length > 300 || !Number.isFinite(entry.rank))) return "each ranking entry needs a key and a numeric rank";
     }
     if (op.op === "reorder" && op.keySelector !== null && typeof op.keySelector !== "string") return "bad reorder keySelector";
+    if (op.op === "reorder" && op.groupSelector != null && (typeof op.groupSelector !== "string" || op.groupSelector.length > 400 || /[{};@\\<]/.test(op.groupSelector))) return "bad reorder groupSelector";
     if (op.op === "setAttribute" && op.value.length > LIMITS.attrChars) return "attribute value too long";
   }
   if (change.block && !BLOCKS.has(change.block.name)) return `unknown block "${change.block.name}"`;
@@ -129,6 +130,10 @@ export function validateChange(change: Change): string | null {
   if (change.schedule) {
     const problem = scheduleProblem(change.schedule);
     if (problem) return problem;
+  }
+  if (change.block?.name === "contrast") {
+    const { minRatio } = change.block;
+    if (!Number.isFinite(minRatio) || minRatio < 3 || minRatio > 7) return "contrast ratio must be from 3 to 7";
   }
   if (change.block?.name === "textScale") {
     change.block.scale = Math.min(2, Math.max(1, Number(change.block.scale) || 1));
