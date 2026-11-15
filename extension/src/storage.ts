@@ -1,6 +1,7 @@
 import Fuse from "fuse.js";
 import type { ActiveChange, ChatTurn } from "../../shared/adaptation.js";
 import type { FrictionKind, MemoryScope, ChoiceOption, Routing, SuggestionFeedback, Tier, TokenUsage } from "../../shared/protocol.js";
+import { CLASSIFY_CACHE_HOSTS, CLASSIFY_INDEX_KEY, classifyCacheKey, isClassifyCacheKey, mergeClassifyHost, mergeClassifyIndex, readClassifyHost, readClassifyIndex, type ClassifyHostCache } from "../../shared/classify-cache.js";
 import { savedChangeOnThisPage } from "../../shared/validate.js";
 
 export interface Recipe {
@@ -167,6 +168,102 @@ export async function saveSiteNotes(host: string, notes: string[]) {
   const hosts = Object.keys(next).sort((a, b) => next[a].updatedAt - next[b].updatedAt);
   for (const old of hosts.slice(0, Math.max(0, hosts.length - MAX_SKILL_SITES))) delete next[old];
   await save({ siteSkills: next });
+}
+
+export async function activeProfileId(): Promise<string> {
+  try {
+    const stored = await chrome.storage.local.get("activeProfileId");
+    return typeof stored.activeProfileId === "string" && stored.activeProfileId ? stored.activeProfileId : DEFAULTS.activeProfileId;
+  } catch {
+    return DEFAULTS.activeProfileId;
+  }
+}
+
+export async function loadClassifyHost(profileId: string, host: string): Promise<ClassifyHostCache | null> {
+  try {
+    const key = classifyCacheKey(profileId, host);
+    const stored = await chrome.storage.local.get(key);
+    return readClassifyHost(stored[key]);
+  } catch {
+    return null;
+  }
+}
+
+// Re-reads the host key and merges, so a tab does not replace verdicts another tab saved after this page loaded.
+export async function saveClassifyVerdicts(profileId: string, host: string, updates: Record<string, Record<string, boolean>>, now = Date.now()): Promise<ClassifyHostCache> {
+  const key = classifyCacheKey(profileId, host);
+  const current = await loadClassifyHost(profileId, host);
+  const merged = mergeClassifyHost(current, updates, now);
+  await chrome.storage.local.set({ [key]: merged });
+  await touchClassifyIndex(key, now);
+  return merged;
+}
+
+async function readIndex(): Promise<ReturnType<typeof readClassifyIndex>> {
+  const stored = await chrome.storage.local.get(CLASSIFY_INDEX_KEY);
+  return readClassifyIndex(stored[CLASSIFY_INDEX_KEY]);
+}
+
+async function touchClassifyIndex(key: string, now: number) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { index, dropped } = mergeClassifyIndex(await readIndex(), key, now);
+    await chrome.storage.local.set({ [CLASSIFY_INDEX_KEY]: index });
+    const safeDrop = dropped.filter(isClassifyCacheKey);
+    if (safeDrop.length) await chrome.storage.local.remove(safeDrop);
+    const after = new Set((await readIndex()).map((entry) => entry.key));
+    if (index.every((entry) => after.has(entry.key))) return;
+  }
+}
+
+export async function clearClassifyCaches() {
+  try {
+    const stored = await chrome.storage.local.get(null);
+    const keys = Object.keys(stored).filter(isClassifyCacheKey);
+    if (keys.length) await chrome.storage.local.remove(keys);
+  } catch {
+    try {
+      const keys = (await readIndex()).map((entry) => entry.key).filter(isClassifyCacheKey);
+      if (keys.length) await chrome.storage.local.remove(keys);
+    } catch {
+      // The index is cleared below even when the blobs were already gone.
+    }
+  }
+  await chrome.storage.local.set({ [CLASSIFY_INDEX_KEY]: [] });
+}
+
+export async function exportClassifyCaches(): Promise<Record<string, ClassifyHostCache>> {
+  const index = await readIndex();
+  if (!index.length) return {};
+  try {
+    const stored = await chrome.storage.local.get(index.map((entry) => entry.key));
+    const caches: Record<string, ClassifyHostCache> = {};
+    for (const entry of index) {
+      const cache = readClassifyHost(stored[entry.key]);
+      if (cache) caches[entry.key] = cache;
+    }
+    return caches;
+  } catch {
+    return {};
+  }
+}
+
+export async function importClassifyCaches(caches: Record<string, ClassifyHostCache>) {
+  const now = Date.now();
+  const entries = Object.entries(caches)
+    .filter(([key, cache]) => isClassifyCacheKey(key) && readClassifyHost(cache))
+    .slice(-CLASSIFY_CACHE_HOSTS);
+  if (!entries.length) return;
+  await chrome.storage.local.set(Object.fromEntries(entries));
+  let index = await readIndex();
+  const dropped: string[] = [];
+  for (const [offset, [key]] of entries.entries()) {
+    const merged = mergeClassifyIndex(index, key, now + offset);
+    index = merged.index;
+    dropped.push(...merged.dropped);
+  }
+  const safeDrop = dropped.filter((key) => isClassifyCacheKey(key) && !index.some((entry) => entry.key === key));
+  if (safeDrop.length) await chrome.storage.local.remove(safeDrop);
+  await chrome.storage.local.set({ [CLASSIFY_INDEX_KEY]: index });
 }
 
 export async function forgetSiteNotes(host: string) {

@@ -1,5 +1,5 @@
 import type { MemoryScope } from "../../shared/protocol.js";
-import { load, save, type PendingSite, type StoredState } from "./storage.js";
+import { clearClassifyCaches, load, save, type PendingSite, type StoredState } from "./storage.js";
 
 const MAX_LINE = 140;
 
@@ -107,4 +107,7 @@ export const rejectProposal = (line: string) => update((state) => rejectMemory(s
 export const forgetLine = (line: string) => update((state) => forgetMemory(state, line));
 export const addLine = (line: string) => update((state) => ({ profile: addMemoryLines(state.profile, [line]) }));
 export const editLine = (index: number, next: string) => update((state) => ({ profile: editMemoryLine(state.profile, index, next) }));
-export const clearAllMemory = () => update(() => ({ profile: [], pendingMemory: [], pendingSites: {} }));
+export async function clearAllMemory() {
+  await update(() => ({ profile: [], pendingMemory: [], pendingSites: {} }));
+  await clearClassifyCaches();
+}

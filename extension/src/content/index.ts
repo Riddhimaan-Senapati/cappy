@@ -13,7 +13,7 @@ import { load, recordApplied, recordReverted, save, savedChangesFor, type Stored
 import { detectInjectionFields } from "../../../shared/safety.js";
 import { isOneShot } from "../../../shared/validate.js";
 import { describeElement, uniqueSelector } from "./dom.js";
-import { setFilterClassifier, setFilterPauseNotice, setLeftoverListener } from "./content-filter.js";
+import { beginClassifyCache, setFilterClassifier, setFilterPauseNotice, setLeftoverListener } from "./content-filter.js";
 import { activeChanges, applyChange, applySiteControl, changeHistory, clearChangeHistory, ensureBaseStyle, onChangeDropped, onFocusLive, setFocusMode, revertAll, revertChange, setBusy, stopEngine } from "./engine.js";
 import { CameraController } from "./gestures/controller.js";
 import { ElementPicker } from "./picker.js";
@@ -441,6 +441,7 @@ async function handle(request: ContentRequest): Promise<unknown> {
 const LOADED_FLAG = "__adaptiveAgentLoaded";
 
 function start() {
+  void beginClassifyCache(location.host);
   setFilterClassifier((match, items) => send({ kind: "classify", match, items }) as Promise<boolean[] | null>);
   // A filter that said it hid something but left matches on screen says so, once per rule per page.
   const toldLeftovers = new Set<string>();
