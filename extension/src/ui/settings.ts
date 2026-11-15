@@ -1,12 +1,13 @@
 import type { ActiveChange } from "../../../shared/adaptation.js";
 import type { Routing, Tier } from "../../../shared/protocol.js";
 import { ROUTING_LABELS, type BackgroundRequest, type StatusInfo, type TtsRequest } from "../messages.js";
-import { forgetStoredChange, load, save, type StoredState } from "../storage.js";
+import { DEFAULTS, forgetStoredChange, load, save, type StoredState } from "../storage.js";
 import { isScheduleActive, scheduleStatus } from "../../../shared/validate.js";
 import { h } from "./dom.js";
 import { createMemoryView } from "./memory.js";
 import { createProfilesView } from "./profiles.js";
 import { createConfigView } from "./config.js";
+import { paintOnce, settle } from "../coalesce.js";
 
 let voicesRequest: Promise<string[]> | null = null;
 
@@ -309,9 +310,14 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
   let checkingVoice = false;
   let pendingVoice: "openai" | "gemini" | undefined;
 
-  const paint = async () => {
-    const [state, changes, status, voices] = await Promise.all([load(), ctx.listChanges().catch(() => []), ctx.getStatus().catch((): StatusInfo => ({ connected: false, busy: false })), loadVoices()]);
-    if (disposed) return;
+  const paint = paintOnce(async (current) => {
+    const [state, changes, status, voices] = await Promise.all([
+      settle(load(), { ...DEFAULTS }, 8_000),
+      settle(ctx.listChanges(), [] as ActiveChange[], 8_000),
+      settle(ctx.getStatus(), { connected: false, busy: false }, 8_000),
+      settle(loadVoices(), [], 8_000),
+    ]);
+    if (disposed || !current()) return;
     const focused = root.getRootNode() instanceof ShadowRoot ? (root.getRootNode() as ShadowRoot).activeElement : document.activeElement;
     const field = (focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement) && root.contains(focused) ? focused : null;
     const focusLabel = field?.getAttribute("aria-label");
@@ -545,7 +551,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       next?.focus();
       if (selection != null) next?.setSelectionRange(selection, selection);
     }
-  };
+  }, 15_000);
 
   const queue = () => {
     if (queued) return;

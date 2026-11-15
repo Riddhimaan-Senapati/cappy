@@ -271,7 +271,7 @@ async function syncLearnedText() {
   }
 }
 
-async function restore(animate: boolean) {
+async function restore() {
   if (detectInjectionFields(readInjectionSurface())) {
     const saved = await savedChangesFor(origin);
     const { paused, profile } = await load();
@@ -282,7 +282,7 @@ async function restore(animate: boolean) {
   }
   let restored = 0;
   for (const change of await savedChangesFor(origin)) {
-    if ((await applyChange(change, animate)).ok) {
+    if ((await applyChange(change, false)).ok) {
       restored++;
       recordChange(change.id, "Saved change restored locally (no LLM call)");
     } else recordActivity(`Saved change ${change.id} could not be restored.`);
@@ -449,7 +449,8 @@ function start() {
         await revertAll(false);
         clearChangeHistory();
         const state = await load();
-        const restored = state.paused ? 0 : await restore(true);
+        // A view transition waits for a frame, so a fast switch would keep the previous profile's rules on screen.
+        const restored = state.paused ? 0 : await restore();
         await send({ kind: "pageReady", origin, restored, profileChanged: true });
       }).catch(reportExtensionError);
     } else if (changes.profile) void mutate(syncLearnedText).catch(() => undefined);
@@ -457,7 +458,7 @@ function start() {
       recordActivity(changes.paused.newValue ? "Adaptations paused; reverting all active changes locally." : "Adaptations resumed; restoring saved changes locally.");
       void mutate(async () => {
         if (changes.paused.newValue) await revertAll();
-        else await restore(true);
+        else await restore();
       }).catch(() => undefined);
     }
     if (changes.trackEvents) setEventTracking(changes.trackEvents.newValue !== false);
@@ -479,7 +480,7 @@ function start() {
       void mutate(async () => {
         let restored = 0;
         try {
-          if (!state.paused) restored = await restore(false);
+          if (!state.paused) restored = await restore();
         } finally {
           void send({ kind: "pageReady", origin, restored });
         }
