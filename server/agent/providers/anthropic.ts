@@ -54,7 +54,8 @@ export function createAnthropicProvider(): AgentProvider {
         max_iterations: 16,
         ...(model.includes("haiku") ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
         output_config: { effort: efforts[tier] },
-        system: SYSTEM_PROMPT,
+        // Cache breakpoint after the tools and system prompt, which repeat unchanged on every turn.
+        system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
         tools: runnableTools,
         messages: [{ role: "user", content: buildUserTurn(session.request) }],
       }, { signal: session.signal });
