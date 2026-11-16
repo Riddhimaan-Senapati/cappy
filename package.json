@@ -12,6 +12,7 @@
     "chatgpt:login": "bun server/auth/chatgpt.ts",
     "test": "bun x tsx --test tests/*.test.ts",
     "e2e": "bun scripts/e2e/run-all.ts",
+    "perf:reapply": "bun scripts/perf/reapply.ts",
     "e2e:gate": "bun scripts/e2e/gate.ts",
     "e2e:injection": "bun scripts/e2e/injection.ts",
     "e2e:replay": "bun scripts/e2e/replay.ts",
