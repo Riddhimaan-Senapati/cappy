@@ -1,8 +1,19 @@
-import axe from "axe-core";
+import type axe from "axe-core";
 import type { BlockCall } from "../../../shared/adaptation.js";
 import { accessibleName, isVisible, LABELLABLE, OWN_ATTR, queryAll } from "./dom.js";
 
 type FormFixer = Extract<BlockCall, { name: "formFixer" }>;
+
+// axe-core is ~650 KB, so it is injected only when a form change needs its audit.
+async function loadAxe(): Promise<typeof axe> {
+  const scope = globalThis as unknown as { __cappyAxe?: typeof axe };
+  if (!scope.__cappyAxe) {
+    const loaded = (await chrome.runtime.sendMessage({ kind: "loadAxe" }).catch(() => undefined)) as { ok?: boolean } | undefined;
+    if (!loaded?.ok || !scope.__cappyAxe) throw new Error("axe-core is unavailable");
+  }
+  return scope.__cappyAxe;
+}
+
 type Field = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
 type Undo = () => void;
 
@@ -204,12 +215,12 @@ ${CONTROLS} { min-width: ${block.minTargetPx}px !important; min-height: ${block.
   }
   const note = auditQueue.then(async () => {
     if (!undo.length) return "";
-    const results = await axe.run({ include: ["form"] }, {
+    const results = await loadAxe().then((engine) => engine.run({ include: ["form"] }, {
       runOnly: { type: "rule", values: ["label", "select-name", "tabindex"] },
       resultTypes: ["violations"],
       iframes: false,
       preload: false,
-    });
+    }));
     const count = results.violations.reduce((total, rule) => total + rule.nodes.length, 0);
     return `Axe checked visible form labels and tab order. ${count} issue${count === 1 ? "" : "s"} remain${count === 1 ? "s" : ""}.`;
   }).catch(() => "The form audit was unavailable. Check the page stats for the result.");

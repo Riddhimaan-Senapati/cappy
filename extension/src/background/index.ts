@@ -341,6 +341,10 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "openDebug":
       if (sender.tab?.id) void chrome.sidePanel.open({ tabId: sender.tab.id }).catch(() => undefined);
       break;
+    case "loadAxe":
+      if (sender.tab?.id === undefined || sender.frameId === undefined) return false;
+      void chrome.scripting.executeScript({ target: { tabId: sender.tab.id, frameIds: [sender.frameId] }, files: ["dist/axe.js"], world: "ISOLATED" }).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+      return true;
     case "openShortcuts":
       void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
       break;
