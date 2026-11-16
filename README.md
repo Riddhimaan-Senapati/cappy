@@ -6,6 +6,10 @@ Take control of the web with AI agents.
 
 A Chrome extension that adapts the website you're on to how you need it. Built at HackUMass XIV.
 
+[![Watch the Cappy demo on YouTube](https://img.youtube.com/vi/xg5TxgsSfbc/maxresdefault.jpg)](https://www.youtube.com/watch?v=xg5TxgsSfbc)
+
+Watch the demo: [youtu.be/xg5TxgsSfbc](https://www.youtube.com/watch?v=xg5TxgsSfbc)
+
 ## The problem
 
 Most websites are built for one kind of user. If you're colorblind, sensitive to bright pages, have low vision or a tremor, or lose focus in a busy feed, you end up working around the page instead of using it. Site settings differ everywhere, and browser zoom often breaks the layout.
