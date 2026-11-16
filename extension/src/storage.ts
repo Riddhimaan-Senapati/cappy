@@ -110,6 +110,9 @@ export interface StoredState {
 export const PROFILE_KEYS = ["profile", "pendingMemory", "pendingSites", "history", "submittedRequests", "requestSessions", "lastingSuggestion", "globalChanges", "siteChanges", "recipes", "commands", "nudgedAt", "suggestionFeedback"] as const;
 export type ProfileState = Pick<StoredState, typeof PROFILE_KEYS[number]>;
 
+// Every StoredState key is either exported in config.ts or listed here. A new field fails the config test until it is classified.
+export const NOT_PORTABLE_KEYS = ["usage", "frictionLog", "activity", "lastingSuggestion", "onboarded", "barOffset", "serverUrl", "openAIVoiceVerified", "geminiVoiceVerified", "voiceProvider"] as const satisfies readonly (keyof StoredState)[];
+
 export const DEFAULTS: StoredState = {
   activeProfileId: "default",
   profiles: { default: { name: "Default" } },
