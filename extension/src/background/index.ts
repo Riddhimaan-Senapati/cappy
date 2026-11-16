@@ -10,6 +10,7 @@ import { handleVoiceRequest, setLiveTaskRunner } from "./voice.js";
 import { registerFriction } from "./friction.js";
 import { registerTts } from "./tts.js";
 import { applyProfileAction, type ProfileAction } from "../profiles.js";
+import { exportConfig, importConfig, parseConfig } from "../config.js";
 
 registerTts();
 registerFriction();
@@ -344,6 +345,22 @@ chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendRe
     case "loadAxe":
       if (sender.tab?.id === undefined || sender.frameId === undefined) return false;
       void chrome.scripting.executeScript({ target: { tabId: sender.tab.id, frameIds: [sender.frameId] }, files: ["dist/axe.js"], world: "ISOLATED" }).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+      return true;
+    case "exportConfig":
+      if (sender.id !== chrome.runtime.id) return false;
+      void exportConfig().then((text) => sendResponse({ ok: true, text }), (error: Error) => sendResponse({ ok: false, error: error.message }));
+      return true;
+    case "checkConfig":
+      if (sender.id !== chrome.runtime.id || typeof request.text !== "string") return false;
+      try {
+        sendResponse({ ok: true, profiles: Object.keys(parseConfig(request.text).profiles).length });
+      } catch (error) {
+        sendResponse({ ok: false, error: (error as Error).message });
+      }
+      return false;
+    case "importConfig":
+      if (sender.id !== chrome.runtime.id || typeof request.text !== "string") return false;
+      void importConfig(parseConfig(request.text)).then(() => sendResponse({ ok: true }), (error: Error) => sendResponse({ ok: false, error: error.message }));
       return true;
     case "openShortcuts":
       void chrome.tabs.create({ url: "chrome://extensions/shortcuts" });

@@ -1,8 +1,17 @@
-import { exportConfig, importConfig, parseConfig, type ImportedConfig } from "../config.js";
+import type { BackgroundRequest } from "../messages.js";
 import { h } from "./dom.js";
 
+type Reply<T> = ({ ok: true } & T) | { ok: false; error: string };
+
+// Config parsing and storage run in the background, which holds the zod schemas.
+async function send<T extends object>(request: BackgroundRequest): Promise<{ ok: true } & T> {
+  const reply = (await chrome.runtime.sendMessage(request)) as Reply<T> | undefined;
+  if (!reply?.ok) throw new Error(reply?.error ?? "Could not transfer config.");
+  return reply;
+}
+
 export function createConfigView(rerender: () => void) {
-  let pending: ImportedConfig | null = null;
+  let pending: { text: string; profiles: number } | null = null;
   let message = "";
   let error = false;
   let busy = false;
@@ -40,10 +49,15 @@ export function createConfigView(rerender: () => void) {
       const selected = file.files?.[0];
       if (!selected) return;
       pending = null;
-      void run(async () => { pending = parseConfig(await selected.text()); });
+      void run(async () => {
+        const text = await selected.text();
+        const checked = await send<{ profiles: number }>({ kind: "checkConfig", text });
+        pending = { text, profiles: checked.profiles };
+      });
     });
     const exportButton = button("Export config", () => void run(async () => {
-      const url = URL.createObjectURL(new Blob([await exportConfig()], { type: "application/json" }));
+      const exported = await send<{ text: string }>({ kind: "exportConfig" });
+      const url = URL.createObjectURL(new Blob([exported.text], { type: "application/json" }));
       const link = h("a");
       link.href = url;
       link.download = `cappy-config-${new Date().toISOString().slice(0, 10)}.json`;
@@ -61,10 +75,10 @@ export function createConfigView(rerender: () => void) {
       file,
       h("div", "s-acts", "", [exportButton, button("Import config", () => file.click())]),
       ...(pending ? [
-        h("div", "s-note", `Import ${Object.keys(pending.profiles).length} profile(s)? This replaces your current profiles and preferences.`),
+        h("div", "s-note", `Import ${pending.profiles} profile(s)? This replaces your current profiles and preferences.`),
         h("div", "s-acts", "", [
           button("Replace config", () => void run(async () => {
-            await importConfig(pending!);
+            await send({ kind: "importConfig", text: pending!.text });
             pending = null;
             message = "Config imported. Open websites now use your imported settings.";
           })),
