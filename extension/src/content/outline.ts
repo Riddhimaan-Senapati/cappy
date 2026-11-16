@@ -43,7 +43,9 @@ export function lowContrastSamples(limit = 8): ContrastIssue[] {
     if (info.ratio >= 4.5) continue;
     const selector = cssPath(element);
     const existing = worst.get(selector);
-    if (!existing || info.ratio < existing.ratio) worst.set(selector, { selector, text: clip(element.textContent, 40), ...info });
+    if (!existing || info.ratio < existing.ratio) {
+      worst.set(selector, { selector, text: clip(element.textContent, 40), color: info.color, background: info.background, ratio: info.ratio });
+    }
   }
   return [...worst.values()].sort((a, b) => a.ratio - b.ratio).slice(0, limit);
 }
