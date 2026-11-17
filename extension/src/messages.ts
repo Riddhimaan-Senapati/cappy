@@ -88,6 +88,10 @@ export type BackgroundRequest =
   | { kind: "pageReady"; origin: string; restored: number; profileChanged?: boolean }
   | { kind: "openDebug" }
   | { kind: "openShortcuts" }
+  | { kind: "loadAxe" }
+  | { kind: "exportConfig" }
+  | { kind: "checkConfig"; text: string }
+  | { kind: "importConfig"; text: string }
   | { kind: "verifyVoice"; key: string; provider?: "openai" | "gemini" }
   | { kind: "status" }
   | { kind: "setKey"; provider: string; key: string | null; baseURL?: string | null }

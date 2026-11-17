@@ -275,24 +275,6 @@ function contentFilter(block: Extract<BlockCall, { name: "contentFilter" }>): Li
   return { undo: handle.undo, matched: handle.matched };
 }
 
-function channelLuminance(r: number, g: number, b: number): number {
-  const channel = (piece: number) => {
-    const s = piece / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
-
-function backgroundLuminance(color: string): number | null {
-  const rgb = color.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
-  if (rgb) return channelLuminance(Number(rgb[1]), Number(rgb[2]), Number(rgb[3]));
-  const hex = color.trim().match(/^#([0-9a-f]{6})$/i);
-  if (!hex) return null;
-  const value = Number.parseInt(hex[1], 16);
-  if (!Number.isFinite(value)) return null;
-  return channelLuminance((value >> 16) & 255, (value >> 8) & 255, value & 255);
-}
-
 function contrastFix(minRatio: number): LiveBlock {
   const marked = new Set<HTMLElement>();
   const style = document.createElement("style");
@@ -316,9 +298,7 @@ function contrastFix(minRatio: number): LiveBlock {
         if (marked.delete(el)) el.removeAttribute("data-ba-contrast");
         continue;
       }
-      const luminance = backgroundLuminance(info.background);
-      if (luminance == null) continue;
-      const tone = luminance < 0.5 ? "paper" : "ink";
+      const tone = info.backgroundLuminance < 0.5 ? "paper" : "ink";
       if (el.getAttribute("data-ba-contrast") !== tone) el.setAttribute("data-ba-contrast", tone);
       marked.add(el);
     }

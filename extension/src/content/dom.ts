@@ -1,3 +1,5 @@
+import { parseRgba, relativeLuminance, type Rgba } from "./color.js";
+
 export const OWN_ATTR = "data-ba";
 
 export function isOwn(element: Element): boolean {
@@ -110,49 +112,41 @@ export const LABELLABLE = 'input:not([type="hidden"]):not([type="submit"]):not([
 export const AD_OR_POPUP =
   '[class*="advert" i], [id*="advert" i], [class~="ad"], [class*="ad-slot" i], [class*="sponsor" i], [aria-label*="advert" i], [data-ad], iframe[src*="doubleclick"], [role="dialog"], [aria-modal="true"], [class*="modal" i], [class*="popup" i], [class*="newsletter" i], [class*="cookie" i]';
 
-type Rgba = [number, number, number, number];
-
-function parseColor(value: string): Rgba | null {
-  const match = value.match(/rgba?\(([^)]+)\)/);
-  if (!match) return null;
-  const [r, g, b, a = "1"] = match[1].split(/[ ,/]+/).filter(Boolean);
-  return [Number(r), Number(g), Number(b), Number(a)];
-}
-
-function luminance([r, g, b]: Rgba): number {
-  const channel = (value: number) => {
-    const s = value / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+function composite(top: Rgba, bottom: Rgba): Rgba {
+  return {
+    r: top.r * top.a + bottom.r * (1 - top.a),
+    g: top.g * top.a + bottom.g * (1 - top.a),
+    b: top.b * top.a + bottom.b * (1 - top.a),
+    a: 1,
   };
-  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
-}
-
-function composite([red, green, blue, alpha]: Rgba, bottom: Rgba): Rgba {
-  return [
-    red * alpha + bottom[0] * (1 - alpha),
-    green * alpha + bottom[1] * (1 - alpha),
-    blue * alpha + bottom[2] * (1 - alpha),
-    1,
-  ];
 }
 
 function effectiveBackground(element: Element): Rgba {
   const layers: Rgba[] = [];
   for (let current: Element | null = element; current; current = current.parentElement) {
-    const color = parseColor(getComputedStyle(current).backgroundColor);
-    if (!color || color[3] === 0) continue;
+    const color = parseRgba(getComputedStyle(current).backgroundColor);
+    if (!color || color.a === 0) continue;
     layers.push(color);
-    if (color[3] === 1) break;
+    if (color.a === 1) break;
   }
-  return layers.reduceRight((bottom, top) => composite(top, bottom), [255, 255, 255, 1] as Rgba);
+  return layers.reduceRight((bottom, top) => composite(top, bottom), { r: 255, g: 255, b: 255, a: 1 });
 }
 
-export function contrastInfo(element: Element): { ratio: number; color: string; background: string } {
-  const foreground = parseColor(getComputedStyle(element).color) ?? [0, 0, 0, 1];
+const hex = (c: Rgba) => `#${[c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
+
+export function contrastInfo(element: Element): { ratio: number; color: string; background: string; backgroundLuminance: number } {
+  const foreground = parseRgba(getComputedStyle(element).color) ?? { r: 0, g: 0, b: 0, a: 1 };
   const background = effectiveBackground(element);
-  const [light, dark] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
-  const hex = ([r, g, b]: Rgba) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join("")}`;
-  return { ratio: Math.round(((light + 0.05) / (dark + 0.05)) * 10) / 10, color: hex(foreground), background: hex(background) };
+  // Text alpha is ignored here, as before.
+  const foregroundLuminance = relativeLuminance({ ...foreground, a: 1 });
+  const backgroundLuminance = relativeLuminance({ r: Math.round(background.r), g: Math.round(background.g), b: Math.round(background.b), a: 1 });
+  const [light, dark] = [foregroundLuminance, backgroundLuminance].sort((a, b) => b - a);
+  return {
+    ratio: Math.round(((light + 0.05) / (dark + 0.05)) * 10) / 10,
+    color: hex(foreground),
+    background: hex(background),
+    backgroundLuminance,
+  };
 }
 
 export function contrastRatio(element: Element): number {

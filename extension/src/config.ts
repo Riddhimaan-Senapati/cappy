@@ -48,6 +48,10 @@ const settings = profile.extend({
   ttsRate: z.number().min(0.5).max(2),
   voiceAutoSend: z.boolean(),
   voiceLang: z.string(),
+  uiTheme: z.enum(["dark", "light", "system"]).optional(),
+  trackEvents: z.boolean().optional(),
+  focusMode: z.boolean().optional(),
+  askBeforeAdapting: z.boolean().optional(),
 }).refine((value) => Object.hasOwn(value.profiles, value.activeProfileId)
   && Object.entries(value.profiles).every(([id, entry]) => id === value.activeProfileId || entry.state),
 "Invalid profiles");

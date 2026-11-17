@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { exportConfig, importConfig, parseConfig } from "../extension/src/config.js";
-import { DEFAULTS } from "../extension/src/storage.js";
+import { DEFAULTS, NOT_PORTABLE_KEYS } from "../extension/src/storage.js";
 import { profileState } from "../extension/src/profiles.js";
 
 const originalChrome = globalThis.chrome;
@@ -73,4 +73,39 @@ test("import reports storage failures", async () => {
   const parsed = parseConfig(await exportConfig());
   chrome.storage.local.set = async () => { throw new Error("Storage is full"); };
   await assert.rejects(importConfig(parsed), /Storage is full/);
+});
+
+const displayKeys = { uiTheme: "light", trackEvents: false, focusMode: true, askBeforeAdapting: false } as const;
+
+test("display and focus preferences survive an export and import", async () => {
+  storage({ ...DEFAULTS, ...displayKeys });
+  const parsed = parseConfig(await exportConfig());
+  const target = storage(DEFAULTS as unknown as Record<string, unknown>);
+  await importConfig(parsed);
+  assert.deepEqual({ uiTheme: target.uiTheme, trackEvents: target.trackEvents, focusMode: target.focusMode, askBeforeAdapting: target.askBeforeAdapting }, displayKeys);
+});
+
+test("this computer's onboarding, bar position, server and usage stay out of the export", async () => {
+  storage({ ...DEFAULTS, onboarded: true, barOffset: { x: 4, y: 9 }, serverUrl: "ws://other:8787/agent", usage: { calls: 3, inputTokens: 1, outputTokens: 1 } });
+  const settings = JSON.parse(await exportConfig()).settings;
+  for (const key of ["onboarded", "barOffset", "serverUrl", "usage"]) assert.ok(!(key in settings), key);
+});
+
+test("every stored setting is either exported or listed as not portable", async () => {
+  storage(DEFAULTS as unknown as Record<string, unknown>);
+  const exported = JSON.parse(await exportConfig());
+  const portable = Object.keys(DEFAULTS).filter((key) => !(NOT_PORTABLE_KEYS as readonly string[]).includes(key)).sort();
+  assert.deepEqual(Object.keys(exported.settings).sort(), portable);
+});
+
+test("an export from before the display keys existed imports without changing them", async () => {
+  storage({ ...DEFAULTS, ...displayKeys });
+  const old = JSON.parse(await exportConfig());
+  for (const key of Object.keys(displayKeys)) delete old.settings[key];
+  const target = storage({ ...DEFAULTS, ...displayKeys, uiTheme: "system" });
+  await importConfig(parseConfig(JSON.stringify(old)));
+  assert.equal(target.uiTheme, "system");
+  assert.equal(target.trackEvents, false);
+  assert.equal(target.focusMode, true);
+  assert.equal(target.askBeforeAdapting, false);
 });
