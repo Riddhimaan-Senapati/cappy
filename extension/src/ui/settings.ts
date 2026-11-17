@@ -44,6 +44,19 @@ function toggle(label: string, sub: string, checked: boolean, onChange: (value: 
   return h("div", "s-row", "", [h("div", "grow", "", [h("div", "", label), h("small", "", sub)]), button]);
 }
 
+function statusNote(text: string, error = false, className = "s-note"): HTMLElement {
+  const note = h("div", error ? `${className} s-error` : className, text);
+  note.setAttribute("role", error ? "alert" : "status");
+  return note;
+}
+
+function segmented(label: string, buttons: HTMLElement[], extra = ""): HTMLElement {
+  const group = h("div", `s-seg${extra ? ` ${extra}` : ""}`, "", buttons);
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", label);
+  return group;
+}
+
 function modelPickers(state: StoredState, status: StatusInfo): Node[] {
   if (!status.activeProvider) return [];
   const defaults = status.models;
@@ -130,7 +143,7 @@ function cameraSection(state: StoredState): Node {
       button.addEventListener("click", () => set({ dwellMs: value }));
       return button;
     });
-    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click"), h("div", "s-seg s-seg4", "", segments), h("div", "s-note", "Thumbs down cancels. Pause from the camera preview."));
+    rows.push(h("div", "s-note", "Dwell click: hold the pointer still to click"), segmented("Dwell click", segments, "s-seg4"), h("div", "s-note", "Thumbs down cancels. Pause from the camera preview."));
   }
   return h("section", "s-sec", "", [h("h3", "", "Camera"), ...rows]);
 }
@@ -155,13 +168,15 @@ function tabBar(onPick: (tab: Tab) => void): HTMLElement {
     return button;
   });
   bar.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     event.stopPropagation();
     const focused = buttons.indexOf(event.target as HTMLButtonElement);
     const index = focused >= 0 ? focused : TABS.findIndex(([id]) => id === currentTab);
-    const next = TABS[(index + (event.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length][0];
-    onPick(next);
+    const last = TABS.length - 1;
+    const nextIndex =
+      event.key === "Home" ? 0 : event.key === "End" ? last : (index + (event.key === "ArrowRight" ? 1 : last)) % TABS.length;
+    onPick(TABS[nextIndex][0]);
   });
   bar.append(...buttons);
   return bar;
@@ -228,9 +243,11 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       if (provider.ready) {
         const isSignin = provider.setup === "signin";
         const armed = confirming === provider.id;
-        const disconnect = h("button", `s-link${armed ? " s-danger" : " s-quiet"}`, armed ? (isSignin ? "Confirm sign out" : "Confirm remove") : isSignin ? "Sign out" : "Remove key");
+        const visible = armed ? (isSignin ? "Confirm sign out" : "Confirm remove") : isSignin ? "Sign out" : "Remove key";
+        const disconnect = h("button", `s-link${armed ? " s-danger" : " s-quiet"}`, visible);
         disconnect.type = "button";
-        disconnect.setAttribute("aria-label", armed ? `Confirm: disconnect ${provider.label}` : `Disconnect ${provider.label}`);
+        // The accessible name starts with the visible text (WCAG 2.5.3).
+        disconnect.setAttribute("aria-label", `${visible} ${provider.label}`);
         disconnect.addEventListener("click", () => {
           clearTimeout(confirmTimer);
           if (!armed) {
@@ -302,7 +319,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       queueMicrotask(() => (url ?? input).focus());
       return h("div", "s-sec", "", [row, form]);
     });
-    const notice = status.notice ? [h("div", `s-note${status.notice.level === "error" ? " s-error" : ""}`, status.notice.text)] : [];
+    const notice = status.notice ? [statusNote(status.notice.text, status.notice.level === "error")] : [];
     const hint = status.activeProvider ? [] : [h("div", "s-note", "Sign in with ChatGPT or add a key. Keys stay on your computer.")];
     const providers = status.providers ?? [];
     const ready = rows.filter((_, index) => providers[index]?.ready);
@@ -517,10 +534,8 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
         ["auto", "Adapt it", { proactive: true, askBeforeAdapting: false }],
         ["off", "Do nothing", { proactive: false }],
       ];
-      const seg = h(
-        "div",
-        "s-seg",
-        "",
+      const seg = segmented(
+        "On a new website",
         choices.map(([value, label, patch]) => {
           const button = h("button", "", label);
           button.type = "button";
@@ -534,10 +549,8 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
     };
     const themePicker = (): Node => {
       const choices: Array<[StoredState["uiTheme"], string]> = [["dark", "Dark"], ["light", "Light"], ["system", "Auto"]];
-      return h(
-        "div",
-        "s-seg",
-        "",
+      return segmented(
+        "Appearance",
         choices.map(([value, label]) => {
           const button = h("button", "", label);
           button.type = "button";
@@ -566,7 +579,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       return h("div", "s-warn", "", [
         h("b", "", "Reset everything?"),
         h("p", "", "This deletes your profiles, memory, saved changes, commands, request history and settings on this browser, and undoes changes on open tabs. It cannot be undone. Your API keys and ChatGPT sign-in are kept."),
-        ...(resetError ? [h("div", "s-note s-error", resetError)] : []),
+        ...(resetError ? [statusNote(resetError, true)] : []),
         h("div", "s-acts", "", [
           button("Cancel", "s-btn s-small", () => {
             confirmingReset = false;
@@ -607,7 +620,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
       ],
       ai: () => [
         ...providerSection(status, state),
-        section("Model", h("div", "s-seg", "", segments), h("div", "s-note", routingNote), ...(status.activeProvider ? [more("Choose models", modelPickers(state, status))] : [])),
+        section("Model", segmented("Routing", segments), h("div", "s-note", routingNote), ...(status.activeProvider ? [more("Choose models", modelPickers(state, status))] : [])),
         section("Usage on this browser", usageRow),
       ],
       voice: () => [
@@ -618,7 +631,7 @@ export function renderSettings(root: HTMLElement, ctx: SettingsContext): () => v
           voiceRow,
           rateRow,
           h("div", "s-foot", "", [testVoice]),
-          ...(speechError ? [h("div", "s-note s-error", speechError)] : []),
+          ...(speechError ? [statusNote(speechError, true)] : []),
         ),
         more("Speech provider", [voiceProviderRow, ...liveNote, ...(voiceProvider.value !== "chrome" || pendingVoice ? [voiceKeyField, verify] : []), verificationStatus]),
       ],
