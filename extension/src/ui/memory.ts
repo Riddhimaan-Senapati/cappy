@@ -24,6 +24,11 @@ export function createMemoryView(rerender: () => void): MemoryView {
     return el;
   };
 
+  const withLabel = (element: HTMLButtonElement, label: string) => {
+    element.setAttribute("aria-label", label);
+    return element;
+  };
+
   const savedRow = (line: string, index: number) => {
     if (editing === index) {
       const input = h("input");
@@ -55,12 +60,12 @@ export function createMemoryView(rerender: () => void): MemoryView {
     }
     return h("div", "s-row", "", [
       h("div", "grow", line),
-      button("Edit", "s-link", () => {
+      withLabel(button("Edit", "s-link", () => {
         editing = index;
         editDraft = line;
         rerender();
-      }),
-      button("Forget this", "s-link", () => void forgetLine(line)),
+      }), `Edit memory line: ${line}`),
+      withLabel(button("Forget this", "s-link", () => void forgetLine(line)), `Forget memory line: ${line}`),
     ]);
   };
 
@@ -89,7 +94,7 @@ export function createMemoryView(rerender: () => void): MemoryView {
       ...hosts.map(([host, skill]) =>
         h("div", "s-row", "", [
           h("div", "grow", "", [h("div", "", host), h("small", "", `${skill.notes.length} note${skill.notes.length === 1 ? "" : "s"}: ${skill.notes.slice(-2).join(" · ")}`)]),
-          button("Forget", "s-link", () => void forgetSiteNotes(host)),
+          withLabel(button("Forget", "s-link", () => void forgetSiteNotes(host)), `Forget site skills for ${host}`),
         ]),
       ),
     ];
