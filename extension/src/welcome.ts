@@ -470,6 +470,7 @@ async function render() {
       ];
 
   const view = finished ? "done" : String(step);
+  const kept = view === shownView && root.contains(document.activeElement) ? { tag: document.activeElement!.tagName, label: document.activeElement!.getAttribute("aria-label"), text: document.activeElement!.textContent } : null;
   const card = h("section", `w-card${view !== shownView ? " enter" : ""}`, "", [...body, ...nav]);
   shownView = view;
   root.replaceChildren(
@@ -477,6 +478,10 @@ async function render() {
     progress,
     card,
   );
+  if (kept) {
+    const same = [...root.querySelectorAll<HTMLElement>(kept.tag)].find((element) => element.getAttribute("aria-label") === kept.label && element.textContent === kept.text);
+    same?.focus({ preventScroll: true });
+  }
 }
 
 async function go(next: number) {
