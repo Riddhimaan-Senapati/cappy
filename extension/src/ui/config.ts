@@ -68,7 +68,7 @@ export function createConfigView(rerender: () => void) {
       message = "Config exported.";
     }));
     const status = h("div", `s-note${error ? " s-error" : ""}`, message);
-    status.setAttribute("role", "status");
+    status.setAttribute("role", error ? "alert" : "status");
     return h("section", "s-sec", "", [
       h("h3", "", "Import and export"),
       h("div", "s-note", "Move all profiles, preferences, saved changes, commands, and request history to another computer using a JSON file. The file includes personal saved data. API keys, sign-ins, and the server address stay on each computer. Verify AI audio again after importing."),

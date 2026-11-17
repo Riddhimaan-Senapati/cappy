@@ -73,7 +73,11 @@ export function createProfilesView(rerender: () => void) {
         h("div", "s-note", "A new profile starts empty. Tip: type /profile in the bar to switch quickly."),
       );
     }
-    if (error) rows.push(h("div", "s-note s-error", error));
+    if (error) {
+      const note = h("div", "s-note s-error", error);
+      note.setAttribute("role", "alert");
+      rows.push(note);
+    }
     return h("section", "s-sec", "", rows);
   };
 }
