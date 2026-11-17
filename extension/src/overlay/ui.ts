@@ -333,12 +333,19 @@ export class OverlayUi {
     if (!sticky) nodes.push(h("div", "life"));
 
     const toast = h("div", `toast${isError ? " error" : ""}${stacked ? " stack" : ""}`, "", nodes);
-    toast.setAttribute("role", "status");
+    toast.setAttribute("role", isError ? "alert" : "status");
     close.addEventListener("click", () => {
       const dismiss = this.toastDismiss;
       this.toastDismiss = undefined;
       void dismiss?.();
       this.dismissToast();
+    });
+    // Keyboard users can Tab to Undo or a choice; the timer waits while focus is inside and restarts when it leaves.
+    toast.addEventListener("focusin", () => window.clearTimeout(this.toastTimer));
+    toast.addEventListener("focusout", (event) => {
+      if (sticky || this.toast !== toast || toast.contains(event.relatedTarget as Node | null)) return;
+      window.clearTimeout(this.toastTimer);
+      this.toastTimer = window.setTimeout(() => this.dismissToast(), TOAST_MS);
     });
     this.toast = toast;
     this.shadow.append(toast);
