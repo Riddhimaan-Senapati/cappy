@@ -45,7 +45,7 @@ async function runLoop(getClient: () => Promise<OpenAI>, model: string, session:
     for await (const event of stream) {
       if (event.type === "response.completed") {
         output = event.response.output;
-        reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0 });
+        reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0, cachedTokens: event.response.usage?.input_tokens_details?.cached_tokens ?? 0 });
       }
       if (event.type === "response.failed") throw new Error(event.response.error?.message ?? "Response failed");
       if (event.type === "error") throw new Error(event.message);
@@ -98,7 +98,7 @@ async function completeText(client: OpenAI, model: string, system: string, user:
   const stream = await client.responses.create({ model, instructions: system, input: [{ role: "user", content: user }], store: false, stream: true, ...quickReasoning(model) });
   let text = "";
   for await (const event of stream) {
-    if (event.type === "response.completed") reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0 });
+    if (event.type === "response.completed") reportUsage({ calls: 1, inputTokens: event.response.usage?.input_tokens ?? 0, outputTokens: event.response.usage?.output_tokens ?? 0, cachedTokens: event.response.usage?.input_tokens_details?.cached_tokens ?? 0 });
     if (event.type === "response.output_text.delta") text += event.delta;
     if (event.type === "response.failed") throw new Error(event.response.error?.message ?? "Response failed");
   }

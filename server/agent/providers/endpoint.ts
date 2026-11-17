@@ -52,7 +52,7 @@ async function runModel(model: LanguageModel, session: AgentSession, reportUsage
     stopWhen: [isStepCount(MAX_STEPS), () => session.escalation != null],
     abortSignal: session.signal,
     onStepFinish: (step) => {
-      reportUsage({ calls: 1, inputTokens: step.usage.inputTokens ?? 0, outputTokens: step.usage.outputTokens ?? 0 });
+      reportUsage({ calls: 1, inputTokens: step.usage.inputTokens ?? 0, outputTokens: step.usage.outputTokens ?? 0, cachedTokens: step.usage.inputTokenDetails?.cacheReadTokens ?? 0 });
       const note = step.text.trim();
       if (note) session.progress(note.length > 120 ? `${note.slice(0, 117)}...` : note);
     },

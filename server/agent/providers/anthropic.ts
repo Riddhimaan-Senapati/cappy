@@ -31,7 +31,7 @@ export function createAnthropicProvider(): AgentProvider {
     models,
     async complete(system: string, user: string, model: string, reportUsage: UsageReporter) {
       const response = await client.messages.create({ model, max_tokens: 2000, output_config: { effort: "low" }, system, messages: [{ role: "user", content: user }] });
-      reportUsage({ calls: 1, inputTokens: response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0), outputTokens: response.usage.output_tokens });
+      reportUsage({ calls: 1, inputTokens: response.usage.input_tokens + (response.usage.cache_read_input_tokens ?? 0) + (response.usage.cache_creation_input_tokens ?? 0), outputTokens: response.usage.output_tokens, cachedTokens: response.usage.cache_read_input_tokens ?? 0 });
       return response.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("").trim();
     },
     async listModels() {
@@ -61,7 +61,7 @@ export function createAnthropicProvider(): AgentProvider {
       }, { signal: session.signal });
 
       for await (const message of runner) {
-        reportUsage({ calls: 1, inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0), outputTokens: message.usage.output_tokens });
+        reportUsage({ calls: 1, inputTokens: message.usage.input_tokens + (message.usage.cache_read_input_tokens ?? 0) + (message.usage.cache_creation_input_tokens ?? 0), outputTokens: message.usage.output_tokens, cachedTokens: message.usage.cache_read_input_tokens ?? 0 });
       }
       const finalMessage = await runner;
       if (finalMessage.stop_reason === "refusal") return "I can't help with that one.";

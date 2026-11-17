@@ -25,7 +25,7 @@ export function createGeminiProvider(): AgentProvider {
     models,
     async complete(system: string, user: string, model: string, reportUsage: UsageReporter) {
       const response = await ai.models.generateContent({ model, contents: user, config: { systemInstruction: system } });
-      reportUsage({ calls: 1, inputTokens: response.usageMetadata?.promptTokenCount ?? 0, outputTokens: (response.usageMetadata?.candidatesTokenCount ?? 0) + (response.usageMetadata?.thoughtsTokenCount ?? 0) });
+      reportUsage({ calls: 1, inputTokens: response.usageMetadata?.promptTokenCount ?? 0, outputTokens: (response.usageMetadata?.candidatesTokenCount ?? 0) + (response.usageMetadata?.thoughtsTokenCount ?? 0), cachedTokens: response.usageMetadata?.cachedContentTokenCount ?? 0 });
       return (response.text ?? "").trim();
     },
     async listModels() {
@@ -44,7 +44,7 @@ export function createGeminiProvider(): AgentProvider {
           config: { abortSignal: session.signal, systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }] },
         });
 
-        reportUsage({ calls: 1, inputTokens: response.usageMetadata?.promptTokenCount ?? 0, outputTokens: (response.usageMetadata?.candidatesTokenCount ?? 0) + (response.usageMetadata?.thoughtsTokenCount ?? 0) });
+        reportUsage({ calls: 1, inputTokens: response.usageMetadata?.promptTokenCount ?? 0, outputTokens: (response.usageMetadata?.candidatesTokenCount ?? 0) + (response.usageMetadata?.thoughtsTokenCount ?? 0), cachedTokens: response.usageMetadata?.cachedContentTokenCount ?? 0 });
         const calls = response.functionCalls ?? [];
         if (!calls.length) return (response.text ?? "").trim();
 
