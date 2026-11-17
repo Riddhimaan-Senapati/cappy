@@ -34,10 +34,14 @@ export const USAGE_CSS = `
 .usage-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #9aa8ff; }
 .usage-output .usage-label::before { background: #67d8c3; }
 .usage-metric strong { font-size: clamp(20px, 6vw, 28px); font-weight: 600; letter-spacing: -0.04em; line-height: 1.2; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.usage-unit { color: var(--faint); font-size: 10px; }
+.usage-unit { color: var(--muted); font-size: 10px; }
 .usage-bar { display: flex; height: 4px; border-radius: 999px; overflow: hidden; background: #67d8c3; }
 .usage-bar-input { background: #9aa8ff; }
 .usage-total { margin-top: 12px; font-size: 11px; color: var(--muted); }
 .usage-total b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
 .usage-note { margin: 12px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+@media (forced-colors: active) {
+  .usage-card { border: 1px solid ButtonText; }
+  .usage-metric + .usage-metric { border-left: 1px solid ButtonText; }
+}
 `;
