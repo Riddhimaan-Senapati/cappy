@@ -205,6 +205,7 @@ export function createStubProvider(): AgentProvider {
       const { trigger, message, profile, page, active } = session.request;
 
       await toolNamed("read_page").run({}, session);
+      if (process.env.STUB_DELAY_MS) await new Promise((resolve) => setTimeout(resolve, Number(process.env.STUB_DELAY_MS)));
       if (session.blockedReason) return "This page contains text that tries to instruct me, so I didn't change anything.";
 
       if (trigger === "chat" && /^turn on dark mode[.!?]?$/i.test(message.trim())) {

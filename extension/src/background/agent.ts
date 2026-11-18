@@ -24,6 +24,7 @@ interface Run {
   commandId?: string;
   thread?: string;
   target?: TargetElement;
+  documentId?: string;
   // Set when the run request is sent, so a replaced socket can still fail its own runs.
   socket?: WebSocket;
 }
@@ -51,8 +52,18 @@ const STAT_LABELS: Record<keyof PageStats, string> = {
   visibleAdsOrPopups: "ads and popups",
 };
 
-export async function sendToTab<T>(tabId: number, request: ContentRequest): Promise<T> {
-  const response: ContentResponse | undefined = await chrome.tabs.sendMessage(tabId, request);
+export class PageChangedError extends Error {}
+
+// A run that outlives a navigation must not reach the page that replaced the one the user asked about.
+export async function sendToTab<T>(tabId: number, request: ContentRequest, documentId?: string): Promise<T> {
+  let response: ContentResponse | undefined;
+  try {
+    response = await chrome.tabs.sendMessage(tabId, request, documentId ? { documentId } : {});
+  } catch (error) {
+    // Chrome words a gone document like any unreachable page, so ask the tab which document it has now.
+    if (documentId && (await documentIdOf(tabId)) !== documentId) throw new PageChangedError("The page changed, so this request was stopped.");
+    throw error;
+  }
   if (!response) throw new Error("This page is not reachable. Reload the tab.");
   if (!response.ok) throw new Error(response.error);
   return response.result as T;
@@ -446,9 +457,10 @@ export class AgentClient {
     if (trigger === "page_load") await sendToTab(tabId, { kind: "busy", on: true }).catch(() => undefined);
 
     try {
+      run.documentId = await documentIdOf(tabId);
       const [page, active] = await Promise.all([
-        sendToTab<PageOutline>(tabId, { kind: "tool", name: "read_page", input: {} }),
-        sendToTab<ActiveChange[]>(tabId, { kind: "list" }),
+        sendToTab<PageOutline>(tabId, { kind: "tool", name: "read_page", input: {} }, run.documentId),
+        sendToTab<ActiveChange[]>(tabId, { kind: "list" }, run.documentId),
       ]);
       const request: RunRequest = {
         type: "run",
@@ -486,7 +498,7 @@ export class AgentClient {
   private async tryRecipe(run: Run, changes: ActiveChange[] | undefined): Promise<"applied" | "blocked" | "stopped" | false> {
     if (!changes?.length) return false;
     try {
-      const page = await sendToTab<PageOutline>(run.tabId, { kind: "tool", name: "read_page", input: {} });
+      const page = await sendToTab<PageOutline>(run.tabId, { kind: "tool", name: "read_page", input: {} }, run.documentId);
       if (!this.runs.has(run.runId)) return "stopped";
       // Same check the server runs before a model call, so a saved change cannot land on a trap page.
       const injection = detectInjection(page);
@@ -502,7 +514,7 @@ export class AgentClient {
       let appliedAny = false;
       for (const change of changesWithDarkModeLast(changes)) {
         if (!this.runs.has(run.runId)) return "stopped";
-        const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" });
+        const outcome = await sendToTab<ApplyOutcome>(run.tabId, { kind: "tool", name: "apply_change", input: { change }, source: "recipe" }, run.documentId);
         if (!outcome.ok) return false;
         if (outcome.noop) continue;
         run.applied.set(change.id, change);
@@ -652,9 +664,9 @@ export class AgentClient {
         result = { dataUrl: await captureRunTab(run) };
       } else if (message.name === "use_site_control") {
         if (run.trigger !== "chat") throw new Error("Site controls require a chat request.");
-        result = await sendToTab(run.tabId, { kind: "useSiteControl", input: message.input, userMessage: run.message });
+        result = await sendToTab(run.tabId, { kind: "useSiteControl", input: message.input, userMessage: run.message }, run.documentId);
       } else {
-        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input, source: "llm", requested: run.trigger === "chat" });
+        result = await sendToTab(run.tabId, { kind: "tool", name: message.name, input: message.input, source: "llm", requested: run.trigger === "chat" }, run.documentId);
       }
       if (!this.runs.has(run.runId)) return;
       if (message.name === "apply_change") this.afterApply(run, (message.input as { change: Change }).change, result as ApplyOutcome);
@@ -676,6 +688,7 @@ export class AgentClient {
       const text = error instanceof Error ? error.message : String(error);
       this.hooks.tool(run.tabId, message.name, Date.now() - started, false, text);
       this.send({ type: "toolResult", callId: message.callId, ok: false, error: text });
+      if (error instanceof PageChangedError) this.cancelRun(run, text);
     }
   }
 
@@ -692,6 +705,15 @@ export class AgentClient {
     if (missed.length) this.step(run, `Matched nothing: ${missed.slice(0, 2).join(", ")}`, "warn");
     if (outcome.replaced?.length) this.step(run, `Replaced the earlier sort (${outcome.replaced.join(", ")})`, "good");
     if (outcome.lowContrast?.length) this.step(run, `${outcome.lowContrast.length} low-contrast spots to fix`, "warn");
+  }
+}
+
+async function documentIdOf(tabId: number): Promise<string | undefined> {
+  try {
+    const [injection] = await chrome.scripting.executeScript({ target: { tabId }, func: () => 0 });
+    return injection?.documentId;
+  } catch {
+    return undefined;
   }
 }
 
