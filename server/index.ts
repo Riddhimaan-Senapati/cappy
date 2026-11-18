@@ -18,6 +18,7 @@ import { AgentSession, replyAfterTools, RunCancelledError } from "./agent/sessio
 import { normalizeBaseURL, setKey } from "./keys.js";
 import { audio } from "./audio.js";
 import { allowRequest } from "./trust.js";
+import { MAX_MESSAGE_BYTES, parseClientMessage } from "./messages.js";
 import { bridgeLive } from "./live.js";
 import { detectInjection } from "../shared/safety.js";
 
@@ -35,7 +36,7 @@ app.get("/api/health", async (_req, res) => {
 });
 
 const server = createServer(app);
-const wss = new WebSocketServer({ noServer: true });
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
 const liveWss = new WebSocketServer({ noServer: true });
 // Two socket endpoints share one HTTP server, so upgrades are routed by path and only the extension may connect to either.
 server.on("upgrade", (request, socket, head) => {
@@ -126,15 +127,17 @@ wss.on("connection", (socket) => {
   const sessions = new Map<string, AgentSession>();
   void describeProviders().then((providers) => sendTo(socket, { type: "providers", providers, defaultProvider: defaultProviderId() }));
 
-  socket.on("message", async (raw) => {
-    let message: ClientMessage;
-    try {
-      message = JSON.parse(raw.toString());
-    } catch {
-      return;
-    }
+  socket.on("message", (raw) => {
+    const message = parseClientMessage(raw.toString());
+    if (!message) return console.warn("[ws] ignored a malformed message");
+    handle(message).catch((error) => {
+      console.warn("[ws] message failed:", error instanceof Error ? error.message : error);
+      const runId = (message as { runId?: unknown }).runId;
+      if (typeof runId === "string") sendTo(socket, { type: "error", runId, message: safeProviderError(error) });
+    });
+  });
 
-    if (!message || typeof message !== "object") return;
+  async function handle(message: ClientMessage) {
     switch (message.type) {
       case "toolResult":
         for (const session of sessions.values()) session.handleToolResult(message);
@@ -209,7 +212,7 @@ wss.on("connection", (socket) => {
     } finally {
       sessions.delete(message.runId);
     }
-  });
+  }
 
   socket.on("close", () => {
     sockets.delete(socket);
