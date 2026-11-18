@@ -63,6 +63,24 @@ async function barOpen(page: Page): Promise<boolean> {
   }
 }
 
+// The bar focuses its field on the next animation frame, so keys sent right after it opens can still reach the page.
+async function barFocused(page: Page): Promise<boolean> {
+  const { session, root } = await pierce(page);
+  try {
+    for (const node of walk(root)) {
+      if (node.nodeName !== "INPUT") continue;
+      await ensureAttrs(session, node);
+      if (!(attr(node, "class") ?? "").split(/\s+/).includes("input")) continue;
+      const { object } = (await session.send("DOM.resolveNode", { backendNodeId: node.backendNodeId })) as { object: { objectId?: string } };
+      const result = (await session.send("Runtime.callFunctionOn", { objectId: object.objectId, functionDeclaration: "function () { return this.getRootNode().activeElement === this; }", returnByValue: true })) as { result: { value?: boolean } };
+      return result.result.value === true;
+    }
+    return false;
+  } finally {
+    await session.detach();
+  }
+}
+
 export async function openBar(page: Page): Promise<void> {
   await page.bringToFront();
   if (await barOpen(page)) return;
@@ -72,6 +90,8 @@ export async function openBar(page: Page): Promise<void> {
     if (Date.now() > deadline) throw new Error("The bar did not open");
     await page.waitForTimeout(50);
   }
+  const focusBy = Date.now() + 2000;
+  while (!(await barFocused(page)) && Date.now() < focusBy) await page.waitForTimeout(50);
 }
 
 export async function clickShadowText(page: Page, fragment: string): Promise<void> {
