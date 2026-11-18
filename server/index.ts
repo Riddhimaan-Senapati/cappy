@@ -78,7 +78,11 @@ async function execute(session: AgentSession, request: RunRequest, provider: Age
   if (tier === "fast" && request.routing === "auto" && !session.blockedReason && (session.escalation || session.struggled())) {
     session.progress(session.escalation ? `Switching to Pro: ${session.escalation}` : "That didn't land. Switching to Pro");
     console.log(`[route] escalated to frontier: ${session.escalation ?? "fast model struggled"}`);
-    await session.undoAppliedChanges();
+    if (!(await session.undoAppliedChanges())) {
+      console.warn("[route] escalation stopped: some changes could not be undone");
+      session.send({ type: "done", runId: request.runId, reply: "I couldn't fully undo my first attempt, so I stopped instead of trying again on a half-changed page. Use Undo for what is still on the page." });
+      return;
+    }
     session.escalation = null;
     tier = "frontier";
     session.tier = tier;

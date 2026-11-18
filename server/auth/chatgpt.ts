@@ -51,7 +51,12 @@ export function isSignedIn(): boolean {
 }
 
 // Keeps the issued client_id and host id so the next sign-in reuses the same registration, as OpenAI's docs ask.
+// Bumped on sign-out so a refresh or sign-in that was already running cannot write credentials back afterward.
+let generation = 0;
+
 export function signOut() {
+  generation += 1;
+  refreshing = null;
   const current = readCredentials();
   if (!current) return;
   const { access_token: _access, refresh_token: _refresh, id_token: _id, ...registration } = current;
@@ -106,6 +111,7 @@ export async function getAccessToken(): Promise<string> {
 
 export function refreshCredentials(current = readCredentials()): Promise<ChatGptCredentials> {
   if (!current?.refresh_token) return Promise.reject(new Error("Not signed in to ChatGPT. Sign in from the extension settings."));
+  const started = generation;
   refreshing ??= (async () => {
     try {
       const token = await postToken({
@@ -114,6 +120,7 @@ export function refreshCredentials(current = readCredentials()): Promise<ChatGpt
         refresh_token: current.refresh_token!,
         resource: RESOURCE,
       });
+      if (started !== generation) throw new Error("Signed out while refreshing.");
       const next: ChatGptCredentials = {
         ...current,
         access_token: token.access_token,
@@ -127,7 +134,7 @@ export function refreshCredentials(current = readCredentials()): Promise<ChatGpt
       writeCredentials(next);
       return next;
     } finally {
-      refreshing = null;
+      if (started === generation) refreshing = null;
     }
   })();
   return refreshing;
@@ -140,6 +147,7 @@ function openBrowser(url: string) {
 }
 
 export async function login({ log = true } = {}): Promise<ChatGptCredentials> {
+  const started = generation;
   const existing = readCredentials();
   const hostId = existing?.ext_agent_host_id ?? `urn:uuid:${randomUUID()}`;
   const clientId = existing?.client_id;
@@ -204,6 +212,7 @@ export async function login({ log = true } = {}): Promise<ChatGptCredentials> {
   const scopes = grantedScopes(token, (callback.get("scope") ?? "").split(/[\s+]+/).filter(Boolean));
   if (!scopes.includes(REQUIRED_SCOPE)) throw new Error(`Plan usage was not granted (missing ${REQUIRED_SCOPE}). Approve "Use your ChatGPT plan" when signing in.`);
 
+  if (started !== generation) throw new Error("Signed out while signing in.");
   const credentials: ChatGptCredentials = {
     email: identity.email,
     issuer: ISSUER,

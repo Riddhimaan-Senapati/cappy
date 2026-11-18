@@ -3,6 +3,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { parse } from "yaml";
+import { loggingEnabled } from "./llm-logs.js";
 
 const directory = new URL("../llm_logs/", import.meta.url);
 const fingerprint = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 16);
@@ -62,6 +63,12 @@ async function load(id: string) {
 }
 
 export const logViewer = Router();
+// Saved prompts and screenshots hold page content, so only the developer's own browser on localhost may read them, and only while logging is on.
+logViewer.use(["/api/llm-logs", "/llm-logs"], (req, res, next) => {
+  const site = req.headers["sec-fetch-site"];
+  if (!loggingEnabled() || !/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(req.headers.host ?? "") || req.headers.origin || (site && site !== "same-origin" && site !== "none")) return void res.sendStatus(404);
+  next();
+});
 logViewer.get("/api/llm-logs", async (_req, res) => {
   const files = (await readdir(directory).catch(() => [])).filter((file) => /\.ya?ml$/.test(file)).sort();
   const logs = await Promise.all(files.map(async (id) => {

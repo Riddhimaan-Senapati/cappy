@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { stringify } from "yaml";
 
 const directory = fileURLToPath(new URL("../llm_logs/", import.meta.url));
+export const loggingEnabled = () => (process.env.log_llm_requests ?? process.env.log_llm_request ?? process.env.LOG_LLM_REQUESTS) === "true";
 const run = new AsyncLocalStorage<string>();
 export const withLogRun = <T>(id: string, task: () => T): T => run.run(id, task);
 
@@ -20,8 +21,8 @@ async function preserveImages(value: any): Promise<any> {
       const bytes = Buffer.from(encoded, "base64");
       const extension = (dataUrl?.[1] ?? mime).split("/")[1].replace("jpeg", "jpg");
       const name = `${createHash("sha256").update(bytes).digest("hex")}.${extension}`;
-      await mkdir(`${directory}images`, { recursive: true });
-      await writeFile(`${directory}images/${name}`, bytes);
+      await mkdir(`${directory}images`, { recursive: true, mode: 0o700 });
+      await writeFile(`${directory}images/${name}`, bytes, { mode: 0o600 });
       copy[key] = `/api/llm-logs/images/${name}`;
     } else copy[key] = await preserveImages(item);
   }
@@ -65,14 +66,14 @@ function parseEvents(body: string): unknown {
 
 async function save(file: string, request: unknown, response: unknown) {
   try {
-    await mkdir(directory, { recursive: true });
+    await mkdir(directory, { recursive: true, mode: 0o700 });
     await writeFile(`${directory}${file}`, stringify({ request: summarizeRequest(await preserveImages(request)), response }, {
       lineWidth: 100,
       minContentWidth: 0,
       defaultStringType: "PLAIN",
       blockQuote: "folded",
       defaultKeyType: "PLAIN",
-    }));
+    }), { mode: 0o600 });
   } catch (error) {
     console.warn("[llm-logs] Could not save exchange:", error instanceof Error ? error.message : error);
   }
@@ -80,8 +81,7 @@ async function save(file: string, request: unknown, response: unknown) {
 
 // Inject into each provider's SDK to include every tool-loop request and retry.
 export const llmFetch: typeof globalThis.fetch = async (input, init) => {
-  const enabled = process.env.log_llm_requests ?? process.env.log_llm_request ?? process.env.LOG_LLM_REQUESTS;
-  if (enabled !== "true") return globalThis.fetch(input, init);
+  if (!loggingEnabled()) return globalThis.fetch(input, init);
   const body = typeof init?.body === "string" ? init.body : input instanceof Request ? await input.clone().text() : "";
   // Model-list and authentication requests are not LLM exchanges.
   if (!body) return globalThis.fetch(input, init);
