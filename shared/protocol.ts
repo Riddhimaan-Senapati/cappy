@@ -4,6 +4,7 @@ export interface TokenUsage {
   calls: number;
   inputTokens: number;
   outputTokens: number;
+  cachedTokens?: number;
 }
 
 export type UsageReporter = (usage: TokenUsage) => void;

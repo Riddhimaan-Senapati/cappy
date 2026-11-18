@@ -138,6 +138,7 @@ interface Row {
   ms: number;
   outputTokens: number;
   inputTokens: number;
+  cachedTokens: number;
   summary: string;
   error?: string;
 }
@@ -231,10 +232,12 @@ async function runCase(testCase: Case, run: number, provider: ReturnType<typeof 
   let turns = 0;
   let outputTokens = 0;
   let inputTokens = 0;
+  let cachedTokens = 0;
   const reportUsage = (usage: TokenUsage) => {
     turns += usage.calls;
     outputTokens += usage.outputTokens;
     inputTokens += usage.inputTokens;
+    cachedTokens += usage.cachedTokens ?? 0;
   };
   const started = performance.now();
   let error: string | undefined;
@@ -247,7 +250,7 @@ async function runCase(testCase: Case, run: number, provider: ReturnType<typeof 
   const change = session.applied[0];
   const pass = !error && !!change && validateChange(change) === null && testCase.check(change, session.calls);
   const summary = change ? `${change.id}: ${change.summary}` : "no apply_change";
-  return { case: testCase.id, run, pass, turns, ms, outputTokens, inputTokens, summary, error };
+  return { case: testCase.id, run, pass, turns, ms, outputTokens, inputTokens, cachedTokens, summary, error };
 }
 
 const provider = createGeminiProvider();
@@ -261,7 +264,7 @@ for (const testCase of CASES) {
 }
 
 const passes = rows.filter((row) => row.pass).length;
-console.log(`\nmodel=${model} accuracy=${passes}/${rows.length} medianTurns=${median(rows.map((row) => row.turns))} medianMs=${median(rows.map((row) => row.ms))} medianOutputTokens=${median(rows.map((row) => row.outputTokens))} medianInputTokens=${median(rows.map((row) => row.inputTokens))}`);
+console.log(`\nmodel=${model} accuracy=${passes}/${rows.length} medianTurns=${median(rows.map((row) => row.turns))} medianMs=${median(rows.map((row) => row.ms))} medianOutputTokens=${median(rows.map((row) => row.outputTokens))} medianInputTokens=${median(rows.map((row) => row.inputTokens))} medianCachedTokens=${median(rows.map((row) => row.cachedTokens))}`);
 for (const testCase of CASES) {
   const mine = rows.filter((row) => row.case === testCase.id);
   console.log(`  ${testCase.id}: ${mine.filter((row) => row.pass).length}/${mine.length} turns=${mine.map((row) => row.turns).join(",")} ms=${mine.map((row) => row.ms).join(",")}`);

@@ -30,7 +30,7 @@ export function recordUsage(delta: TokenUsage, model: string, purpose: string) {
   usage.calls += delta.calls;
   usage.inputTokens += delta.inputTokens;
   usage.outputTokens += delta.outputTokens;
-  recordActivity(`LLM response · ${purpose} · ${model} · ${delta.inputTokens.toLocaleString("en-US")} input / ${delta.outputTokens.toLocaleString("en-US")} output tokens.`);
+  recordActivity(`LLM response · ${purpose} · ${model} · ${delta.inputTokens.toLocaleString("en-US")} input (${(delta.cachedTokens ?? 0).toLocaleString("en-US")} cached) / ${delta.outputTokens.toLocaleString("en-US")} output tokens.`);
 }
 
 export function recordRun(event: UiEvent) {
