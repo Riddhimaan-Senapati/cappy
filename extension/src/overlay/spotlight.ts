@@ -165,11 +165,9 @@ export class Spotlight {
     this.input.setAttribute("aria-label", "Ask Cappy, or type / for commands");
     this.input.setAttribute("aria-autocomplete", "list");
     this.input.setAttribute("aria-expanded", "false");
-    this.input.setAttribute("aria-controls", LISTBOX_ID);
     this.input.spellcheck = false;
     this.input.autocomplete = "off";
     this.body.id = LISTBOX_ID;
-    this.body.setAttribute("role", "listbox");
     this.pill.type = "button";
     this.home.type = "button";
     this.home.append(icon("back", 13), document.createTextNode("Home"));
@@ -946,8 +944,17 @@ export class Spotlight {
     this.syncCombobox();
   }
 
+  // Only list and commands hold option rows; other views keep plain containers so the listbox never holds buttons or switches.
   private syncCombobox() {
     const open = this.opened && this.view === "list" && this.items.length > 0;
+    const listbox = (this.view === "list" || this.view === "commands") && this.body.querySelector("[role='option']") !== null;
+    if (listbox) {
+      this.body.setAttribute("role", "listbox");
+      this.input.setAttribute("aria-controls", LISTBOX_ID);
+    } else {
+      this.body.removeAttribute("role");
+      this.input.removeAttribute("aria-controls");
+    }
     this.input.setAttribute("aria-expanded", String(open));
     const index = this.pickedId ? this.items.findIndex((item) => item.id === this.pickedId) : -1;
     if (!open || index < 0 || !this.pickedId) this.input.removeAttribute("aria-activedescendant");
@@ -1333,6 +1340,7 @@ export class Spotlight {
     this.body.classList.toggle("enter", this.animateBody);
     if (!commands.length) {
       this.body.replaceChildren(h("div", "empty", "No saved commands yet. After a request works, choose Save as command."));
+      this.syncCombobox();
       return;
     }
     this.commandSelected = Math.min(this.commandSelected, commands.length - 1);
@@ -1369,6 +1377,7 @@ export class Spotlight {
       return row;
     });
     this.body.replaceChildren(...rows);
+    this.syncCombobox();
   }
 
   private async toggleEverywhere(id: string) {

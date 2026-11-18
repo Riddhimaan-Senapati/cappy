@@ -40,7 +40,15 @@ body { background: radial-gradient(ellipse at 15% 0%, rgba(110,168,255,0.12), tr
 .w-logo img { display: block; width: 100%; height: 100%; }
 .w-top b { font-size: 15px; font-weight: 650; }
 .w-top small { display: block; color: var(--muted); font-size: 12px; }
-.w-steps { display: grid; gap: 6px; margin-bottom: 26px; }
+.w-steps { display: grid; gap: 6px; margin: 0 0 26px; padding: 0; list-style: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.s-switch { width: 40px; height: 24px; }
+.s-switch::after { top: 4px; left: 4px; }
+.s-switch[aria-checked="true"]::after { transform: translateX(16px); }
+.s-note { color: var(--muted); }
+.s-tag { color: var(--muted); }
+.s-seg button, .s-btn, .w-btn, .w-primary, .w-need { min-height: 24px; }
+.w-card h1:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .w-step { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.1); overflow: hidden; }
 .w-step i { display: block; height: 100%; width: 0; background: var(--grad); transition: width 0.5s var(--ease); }
 .w-step.done i, .w-step.now i { width: 100%; }
@@ -73,7 +81,7 @@ body { background: radial-gradient(ellipse at 15% 0%, rgba(110,168,255,0.12), tr
 .w-extra label { color: var(--muted); font-size: 12.5px; margin-left: 2px; }
 .w-extra textarea { all: unset; box-sizing: border-box; width: 100%; min-height: 64px; padding: 10px 12px; border-radius: 12px; background: var(--raise); border: 1px solid var(--line); color: var(--text); font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; }
 .w-extra textarea:focus { border-color: var(--accent); }
-.w-extra textarea::placeholder { color: var(--faint); }
+.w-extra textarea::placeholder { color: var(--muted); }
 .w-nav { display: flex; align-items: center; gap: 10px; margin-top: 26px; }
 .w-nav .grow { flex: 1; }
 .w-btn { all: unset; box-sizing: border-box; cursor: pointer; padding: 10px 16px; border-radius: 12px; color: var(--muted); font-weight: 500; font-size: 13.5px; }
@@ -91,8 +99,8 @@ code, kbd { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size
 .w-key-row .what b { display: block; font-size: 13.5px; font-weight: 600; }
 .w-key-row .what small { color: var(--muted); font-size: 12.5px; }
 kbd.w-big { font-size: 15px; padding: 6px 12px; border-radius: 9px; box-shadow: 0 2px 0 rgba(255,255,255,0.08); }
-.w-unset { color: var(--faint); font-size: 12.5px; }
-.w-tried { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px 14px; border-radius: 12px; border: 1px dashed var(--line); color: var(--faint); font-size: 13px; }
+.w-unset { color: var(--muted); font-size: 12.5px; }
+.w-tried { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 11px 14px; border-radius: 12px; border: 1px dashed var(--line); color: var(--muted); font-size: 13px; }
 .w-tried.on { border-style: solid; border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.08); color: var(--good); animation: w-in 0.35s var(--ease); }
 .w-row-note { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .w-row-note small { flex: 1; color: var(--muted); font-size: 12.5px; }
@@ -101,6 +109,15 @@ kbd.w-big { font-size: 15px; padding: 6px 12px; border-radius: 9px; box-shadow: 
 @keyframes w-pop { from { transform: scale(0.4); opacity: 0; } }
 .w-done .w-nav { justify-content: center; }
 @media (prefers-reduced-motion: reduce) { *, *::after { animation: none !important; transition: none !important; } }
+@media (forced-colors: active) {
+  :focus-visible, button:focus-visible, textarea:focus { outline: 2px solid Highlight; outline-offset: 2px; }
+  button, textarea, .w-card, .w-points li, .w-key-row, .w-server, .w-tried, .s-row, .s-seg, .s-switch { border: 1px solid ButtonText; }
+  [aria-pressed="true"], [aria-checked="true"] { outline: 2px solid Highlight; outline-offset: 2px; }
+  .w-step { border: 1px solid ButtonText; }
+  .w-step.done, .w-step.now { outline: 2px solid Highlight; outline-offset: -2px; }
+  .s-switch::after { background: ButtonText; }
+  .w-tried.on { border-style: solid; }
+}
 `;
 
 adoptStyles(document, TOKENS + SETTINGS_CSS + CSS);
@@ -122,6 +139,11 @@ let shownView = "";
 
 const root = h("main", "w");
 document.body.append(root);
+
+function announced<T extends HTMLElement>(element: T, role: "status" | "alert"): T {
+  element.setAttribute("role", role);
+  return element;
+}
 
 function button(className: string, label: string, onClick: () => void, children: Node[] = []) {
   const element = h("button", className, children.length ? "" : label, children);
@@ -219,7 +241,7 @@ function aiStep(): Node[] {
     queueMicrotask(() => input.focus());
     return h("div", "s-sec", "", [row, form]);
   });
-  const notice = status.notice ? [h("div", `s-note${status.notice.level === "error" ? " s-error" : ""}`, status.notice.text)] : [];
+  const notice = status.notice ? [announced(h("div", `s-note${status.notice.level === "error" ? " s-error" : ""}`, status.notice.text), status.notice.level === "error" ? "alert" : "status")] : [];
   return [...head, h("section", "s-sec", "", [...rows, ...notice])];
 }
 
@@ -333,7 +355,7 @@ function shortcutStep(): Node[] {
       h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Open the bar"), h("small", "", "Type a request or pick a suggestion")]), keys(shortcuts.bar)]),
       h("div", "w-key-row", "", [h("div", "what", "", [h("b", "", "Talk instead"), h("small", "", "Opens the bar and listens")]), keys(shortcuts.voice)]),
     ]),
-    h("div", `w-tried${tried ? " on" : ""}`, "", tried ? [icon("check", 16), document.createTextNode(tried)] : [document.createTextNode("Waiting for you to press it...")]),
+    announced(h("div", `w-tried${tried ? " on" : ""}`, "", tried ? [icon("check", 16), document.createTextNode(tried)] : [document.createTextNode("Waiting for you to press it...")]), "status"),
     h("div", "w-row-note", "", [h("small", "", "Prefer different keys? Chrome lets you set them on its shortcuts page."), change]),
   ];
 }
@@ -370,7 +392,7 @@ function handsFreeStep(state: StoredState): Node[] {
       : micState === "asking"
         ? h("span", "s-tag", "Answer the prompt above")
         : button("s-btn s-small", micState === "denied" ? "Try again" : "Allow", () => void allowMicrophone());
-  const micNote = micState === "denied" ? [h("div", "s-note s-error", "Blocked. Click the icon at the right of the address bar to allow the microphone, then try again.")] : [];
+  const micNote = micState === "denied" ? [announced(h("div", "s-note s-error", "Blocked. Click the icon at the right of the address bar to allow the microphone, then try again."), "alert")] : [];
   return [
     h("h1", "", "Voice and hands-free"),
     h("p", "w-lead", "Optional. Talk to it instead of typing, have it read replies aloud, or control pages with your hand through the camera."),
@@ -418,17 +440,19 @@ function doneView(): Node[] {
 async function render() {
   const state = await load();
   const progress = h(
-    "div",
+    "ol",
     "w-steps",
     "",
     STEPS.map((name, index) => {
-      const bar = h("div", `w-step${finished || index < step ? " done" : index === step ? " now" : ""}`, "", [h("i")]);
-      bar.title = name;
-      return bar;
+      const complete = finished || index < step;
+      const current = !finished && index === step;
+      const item = h("li", `w-step${complete ? " done" : current ? " now" : ""}`, "", [h("i"), h("span", "sr-only", `${name}${complete ? ", done" : current ? ", current" : ""}`)]);
+      if (current) item.setAttribute("aria-current", "step");
+      return item;
     }),
   );
   progress.style.gridTemplateColumns = `repeat(${STEPS.length}, 1fr)`;
-  progress.setAttribute("aria-label", finished ? "Setup complete" : `Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`);
+  progress.setAttribute("aria-label", "Setup progress");
 
   const views = [welcomeStep, aiStep, () => needsStep(state), shortcutStep, () => handsFreeStep(state), tipsStep];
   const body = finished ? doneView() : views[step]();
@@ -446,13 +470,18 @@ async function render() {
       ];
 
   const view = finished ? "done" : String(step);
+  const kept = view === shownView && root.contains(document.activeElement) ? { tag: document.activeElement!.tagName, label: document.activeElement!.getAttribute("aria-label"), text: document.activeElement!.textContent } : null;
   const card = h("section", `w-card${view !== shownView ? " enter" : ""}`, "", [...body, ...nav]);
   shownView = view;
   root.replaceChildren(
-    h("header", "w-top", "", [h("div", "w-logo", "", [cappyLogo(128)]), h("div", "", "", [h("b", "", "Cappy"), h("small", "", finished ? "Setup complete" : `Setup · ${STEPS[step]}`)])]),
+    h("header", "w-top", "", [h("div", "w-logo", "", [cappyLogo(128)]), h("div", "", "", [h("b", "", "Cappy"), h("small", "", finished ? "Setup complete" : `Setup · Step ${step + 1} of ${STEPS.length}: ${STEPS[step]}`)])]),
     progress,
     card,
   );
+  if (kept) {
+    const same = [...root.querySelectorAll<HTMLElement>(kept.tag)].find((element) => element.getAttribute("aria-label") === kept.label && element.textContent === kept.text);
+    same?.focus({ preventScroll: true });
+  }
 }
 
 async function go(next: number) {
@@ -463,8 +492,10 @@ async function go(next: number) {
   } else step = next;
   editingKey = null;
   await render();
-  root.querySelector<HTMLElement>("h1")?.setAttribute("tabindex", "-1");
-  root.querySelector<HTMLElement>("h1")?.focus();
+  const heading = root.querySelector<HTMLElement>("h1");
+  if (!heading) return;
+  heading.setAttribute("tabindex", "-1");
+  heading.focus();
 }
 
 async function refresh() {

@@ -16,7 +16,8 @@
     "e2e:gate": "bun scripts/e2e/gate.ts",
     "e2e:injection": "bun scripts/e2e/injection.ts",
     "e2e:replay": "bun scripts/e2e/replay.ts",
-    "setup:vendor": "node scripts/setup-vendor.mjs"
+    "setup:vendor": "node scripts/setup-vendor.mjs",
+    "a11y": "bun scripts/a11y/audit.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^4.0.105",
@@ -39,6 +40,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
     "@happy-dom/global-registrator": "^21.0.4",
     "@types/chrome": "^0.3.7",
     "@types/express": "^5.0.6",

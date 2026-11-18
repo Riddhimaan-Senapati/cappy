@@ -51,10 +51,15 @@ export const INSPECTION_CSS = `
 .inspect summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .inspect pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .inspect-event { display: grid; grid-template-columns: 78px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 11px; }
-.inspect time { color: var(--faint); }
+.inspect time { color: var(--muted); }
 .head-actions { display: flex; gap: 6px; }
-.head-actions button { padding: 6px 10px; font: inherit; font-size: 12px; }
+.head-actions button { padding: 6px 10px; min-height: 24px; font: inherit; font-size: 12px; }
 .head-actions button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
 button:focus-visible, .inspect summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .timeline { min-height: 0; }
+@media (forced-colors: active) {
+  .inspect-change { border: 1px solid ButtonText; }
+  .inspect summary:focus-visible, button:focus-visible { outline: 2px solid Highlight; }
+  .head-actions button[aria-pressed="true"] { outline: 2px solid Highlight; }
+}
 `;

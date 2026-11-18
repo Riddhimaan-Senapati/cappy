@@ -28,9 +28,11 @@ function memoryChoice(line: string, host: string | undefined, scope: MemoryScope
 
 const CSS = `
 html, body { margin: 0; height: 100%; overflow: hidden; background: #121217; }
-body { box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 14px; font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
+body { box-sizing: border-box; font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--text); }
+main { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 14px; }
 [hidden] { display: none !important; }
-body > * { flex-shrink: 0; }
+main > * { flex-shrink: 0; }
+.alert { margin: 0; color: var(--bad); font-size: 12px; }
 h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .head-title { display: flex; align-items: center; gap: 8px; }
@@ -51,7 +53,7 @@ h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
 .steps .good { color: var(--good); } .steps .warn { color: var(--warn); } .steps .bad { color: var(--bad); }
 .reply { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .tools { max-height: 24%; overflow: auto; font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); border-top: 1px solid var(--line); padding-top: 8px; }
-.tools div { display: flex; gap: 8px; } .tools .bad { color: var(--bad); } .tools .ms { color: var(--faint); min-width: 54px; }
+.tools div { display: flex; gap: 8px; } .tools .bad { color: var(--bad); } .tools .ms { color: var(--muted); min-width: 54px; }
 form { display: flex; gap: 8px; }
 .previous-requests { display: grid; gap: 4px; }
 .previous-request button.delete-request { color: #f87171; }
@@ -61,14 +63,31 @@ form { display: flex; gap: 8px; }
 .previous-requests button { padding: 8px 12px; background: var(--raise); color: var(--text); text-align: left; }
 textarea { flex: 1; resize: none; padding: 10px 12px; border-radius: 12px; background: var(--raise); border: 1px solid var(--line); color: var(--text); font: inherit; outline: none; }
 textarea:focus { border-color: var(--accent); }
-button { padding: 0 16px; border: 0; border-radius: 12px; background: var(--grad); color: #0d0d12; font-weight: 650; cursor: pointer; }
+button { padding: 0 16px; min-height: 24px; border: 0; border-radius: 12px; background: var(--grad); color: #0d0d12; font-weight: 650; cursor: pointer; }
+.inspect summary { min-height: 24px; display: flex; align-items: center; }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+@media (forced-colors: active) {
+  :focus-visible, button:focus-visible, textarea:focus { outline: 2px solid Highlight; outline-offset: 2px; }
+  button, textarea, .run, .previous-requests button { border: 1px solid ButtonText; }
+  button[aria-pressed="true"], .head-actions button[aria-pressed="true"] { outline: 2px solid Highlight; outline-offset: 2px; }
+  .memory-choice button.suggested { outline: 1px dashed ButtonText; }
+  .dot { border: 1px solid ButtonText; }
+}
 `;
 
 adoptStyles(document, TOKENS + USAGE_CSS + CSS + VOICE_CSS + INSPECTION_CSS);
 
 const statusDot = h("span", "dot");
 const statusText = h("span", "", "Connecting");
+const statusLine = h("div", "status", "", [statusDot, statusText]);
+statusLine.setAttribute("role", "status");
+const alertText = h("p", "alert");
+alertText.setAttribute("role", "alert");
+alertText.hidden = true;
+function showAlert(text: string) {
+  alertText.textContent = text;
+  alertText.hidden = !text;
+}
 const usage = h("div");
 const refreshUsage = async () => usage.replaceChildren(usageCard((await load()).usage));
 chrome.storage.onChanged.addListener((changes) => {
@@ -76,6 +95,8 @@ chrome.storage.onChanged.addListener((changes) => {
 });
 void refreshUsage();
 const timeline = h("div", "timeline");
+timeline.setAttribute("role", "log");
+timeline.setAttribute("aria-label", "Runs");
 const tools = h("div", "tools");
 const inspector = h("div", "inspect");
 inspector.hidden = true;
@@ -107,6 +128,7 @@ backButton.addEventListener("click", () => showInspection(false));
 const input = h("textarea");
 input.rows = 2;
 input.placeholder = "Debug chat: runs on the active tab, always asks the AI fresh";
+input.setAttribute("aria-label", "Debug chat message");
 const mic = micButton();
 const live = liveRegion();
 const form = h("form", "", "", [input, mic, h("button", "", "Send")]);
@@ -134,8 +156,7 @@ function renderPreviousRequests() {
         await deleteRequest(message);
         await refreshRequestState();
       } catch {
-        live.textContent = "Could not delete the saved request.";
-        live.classList.remove("sr-only");
+        showAlert("Could not delete the saved request.");
       }
     });
     return h("div", "previous-request", "", [button, remove]);
@@ -175,16 +196,19 @@ chrome.runtime.onMessage.addListener((message: unknown) => {
 const playbackControls = h("div", "tts", "", [readButton, stopButton]);
 
 document.body.append(
-  h("div", "head", "", [h("div", "head-title", "", [cappyLogo(), h("h1", "", "Debug")]), h("div", "head-actions", "", [backButton, inspectButton])]),
-  h("div", "status", "", [statusDot, statusText]),
-  usage,
-  inspector,
-  playbackControls,
-  timeline,
-  tools,
-  form,
-  previousRequests,
-  live,
+  h("main", "", "", [
+    h("div", "head", "", [h("div", "head-title", "", [cappyLogo(), h("h1", "", "Debug")]), h("div", "head-actions", "", [backButton, inspectButton])]),
+    statusLine,
+    usage,
+    inspector,
+    playbackControls,
+    alertText,
+    timeline,
+    tools,
+    form,
+    previousRequests,
+    live,
+  ]),
 );
 
 let voiceBase = "";
@@ -194,8 +218,14 @@ const voice = new VoiceController({
   },
   onState(state: VoiceState) {
     paintMic(mic, state);
-    live.textContent = voiceStatusText(state);
-    live.classList.toggle("sr-only", state.phase !== "error");
+    const text = voiceStatusText(state);
+    if (state.phase === "error") {
+      live.textContent = "";
+      showAlert(text);
+    } else {
+      live.textContent = text;
+      showAlert("");
+    }
   },
   onInterim(text) {
     input.value = joinVoiceText(voiceBase, text);
