@@ -61,10 +61,18 @@ export class AgentSession {
     return this.failures >= 2 || (this.failures >= 1 && this.appliedIds.size === 0);
   }
 
-  async undoAppliedChanges() {
-    for (const id of this.appliedIds) await this.callTab("revert_change", { id }).catch(() => undefined);
-    this.appliedIds.clear();
+  // Returns false when some change could not be undone; those ids stay tracked.
+  async undoAppliedChanges(): Promise<boolean> {
+    for (const id of [...this.appliedIds]) {
+      const outcome = await this.callTab("revert_change", { id }).catch((error) => {
+        if (error instanceof RunCancelledError) throw error;
+        return { ok: false };
+      });
+      if (outcome.ok) this.appliedIds.delete(id);
+    }
+    if (this.appliedIds.size > 0) return false;
     this.failures = 0;
+    return true;
   }
 
   callTab<Name extends TabToolName>(name: Name, input: TabTools[Name]["input"]): Promise<TabTools[Name]["output"]> {
