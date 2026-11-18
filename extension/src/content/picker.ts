@@ -108,6 +108,7 @@ export class ElementPicker {
   };
 
   private onKey = (event: KeyboardEvent) => {
+    if (!event.isTrusted) return;
     const handled = ["Escape", "Enter", "ArrowUp", "ArrowDown"].includes(event.key);
     if (!handled) return;
     this.swallow(event);

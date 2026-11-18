@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import express from "express";
 import OpenAI from "openai";
 import { getKey, setKey } from "./keys.js";
+import { allowRequest } from "./trust.js";
 
 export const audio = express.Router();
 
@@ -37,7 +38,7 @@ async function geminiTranscript(apiKey: string, data: Buffer, mimeType: "audio/w
 
 audio.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (!origin || !/^chrome-extension:\/\/[a-p]{32}$/.test(origin)) {
+  if (!origin || !allowRequest(origin, req.headers.host)) {
     res.sendStatus(403);
     return;
   }
