@@ -45,7 +45,7 @@ export async function startServer(): Promise<ServerProcess> {
   const logs: string[] = [];
   const child: ChildProcess = spawn(BUN, ["server/index.ts"], {
     cwd: ROOT,
-    env: { ...process.env, LLM_PROVIDER: "stub", PORT: String(PORT) },
+    env: { ...process.env, LLM_PROVIDER: "stub", PORT: String(PORT), CAPPY_TRUST_ANY_EXTENSION: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout?.on("data", (chunk) => logs.push(String(chunk)));
@@ -270,10 +270,10 @@ export async function askInBar(page: Page, message: string): Promise<void> {
         this.focus();
         this.value = message;
         this.dispatchEvent(new Event("input", { bubbles: true }));
-        this.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, composed: true, cancelable: true }));
       }`,
       [message],
     );
+    await page.keyboard.press("Enter");
   } finally {
     await typing.session.detach();
   }

@@ -17,6 +17,7 @@ import { suggestFor } from "./agent/suggest.js";
 import { AgentSession, replyAfterTools, RunCancelledError } from "./agent/session.js";
 import { normalizeBaseURL, setKey } from "./keys.js";
 import { audio } from "./audio.js";
+import { allowRequest } from "./trust.js";
 import { bridgeLive } from "./live.js";
 import { detectInjection } from "../shared/safety.js";
 
@@ -40,7 +41,7 @@ const liveWss = new WebSocketServer({ noServer: true });
 server.on("upgrade", (request, socket, head) => {
   const { pathname } = new URL(request.url ?? "/", "http://localhost");
   const target = pathname === "/agent" ? wss : pathname === "/live" ? liveWss : null;
-  if (!target || !(request.headers.origin ?? "").startsWith("chrome-extension://")) {
+  if (!target || !allowRequest(request.headers.origin, request.headers.host)) {
     socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     socket.destroy();
     return;
@@ -189,7 +190,7 @@ wss.on("connection", (socket) => {
     const session = new AgentSession(socket, { ...message, profile: await recallForRun(message) });
     const provider = resolveProvider(message.provider);
     if (!provider) {
-      session.send({ type: "error", runId: message.runId, message: "No AI provider is set up yet. Open settings to sign in with ChatGPT or add an API key." });
+      session.send({ type: "error", runId: message.runId, message: message.provider ? `The ${message.provider} provider is not ready, so nothing was sent. Open settings to fix it or pick another provider.` : "No AI provider is set up yet. Open settings to sign in with ChatGPT or add an API key." });
       return;
     }
     sessions.set(message.runId, session);

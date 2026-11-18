@@ -231,3 +231,4 @@ extension/vendor/
 
 llm_logs
 poc_playground
+.agent-extension.json

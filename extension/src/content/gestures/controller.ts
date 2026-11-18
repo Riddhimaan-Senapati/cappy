@@ -85,7 +85,6 @@ export class CameraController {
   private ringCircle: SVGCircleElement;
   private outline = document.createElement("div");
   private label = document.createElement("div");
-  private extensionOrigin = new URL(chrome.runtime.getURL("")).origin;
   private filterX = new OneEuroFilter();
   private filterY = new OneEuroFilter();
   private paused = false;
@@ -170,7 +169,7 @@ export class CameraController {
     } catch {
       // without popover support the fixed host still renders
     }
-    addEventListener("message", this.onMessage);
+    chrome.runtime.onMessage.addListener(this.onMessage);
     document.addEventListener("visibilitychange", this.onVisibility);
     this.refreshCamera();
     this.raf = requestAnimationFrame(this.loop);
@@ -178,7 +177,7 @@ export class CameraController {
 
   stop() {
     cancelAnimationFrame(this.raf);
-    removeEventListener("message", this.onMessage);
+    chrome.runtime.onMessage.removeListener(this.onMessage);
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.frame.removeAttribute("src");
     this.host.remove();
@@ -206,16 +205,17 @@ export class CameraController {
     this.hidePointer();
   }
 
-  private onMessage = (event: MessageEvent) => {
-    if (event.source !== this.frame.contentWindow || event.origin !== this.extensionOrigin || event.data?.ba !== "camera") return;
-    const data = event.data;
+  private onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
+    const data = message as { ba?: string; type?: string; state?: string; t?: number; hand?: HandFrame | null; head?: HeadFrame | null };
+    if (sender.id !== chrome.runtime.id || sender.tab || data?.ba !== "camera") return false;
     if (data.type === "status") {
       if (data.state === "blocked") this.setMode("Camera blocked", "paused");
       if (data.state === "failed") this.setMode("Tracking failed", "paused");
       if (data.state === "ready") this.setMode("Show your hand", "idle");
-      return;
+      return false;
     }
     if (data.type === "frame") this.onFrame(data.t as number, data.hand as HandFrame | null, data.head as HeadFrame | null);
+    return false;
   };
 
   private setMode(text: string, state: "on" | "paused" | "idle") {

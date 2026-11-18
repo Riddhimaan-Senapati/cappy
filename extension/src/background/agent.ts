@@ -649,7 +649,7 @@ export class AgentClient {
     try {
       if (message.name === "screenshot") {
         if (run.trigger === "page_load") await sendToTab(run.tabId, { kind: "busy", on: false }).catch(() => undefined);
-        result = { dataUrl: await captureScaled(run.windowId) };
+        result = { dataUrl: await captureRunTab(run) };
       } else if (message.name === "use_site_control") {
         if (run.trigger !== "chat") throw new Error("Site controls require a chat request.");
         result = await sendToTab(run.tabId, { kind: "useSiteControl", input: message.input, userMessage: run.message });
@@ -698,6 +698,20 @@ export class AgentClient {
 function summarizeInput(message: ToolCallMessage) {
   const input = message.input as { change?: Change; selector?: string };
   return input.change?.summary ?? input.selector ?? "";
+}
+
+// captureVisibleTab takes whatever tab is showing, so check it is still the run's tab and page before and after, and drop the pixels otherwise.
+async function captureRunTab(run: Pick<Run, "tabId" | "windowId" | "origin">): Promise<string> {
+  const check = async () => {
+    const tab = await chrome.tabs.get(run.tabId).catch(() => null);
+    const origin = tab?.url ? new URL(tab.url).origin : "";
+    if (!tab || !tab.active || tab.windowId !== run.windowId || origin !== run.origin) throw new Error("The tab changed, so no screenshot was taken.");
+    return tab.url;
+  };
+  const before = await check();
+  const dataUrl = await captureScaled(run.windowId);
+  if ((await check()) !== before) throw new Error("The tab changed, so the screenshot was discarded.");
+  return dataUrl;
 }
 
 async function captureScaled(windowId: number): Promise<string> {

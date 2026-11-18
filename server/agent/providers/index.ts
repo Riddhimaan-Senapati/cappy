@@ -87,7 +87,8 @@ export function defaultProviderId(): string | null {
 }
 
 export function resolveProvider(requested?: string | null): AgentProvider | null {
-  return (requested && getProvider(requested)) || (defaultProviderId() ? getProvider(defaultProviderId()!) : null);
+  if (requested) return getProvider(requested);
+  return defaultProviderId() ? getProvider(defaultProviderId()!) : null;
 }
 
 async function availableModels(id: string, provider: AgentProvider): Promise<string[]> {

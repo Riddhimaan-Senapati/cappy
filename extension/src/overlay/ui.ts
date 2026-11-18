@@ -206,7 +206,7 @@ export class OverlayUi {
   }
 
   captureKey(event: KeyboardEvent) {
-    if (!this.spotlight.isOpen() || !event.composedPath().includes(this.host)) return;
+    if (!event.isTrusted || !this.spotlight.isOpen() || !event.composedPath().includes(this.host)) return;
     event.stopImmediatePropagation();
     if (event.type === "keydown" && this.spotlight.handleKey(event)) event.preventDefault();
   }

@@ -73,9 +73,10 @@ try {
   const typeCommand = async (value: string, enter = false) => {
     await cdp.send("Runtime.callFunctionOn", {
       objectId: object.objectId!,
-      functionDeclaration: "function (value, enter) { this.focus(); this.value = value; this.dispatchEvent(new Event('input', { bubbles: true, composed: true })); if (enter) this.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true })); }",
+      functionDeclaration: "function (value, enter) { this.focus(); this.value = value; this.dispatchEvent(new Event('input', { bubbles: true, composed: true })); }",
       arguments: [{ value }, { value: enter }],
     });
+    if (enter) await page.keyboard.press("Enter");
   };
   await typeCommand("/profile");
   await waitFor("profile commands", () => shadowTextVisible(page, "New profile"));
@@ -88,10 +89,7 @@ try {
     return state.profiles[state.activeProfileId]?.name === "Personal" && state.profile.length === 0 && state.globalChanges.length === 0 && Object.keys(state.siteChanges).length === 0;
   }));
   await typeCommand("/profile Default");
-  await cdp.send("Runtime.callFunctionOn", {
-    objectId: object.objectId!,
-    functionDeclaration: "function () { this.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true })); }",
-  });
+  await page.keyboard.press("Enter");
   await waitFor("slash command switches profile", () => panel.evaluate(async () => (await chrome.storage.local.get("activeProfileId")).activeProfileId === "default"));
   await typeCommand("/profile");
   await waitFor("rename command visible", () => shadowTextVisible(page, "Rename current profile"));

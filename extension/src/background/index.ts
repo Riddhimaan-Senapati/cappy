@@ -319,7 +319,14 @@ async function maybeRunProactively(tab: chrome.tabs.Tab, origin: string, restore
   }
 }
 
+const cameraUrl = chrome.runtime.getURL("camera.html");
+
 chrome.runtime.onMessage.addListener((request: BackgroundRequest, sender, sendResponse) => {
+  // Camera frames come from the extension's own embedded page and go only to that tab's top frame, never through the host page.
+  if ((request as { ba?: string }).ba === "camera") {
+    if (sender.id === chrome.runtime.id && sender.url?.startsWith(cameraUrl) && sender.tab?.id !== undefined) void chrome.tabs.sendMessage(sender.tab.id, request, { frameId: 0 }).catch(() => undefined);
+    return false;
+  }
   if (handleVoiceRequest(request, sender, sendResponse)) return false;
   switch (request.kind) {
     case "profileAction":
