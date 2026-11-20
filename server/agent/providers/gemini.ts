@@ -1,5 +1,5 @@
 import { llmFetch } from "../../llm-logs.js";
-import { GoogleGenAI, type Content, type Part } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, type Content, type Part } from "@google/genai";
 import { z } from "zod";
 import type { Tier, UsageReporter } from "../../../shared/protocol.js";
 import { getKey } from "../../keys.js";
@@ -33,15 +33,17 @@ export function createGeminiProvider(): AgentProvider {
       for await (const model of await ai.models.list()) if (model.name) names.push(model.name.replace(/^models\//, ""));
       return names.filter((name) => name.startsWith("gemini"));
     },
-    async run(session: AgentSession, _tier: Tier, model: string, reportUsage: UsageReporter) {
+    async run(session: AgentSession, tier: Tier, model: string, reportUsage: UsageReporter) {
       const contents: Content[] = [{ role: "user", parts: [{ text: buildUserTurn(session.request) }] }];
+      // The fast tier answers tool-call turns with little thinking; the frontier tier keeps the model default.
+      const thinkingConfig = tier === "fast" ? { thinkingLevel: ThinkingLevel.LOW } : undefined;
 
       for (let step = 0; step < MAX_STEPS; step++) {
         session.throwIfCancelled();
         const response = await ai.models.generateContent({
           model,
           contents,
-          config: { abortSignal: session.signal, systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }] },
+          config: { abortSignal: session.signal, systemInstruction: SYSTEM_PROMPT, tools: [{ functionDeclarations }], thinkingConfig },
         });
 
         reportUsage({ calls: 1, inputTokens: response.usageMetadata?.promptTokenCount ?? 0, outputTokens: (response.usageMetadata?.candidatesTokenCount ?? 0) + (response.usageMetadata?.thoughtsTokenCount ?? 0), cachedTokens: response.usageMetadata?.cachedContentTokenCount ?? 0 });
