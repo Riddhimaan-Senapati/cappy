@@ -4,7 +4,7 @@ import type { BlockCall } from "../shared/adaptation.js";
 import { installDom } from "./dom-setup.js";
 
 installDom();
-const { applyContentFilter, keywordPattern, leftovers, setFilterClassifier, setLeftoverListener, setFilterPauseNotice, LEFTOVER_SETTLE_MS } = await import("../extension/src/content/content-filter.js");
+const { applyContentFilter, keywordPattern, leftovers, setFilterClassifier, setLeftoverListener, setFilterPauseNotice, LEFTOVER_SETTLE_MS, CLASSIFY_BATCH, CLASSIFY_PARALLEL, JUDGE_BUDGET } = await import("../extension/src/content/content-filter.js");
 const { findItemGroups } = await import("../extension/src/content/item-groups.js");
 
 type Filter = Extract<BlockCall, { name: "contentFilter" }>;
@@ -292,6 +292,79 @@ describe("content filter judging limits", () => {
     assert.deepEqual(hiddenTitles(), []);
     handle.undo();
     setFilterClassifier(null);
+  });
+});
+
+describe("content filter judges chunks side by side", () => {
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  const feed = (titles: string[]) => titles.map((title) => `<feed-card><h3>${title}</h3></feed-card>`).join("");
+
+  it("sends several chunks at once and hides the first answers before the rest return", async () => {
+    const pending: Array<{ items: string[]; answer: () => void }> = [];
+    let open = 0;
+    let most = 0;
+    setFilterClassifier((_match, items) => {
+      open++;
+      most = Math.max(most, open);
+      return new Promise((resolve) => {
+        let done = false;
+        const answer = () => {
+          if (done) return;
+          done = true;
+          open--;
+          resolve(items.map((item) => /lecture/i.test(item)));
+        };
+        pending.push({ items, answer });
+      });
+    });
+    const titles = Array.from({ length: 100 }, (_, i) => (i % 4 === 0 ? `Physics lecture ${i}` : `Prank video ${i}`));
+    document.body.innerHTML = `<main>${feed(titles)}</main>`;
+    const handle = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "lectures side by side" }), document);
+    await wait(400);
+    assert.equal(pending.length, CLASSIFY_PARALLEL, "the first chunks go out together");
+    assert.ok(pending.every((call) => call.items.length <= CLASSIFY_BATCH));
+    pending[0]!.answer();
+    await wait(300);
+    assert.equal(hiddenTitles().length, pending[0]!.items.filter((item) => /lecture/i.test(item)).length, "one answer hides its items while others are out");
+    for (let round = 0; round < 10; round++) {
+      pending.forEach((call) => call.answer());
+      await wait(50);
+    }
+    await wait(300);
+    assert.ok(most <= CLASSIFY_PARALLEL, `at most ${CLASSIFY_PARALLEL} calls in flight, saw ${most}`);
+    assert.equal(pending.flatMap((call) => call.items).length, 100, "every item is judged once");
+    assert.equal(hiddenTitles().length, 25);
+    handle.undo();
+    setFilterClassifier(null);
+  });
+
+  it("never sends more than the judging budget, even with chunks in flight together", async () => {
+    const asked: string[] = [];
+    const pauses: Array<[string, number]> = [];
+    let open = 0;
+    let most = 0;
+    setFilterClassifier(async (_match, items) => {
+      open++;
+      most = Math.max(most, open);
+      asked.push(...items);
+      await wait(30);
+      open--;
+      return items.map(() => false);
+    });
+    setFilterPauseNotice((_match, reason, judged) => pauses.push([reason, judged]));
+    document.body.innerHTML = `<main>${feed(Array.from({ length: JUDGE_BUDGET + 120 }, (_, i) => `Budget card number ${i}`))}</main>`;
+    const handle = applyContentFilter(filter({ keywords: ["zzz"], itemSelector: "feed-card", match: "budget side by side" }), document);
+    await wait(1200);
+    assert.equal(asked.length, JUDGE_BUDGET);
+    assert.equal(new Set(asked).size, JUDGE_BUDGET);
+    assert.deepEqual(pauses, [["budget", JUDGE_BUDGET]]);
+    assert.ok(most > 1 && most <= CLASSIFY_PARALLEL, `saw ${most} calls in flight`);
+    document.querySelector("main")!.insertAdjacentHTML("beforeend", feed(["Budget card late arrival"]));
+    await wait(500);
+    assert.equal(asked.length, JUDGE_BUDGET, "nothing more is sent once paused");
+    handle.undo();
+    setFilterClassifier(null);
+    setFilterPauseNotice(null);
   });
 });
 

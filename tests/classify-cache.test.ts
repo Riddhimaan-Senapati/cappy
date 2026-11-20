@@ -152,7 +152,7 @@ describe("classify cache limits", () => {
   });
 });
 
-const RECORDED_CLASSIFY_PROMPT = { version: 2, hash: "b5c830bdb864a419724095fb78ca8920bc27ac7b6497618e74a7f9a3a8e76093" };
+const RECORDED_CLASSIFY_PROMPT = { version: 3, hash: "62f62d82e3226c36c7dac31af5ac2e12c5812cb139cef4e81ba4f5b6c39619ba" };
 
 describe("classify prompt", () => {
   it("records the prompt hash with the cache version", () => {

@@ -56,8 +56,10 @@ export function setLeftoverListener(next: LeftoverListener | null) {
   leftoverListener = next;
 }
 
-const CLASSIFY_BATCH = 40;
-const CLASSIFY_DELAY_MS = 250;
+// Small chunks sent side by side let the first verdicts land after one short call.
+export const CLASSIFY_BATCH = 20;
+export const CLASSIFY_PARALLEL = 4;
+const CLASSIFY_DELAY_MS = 150;
 let classifier: Classifier | null = null;
 const verdicts = new Map<string, boolean>();
 const inFlight = new Set<string>();
@@ -66,11 +68,11 @@ const waiting = new Map<string, Set<() => void>>();
 let classifyTimer: ReturnType<typeof setTimeout> | undefined;
 
 // Hiding items makes feeds load more, so a page that is mostly matches would be judged forever without a stop.
-const JUDGE_BUDGET = 200;
+export const JUDGE_BUDGET = 200;
 const SATURATION_MIN = 30;
 const SATURATION_RATIO = 0.8;
 export type FilterPause = "mostly" | "budget";
-type Usage = { judged: number; matched: number; paused: boolean; resumed: boolean };
+type Usage = { judged: number; matched: number; reserved: number; paused: boolean; resumed: boolean };
 const usage = new Map<string, Usage>();
 let onPause: ((match: string, reason: FilterPause, judged: number, resume: () => void) => void) | null = null;
 
@@ -83,12 +85,12 @@ export function setFilterPauseNotice(next: typeof onPause) {
 }
 
 function usageFor(match: string): Usage {
-  if (!usage.has(match)) usage.set(match, { judged: 0, matched: 0, paused: false, resumed: false });
+  if (!usage.has(match)) usage.set(match, { judged: 0, matched: 0, reserved: 0, paused: false, resumed: false });
   return usage.get(match)!;
 }
 
 function resumeJudging(match: string) {
-  usage.set(match, { judged: 0, matched: 0, paused: false, resumed: true });
+  usage.set(match, { judged: 0, matched: 0, reserved: 0, paused: false, resumed: true });
   waiting.get(match)?.forEach((wake) => wake());
 }
 
@@ -229,33 +231,45 @@ function verdictFor(match: string, el: HTMLElement): boolean | undefined {
   return undefined;
 }
 
+async function judgeChunk(match: string, chunk: string[], state: Usage) {
+  chunk.forEach((text) => inFlight.add(verdictKey(match, classifyTextKey(text))));
+  const result = await classifier?.(match, chunk).catch(() => null);
+  // A failed call leaves those items shown instead of queueing them again on every scroll. Only a real answer is saved for the next visit.
+  chunk.forEach((text, index) => {
+    const key = verdictKey(match, classifyTextKey(text));
+    inFlight.delete(key);
+    if (result) rememberVerdict(match, text, Boolean(result[index]));
+    else verdicts.set(key, false);
+  });
+  state.reserved -= chunk.length;
+  state.judged += chunk.length;
+  state.matched += result ? result.filter(Boolean).length : 0;
+  pauseIfNeeded(match);
+  waiting.get(match)?.forEach((wake) => wake());
+}
+
+// Budget is reserved before a chunk is sent, so chunks in flight together never pass JUDGE_BUDGET.
+async function judgeMatch(match: string, all: string[]) {
+  let next = 0;
+  const lane = async () => {
+    while (next < all.length) {
+      const state = usageFor(match);
+      const room = JUDGE_BUDGET - state.judged - state.reserved;
+      if (state.paused || room <= 0) return;
+      const chunk = all.slice(next, next + Math.min(CLASSIFY_BATCH, room));
+      next += chunk.length;
+      state.reserved += chunk.length;
+      await judgeChunk(match, chunk, state);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CLASSIFY_PARALLEL, Math.ceil(all.length / CLASSIFY_BATCH)) }, lane));
+}
+
 async function flushClassify() {
   classifyTimer = undefined;
   const batches = [...queued.entries()];
   queued.clear();
-  await Promise.all(
-    batches.map(async ([match, texts]) => {
-      const all = [...texts];
-      for (let start = 0; start < all.length; start += CLASSIFY_BATCH) {
-        const state = usageFor(match);
-        if (state.paused) break;
-        const chunk = all.slice(start, start + Math.min(CLASSIFY_BATCH, Math.max(1, JUDGE_BUDGET - state.judged)));
-        chunk.forEach((text) => inFlight.add(verdictKey(match, classifyTextKey(text))));
-        const result = await classifier?.(match, chunk).catch(() => null);
-        // A failed call leaves those items shown instead of queueing them again on every scroll. Only a real answer is saved for the next visit.
-        chunk.forEach((text, index) => {
-          const key = verdictKey(match, classifyTextKey(text));
-          inFlight.delete(key);
-          if (result) rememberVerdict(match, text, Boolean(result[index]));
-          else verdicts.set(key, false);
-        });
-        state.judged += chunk.length;
-        state.matched += result ? result.filter(Boolean).length : 0;
-        pauseIfNeeded(match);
-        waiting.get(match)?.forEach((wake) => wake());
-      }
-    }),
-  );
+  await Promise.all(batches.map(([match, texts]) => judgeMatch(match, [...texts])));
 }
 
 export function applyContentFilter(filter: Filter, doc: Document): ContentFilterHandle {

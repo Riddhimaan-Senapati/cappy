@@ -77,6 +77,14 @@ Nothing is required in `.env`. The server starts with no provider; the settings 
 - `chatgpt-signin` uses OpenAI's documented sign-in for local open-source apps; the Sign in button runs the same flow as `bun run chatgpt:login`. Claude subscription logins are not allowed in third-party tools, so Claude means an API key.
 - With no provider picked, the first ready one wins (ChatGPT, Claude, OpenAI, Gemini), or `LLM_PROVIDER` if set and ready.
 - Each provider has a Fast and a Pro model; picks are stored per provider. Routing defaults to Auto; Tab in the bar cycles Auto, Fast and Pro. In `auto`, keywords give a first guess, and the fast model can call `escalate` when a request is beyond it; the server then undoes its changes and reruns on Pro (it also does this when Fast's changes fail). Model lists are fetched only for the selected provider, since listing costs an API call.
+- Default models per routing mode (Settings, AI tab, can pick others per provider):
+
+  | Provider | Fast | Pro (frontier) | Auto |
+  | --- | --- | --- | --- |
+  | ChatGPT sign-in | `gpt-6-luna` (`CHATGPT_MODEL_FAST`) | `gpt-6.1-sol` (`CHATGPT_MODEL_FRONTIER`) | Fast first; Pro when the request has more than 24 words or a keyword in `server/agent/router.ts` (form, chart, sort, layout, everywhere, not working...), or when Fast calls `escalate` or its changes fail |
+  | Gemini | `gemini-3.6-flash` (`GEMINI_MODEL_FAST`) | `gemini-4-argon` (`GEMINI_MODEL_FRONTIER`) | Same rules |
+
+  Page-load runs always use Fast. One-shot calls (the content filter classifier and suggestions) use the Fast model of the active provider, with low reasoning on OpenAI models.
 - Gemini defaults are `gemini-3.6-flash` (Fast) and `gemini-4-argon` (Pro); `GEMINI_MODEL_FAST` and `GEMINI_MODEL_FRONTIER` override them. Argon is Google's current flagship (GA 2026-10-13, introductory $2/$10 per 1M tokens through 2026-11-30, then $4/$20). On `scripts/perf/latency.ts` (6 canned requests against the real prompt and tools): 3.6 Flash scored 16 to 18 of 18 at a 2 to 6 s median, Argon 6/6 at 24 s, the older 4 Hydrogen 5/6 at 9 s. `gemini-3.8-flash` is Google's newest Flash but did worse here: 12/18 with low thinking (it ignored "across the site" scope and the weekday schedule) and 60 to 80 s on a hard request at its default thinking, so Fast stays on 3.6. The flash-lite models answered fast but passed only 6/12 in an earlier check (malformed `apply_change` calls). The 2.5 models are retired. Samples are small (1 to 3 runs per request), and run-to-run noise moved 3.6 Flash between 16 and 18 of 18. The Fast tier runs with `thinkingLevel: low` and Pro keeps the model default; on the latency script 3.6 Flash went from 18/18 at a 5.5 s median to 18/18 at 2.2 s, with half the input tokens.
 - Adding a provider: implement `AgentProvider` in `server/agent/providers/` over the shared `tools` list, honour `session.signal` for cancellation, register it in `providers/index.ts`.
 
