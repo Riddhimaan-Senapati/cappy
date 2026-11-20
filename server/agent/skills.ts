@@ -22,14 +22,6 @@ export function loadSkills(): Skill[] {
     });
 }
 
-// A playbook is inlined when a word from its description appears in the request, so the model can skip load_skill.
-export function matchedSkills(message: string): Skill[] {
-  const words = new Set(message.toLowerCase().match(/[a-z-]+/g) ?? []);
-  return loadSkills().filter((skill) =>
-    (skill.description.toLowerCase().match(/[a-z-]{4,}/g) ?? []).some((term) => words.has(term) || words.has(`${term}s`) || (term.endsWith("s") && words.has(term.slice(0, -1)))),
-  );
-}
-
 export function skillIndex(): string {
   return loadSkills()
     .map((skill) => `- ${skill.name}: ${skill.description}`)
