@@ -66,7 +66,7 @@ Each request runs as one tool-use loop. The agent reads an outline of the page, 
 
 Cappy runs on ChatGPT, Claude, OpenAI or Gemini. Each provider has a Fast and a Pro model. In Auto, Fast goes first and Pro takes over when Fast calls `escalate` or its changes fail. Tab in the bar cycles Auto, Fast and Pro.
 
-In our tests the GPT-6 family was the most accurate on page edits. Gemini was cheaper and faster but less accurate. Its defaults are `gemini-3.6-flash` for Fast and `gemini-4-hydrogen` for Pro. In a six-request check against the real agent prompt, they got 11 and 10 of 12 right, at about 8 seconds a request. Set `GEMINI_MODEL_FAST` and `GEMINI_MODEL_FRONTIER` in `.env` to change them.
+In our tests the GPT-6 family was the most accurate on page edits. Gemini was cheaper and faster but less accurate. Its defaults are `gemini-3.6-flash` for Fast and `gemini-4-argon`, Google's current flagship, for Pro. In a six-request check against the real agent prompt, Flash got 16 to 18 of 18 right in about 2 seconds and Argon got 6 of 6 in about 24 seconds, which is why Argon is the Pro tier. Set `GEMINI_MODEL_FAST` and `GEMINI_MODEL_FRONTIER` in `.env` to change them.
 
 ## Safety
 
